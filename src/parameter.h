@@ -82,6 +82,7 @@ class MFE : public MFEfromVienna<S>
         auto convert_sequence(const std::string& seq) -> SeqType;
         bool load(const char* filename);
         bool load(const std::string& filename) { return load(filename.c_str());};
+        bool load_default();
 
         auto hairpin(const SeqType& seq, size_t i, size_t j) -> ScoreType;
         auto single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) -> ScoreType;

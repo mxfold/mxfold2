@@ -248,7 +248,7 @@ int main(int argc, char* argv[])
         .help("FASTA-formatted input file");
     ap.add_argument("-p", "--param")
         .help("Thermodynamic parameter file")
-        .default_value("rna_turner2004.par"s);
+        .default_value(""s);
     ap.add_argument("--max-bp")
         .help("maximum distance of base pairs")
         .action([](const auto& v) { return std::stoi(v); })
@@ -266,7 +266,10 @@ int main(int argc, char* argv[])
 
     //auto param = std::make_unique<MaximizeBP<>>();
     auto param = std::make_unique<MFE<>>();
-    param->load(ap.get<std::string>("--param"));
+    if (ap.get<std::string>("--param").empty())
+        param->load_default();
+    else
+        param->load(ap.get<std::string>("--param"));
     Fold f(std::move(param));
 
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));

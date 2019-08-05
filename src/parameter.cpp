@@ -148,6 +148,16 @@ namespace detail
             return v;
         }
 
+        static type read_values(int*& val, std::vector<size_t> d, std::vector<size_t> s, std::vector<size_t> e)
+        {
+            const auto d0 = d.front(); d.erase(d.begin());
+            const auto s0 = s.front(); s.erase(s.begin());
+            const auto e0 = e.front(); e.erase(e.begin());
+            type v = type(d0);
+            for (auto i=s0; i!=d0-e0; i++)
+                v[i] = vector_builder<T, NDIMS-1>::read_values(val, d, s, e);
+            return v;
+        }
     };
 
     template <typename T> struct vector_builder<T, 1>
@@ -188,6 +198,20 @@ namespace detail
 
             return values;
         }
+
+        static type read_values(int*& val, std::vector<size_t> d, std::vector<size_t> s, std::vector<size_t> e)
+        {
+            const auto d0 = d.front();
+            const auto s0 = s.front();
+            const auto e0 = e.front();
+
+            std::vector<T> values(d0, 0);
+            size_t i = s0;
+            while (i < d0-e0)
+                values[i++] = *val++;
+
+            return values;
+        }
     };
 };
 
@@ -201,6 +225,18 @@ auto read_values(std::istream& is, SIZE_T... dims)
     std::copy(vec_dims.begin()+N, vec_dims.begin()+N*2, s.begin());
     std::copy(vec_dims.begin()+N*2, vec_dims.end(), e.begin());
     return detail::vector_builder<T, N>::read_values(is, d, s, e);
+}
+
+template <typename T = int, typename... SIZE_T>
+auto read_values(int*& v, SIZE_T... dims)
+{
+    std::vector<size_t> vec_dims{dims...};
+    constexpr size_t N = sizeof...(dims) / 3;
+    std::vector<size_t> d(N), s(N), e(N);
+    std::copy(vec_dims.begin(), vec_dims.begin()+N, d.begin());
+    std::copy(vec_dims.begin()+N, vec_dims.begin()+N*2, s.begin());
+    std::copy(vec_dims.begin()+N*2, vec_dims.end(), e.begin());
+    return detail::vector_builder<T, N>::read_values(v, d, s, e);
 }
 
 template <typename S>
@@ -325,6 +361,117 @@ load(const char* filename)
 }
 
 template <typename S>
+bool
+MFE<S>::
+load_default()
+{
+    //const auto NBPAIRS = 7;
+    const int DEF = -50;
+    const int NST = 0;
+#ifdef INF
+#undef INF
+#endif
+    const int INF = std::numeric_limits<int>::max();
+#include "default_params.h"
+    int* values = default_params;
+
+    // stack
+    stack_ = read_values(values, NBPAIRS+1u, NBPAIRS+1u, 1u, 1u, 0u, 0u);
+    /* stack_dH_  =*/ read_values(values, NBPAIRS+1u, NBPAIRS+1u, 1u, 1u, 0u, 0u);
+
+    // mismatch_hairpin
+    mismatch_hairpin_ = read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+    /* mismatch_hairpin_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+
+    // mismatch_interior
+    mismatch_internal_ = read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+    /* mismatch_internal_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+
+    // mismatch_interior_1n
+    mismatch_internal_1n_ = read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+    /* mismatch_internal_1n_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+
+    // mismatch_interior_23
+    mismatch_internal_23_ = read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+    /*  mismatch_internal_23_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+
+    // "mismatch_multi
+    mismatch_multi_ = read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+    /* mismatch_multi_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+
+    // mismatch_exterior
+    mismatch_external_ = read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+    /* mismatch_exterior_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
+
+    // dangle5
+    dangle5_ = read_values(values, NBPAIRS+1u, 5u, 1u, 0u, 0u, 0u);
+    /* dangle5_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 1u, 0u, 0u, 0u);
+
+    // dangle3
+    dangle3_ = read_values(values, NBPAIRS+1u, 5u, 1u, 0u, 0u, 0u);
+    /* dangle3_dH_ = */ read_values(values, NBPAIRS+1u, 5u, 1u, 0u, 0u, 0u);
+
+    // int11
+    int11_ = read_values(values, NBPAIRS+1u, NBPAIRS+1u, 5u, 5u, 1u, 1u, 0u, 0u, 0u, 0u, 0u, 0u);
+    /* int11_dH_ = */ read_values(values, NBPAIRS+1u, NBPAIRS+1u, 5u, 5u, 1u, 1u, 0u, 0u, 0u, 0u, 0u, 0u);
+
+    // int21
+    int21_ = read_values(values, NBPAIRS+1u, NBPAIRS+1u, 5u, 5u, 5u, 1u, 1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+    /* int21_dH_ = */ read_values(values, NBPAIRS+1u, NBPAIRS+1u, 5u, 5u, 5u, 1u, 1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+
+    // int22
+    int22_ = read_values(values, NBPAIRS+1u, NBPAIRS+1u, 5u, 5u, 5u, 5u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 0u, 0u, 0u, 0u);
+    /* int22_dH_ = */ read_values(values, NBPAIRS+1u, NBPAIRS+1u, 5u, 5u, 5u, 5u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 1u, 0u, 0u, 0u, 0u);
+
+    // hairpin
+    hairpin_ = read_values(values, 31u, 0u, 0u);
+    /* hairpin_dH_ = */ read_values(values, 31u, 0u, 0u);
+
+    // bulge
+    bulge_ = read_values(values, 31u, 0u, 0u);
+    /* bulge_dH_ = */ read_values(values, 31u, 0u, 0u);
+
+    // interior
+    internal_ = read_values(values, 31u, 0u, 0u);
+    /* internal_dH_ = */ read_values(values, 31u, 0u, 0u);
+
+    // ML_params
+    {
+        auto v = read_values(values, 6u, 0u, 0u);
+        ml_base_ = v[0];
+        // ml_base_dH_ = v[1];
+        ml_closing_ = v[2];
+        // ml_closing_dH_ = v[3];
+        ml_intern_ = v[4];
+        //ml_intern_dH_ = v[5];
+    }
+    // NINIO
+    {
+        auto v = read_values(values, 3u, 0u, 0u);
+        ninio_ = v[0];
+        // ninio_dH_ = v[1];
+        max_ninio_ = v[2];
+    }
+
+    // Misc
+    {
+        auto v = read_values(values, 4u, 0u, 0u);
+        duplex_init_ = v[0];
+        // duplex_init_dH_ = v[1];
+        terminalAU_ = v[2];
+        // terminalAU_dH_ = v[3];
+    }
+
+    // Triloops, Tetraloops, Hexaloops
+    for (auto i = 0; default_params_sl[i].rna !=NULL; i++)
+    {
+        special_loops_.emplace(::convert_sequence<SeqType>(default_params_sl[i].rna), default_params_sl[i].e);
+    }
+    
+    return true;
+}
+
+template <typename S>
 auto
 MFE<S>::
 convert_sequence(const std::string& seq) -> SeqType
@@ -393,7 +540,7 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) -> ScoreTy
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
-    int e = INF;
+    int e = std::numeric_limits<int>::max();
 
     if (ll==0) // stack
         e = stack_[type1][type2];

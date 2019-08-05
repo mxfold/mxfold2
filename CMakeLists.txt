@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 project(dnnfold CXX)
-add_executable(a.out src/fold.cpp src/fold.h src/parameter.cpp src/parameter.h src/fasta.cpp src/fasta.h src/argparse.hpp)
+add_executable(a.out src/fold.cpp src/fold.h src/parameter.cpp src/parameter.h src/fasta.cpp src/fasta.h src/argparse.hpp src/default_params.h)
 target_compile_features(a.out PUBLIC cxx_std_17)
 
 find_package(PkgConfig REQUIRED)
