@@ -272,6 +272,9 @@ int main(int argc, char* argv[])
         param->load(ap.get<std::string>("--param"));
     Fold f(std::move(param));
 
+    auto p = MFETorch();
+    p.load_default();
+
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
 
     for (const auto& fa: fas) 

@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <map>
+#include <torch/torch.h>
 
 template <typename S = float>
 class MaximizeBP
@@ -118,4 +119,36 @@ class MFE : public MFEfromVienna<S>
         int duplex_init_;
         int terminalAU_;
         float lxc_;
+};
+
+struct MFETorch : torch::nn::Module
+{
+    MFETorch();
+    ~MFETorch() {}
+    bool load_default();
+
+    torch::Tensor stack_;
+    torch::Tensor hairpin_;
+    torch::Tensor bulge_;
+    torch::Tensor internal_;
+    torch::Tensor mismatch_external_;
+    torch::Tensor mismatch_hairpin_;
+    torch::Tensor mismatch_internal_;
+    torch::Tensor mismatch_internal_1n_;
+    torch::Tensor mismatch_internal_23_;
+    torch::Tensor mismatch_multi_;
+    torch::Tensor int11_;
+    torch::Tensor int21_;
+    torch::Tensor int22_;
+    torch::Tensor dangle5_;
+    torch::Tensor dangle3_;
+    torch::Tensor ml_base_;
+    torch::Tensor ml_closing_;
+    torch::Tensor ml_intern_;
+    torch::Tensor ninio_;
+    torch::Tensor max_ninio_;
+    //std::map<SeqType, int> special_loops_;
+    torch::Tensor duplex_init_;
+    torch::Tensor terminalAU_;
+    torch::Tensor lxc_;
 };

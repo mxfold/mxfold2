@@ -104,6 +104,8 @@ template class MFEfromVienna<>;
 
 //////////////////////////////////////////////////////////////////////////////
 
+#include "default_params.h"
+
 template <typename Itr1, typename Itr2>
 static
 void convert_sequence(Itr1 b1, Itr1 e1, Itr2 b2)
@@ -168,7 +170,10 @@ namespace detail
         {
             const int DEF = -50;
             const int NST = 0;
-            const int MY_INF = std::numeric_limits<int>::max();
+#ifdef INF
+#undef INF
+#endif
+            const int INF = std::numeric_limits<int>::max();
 
             const auto d0 = d.front();
             const auto s0 = s.front();
@@ -186,7 +191,7 @@ namespace detail
                 while (ss >> v && i < d0-e0)
                 {
                     if (v == "INF")
-                        values[i++] = MY_INF;
+                        values[i++] = INF;
                     else if (v == "DEF")
                         values[i++] = DEF;
                     else if (v == "NST")
@@ -290,6 +295,7 @@ load(const char* filename)
             else if (m[1] == "mismatch_interior_23")
                 mismatch_internal_23_ = read_values(is, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
             else if (m[1] == "mismatch_interior_23_enthalpies")
+            
                 /*  mismatch_internal_23_dH_ = */ read_values(is, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
             else if (m[1] == "mismatch_multi")
                 mismatch_multi_ = read_values(is, NBPAIRS+1u, 5u, 5u, 1u, 0u, 0u, 0u, 0u, 0u);
@@ -366,14 +372,7 @@ MFE<S>::
 load_default()
 {
     //const auto NBPAIRS = 7;
-    const int DEF = -50;
-    const int NST = 0;
-#ifdef INF
-#undef INF
-#endif
-    const int INF = std::numeric_limits<int>::max();
-#include "default_params.h"
-    int* values = default_params;
+    int32_t* values = default_params;
 
     // stack
     stack_ = read_values(values, NBPAIRS+1u, NBPAIRS+1u, 1u, 1u, 0u, 0u);
@@ -672,3 +671,166 @@ external_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
 }
 
 template class MFE<>;
+
+//////////////////////////////////////////////////////////////////////////////
+
+#ifdef NBASES
+#undef NBASES
+#define NBASES 4
+#endif
+
+MFETorch::
+MFETorch() :
+    stack_(register_parameter("stack", torch::zeros({NBPAIRS+1, NBPAIRS+1u}))),
+    hairpin_(register_parameter("hairpin", torch::zeros({31}))),
+    bulge_(register_parameter("bulge", torch::zeros({31}))),
+    internal_(register_parameter("internal", torch::zeros({31}))),
+    mismatch_external_(register_parameter("mismatch_external", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}))),
+    mismatch_hairpin_(register_parameter("mismatch_hairpin", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}))),
+    mismatch_internal_(register_parameter("mismatch_internal", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}))),
+    mismatch_internal_1n_(register_parameter("mismatch_internal_1n", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}))),
+    mismatch_internal_23_(register_parameter("mismatch_internal_23", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}))),
+    mismatch_multi_(register_parameter("mismatch_multi", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}))),
+    int11_(register_parameter("int11", torch::zeros({NBPAIRS+1, NBPAIRS+1, NBASES+1, NBASES+1}))),
+    int21_(register_parameter("int21", torch::zeros({NBPAIRS+1, NBPAIRS+1, NBASES+1, NBASES+1, NBASES+1}))),
+    int22_(register_parameter("int22", torch::zeros({NBPAIRS+1, NBPAIRS+1, NBASES+1, NBASES+1, NBASES+1, NBASES+1}))),
+    dangle5_(register_parameter("dangle5", torch::zeros({NBPAIRS+1, NBASES+1}))),
+    dangle3_(register_parameter("dangle3", torch::zeros({NBPAIRS+1, NBASES+1}))),
+    ml_base_(register_parameter("ml_base", torch::zeros({1}))),
+    ml_closing_(register_parameter("ml_closing", torch::zeros({1}))),
+    ml_intern_(register_parameter("ml_intern", torch::zeros({1}))),
+    ninio_(register_parameter("ninio", torch::zeros({1}))),
+    max_ninio_(register_parameter("max_ninio", torch::zeros({1}))),
+    duplex_init_(register_parameter("duplex_init", torch::zeros({1}))),
+    terminalAU_(register_parameter("terminalAU", torch::zeros({1})))
+{
+
+}
+
+bool
+MFETorch::
+load_default()
+{
+    //const auto NBPAIRS = 7;
+    int32_t* values = default_params;
+
+//    auto params = torch::from_blob(default_params, { sizeof(default_params) / sizeof(default_params[0]) }, 
+//                                torch::dtype(torch::kI32));
+
+    // stack
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=1; i1!=NBPAIRS+1; i1++)
+            stack_[i0][i1] = *values++;
+    values += NBPAIRS*NBPAIRS;
+    
+    // mismatch_hairpin
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                mismatch_hairpin_[i0][i1][i2] = *values++;
+    values += NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // mismatch_interior
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                mismatch_internal_[i0][i1][i2] = *values++;
+    values += NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // mismatch_interior_1n
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                mismatch_internal_1n_[i0][i1][i2] = *values++;
+    values += NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // mismatch_interior_23
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                mismatch_internal_23_[i0][i1][i2] = *values++;
+    values += NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // mismatch_multi
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                mismatch_multi_[i0][i1][i2] = *values++;
+    values += NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // mismatch_exterior
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                mismatch_external_[i0][i1][i2] = *values++;
+    values += NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // dangle5
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            dangle5_[i0][i1] = *values++;
+    values += NBPAIRS*(NBASES+1);
+
+    // dangle3
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=0; i1!=NBASES+1; i1++)
+            dangle3_[i0][i1] = *values++;
+    values += NBPAIRS*(NBASES+1);
+
+    // int11
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=1; i1!=NBPAIRS+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                for (auto i3=0; i3!=NBASES+1; i3++)
+                    int11_[i0][i1][i2][i3] = *values++;
+    values += NBPAIRS*NBPAIRS*(NBASES+1)*(NBASES+1);
+
+    // int21
+    for (auto i0=1; i0!=NBPAIRS+1; i0++)
+        for (auto i1=1; i1!=NBPAIRS+1; i1++)
+            for (auto i2=0; i2!=NBASES+1; i2++)
+                for (auto i3=0; i3!=NBASES+1; i3++)
+                    for (auto i4=0; i4!=NBASES+1; i4++)
+                        int21_[i0][i1][i2][i3][i4] = *values++;
+    values += NBPAIRS*NBPAIRS*(NBASES+1)*(NBASES+1)*(NBASES+1);
+
+    // int22
+    for (auto i0=1; i0!=NBPAIRS; i0++)
+        for (auto i1=1; i1!=NBPAIRS; i1++)
+            for (auto i2=1; i2!=NBASES+1; i2++)
+                for (auto i3=1; i3!=NBASES+1; i3++)
+                    for (auto i4=1; i4!=NBASES+1; i4++)
+                        for (auto i5=1; i5!=NBASES+1; i5++)
+                        int22_[i0][i1][i2][i3][i4][i5] = *values++;
+    values += (NBPAIRS-1)*(NBPAIRS-1)*NBASES*NBASES*NBASES*NBASES;
+
+    // hairpin
+    for (auto i0=0; i0!=31; i0++)
+        hairpin_[i0] = *values++;
+    values += 31;
+
+    // bulge
+    for (auto i0=0; i0!=31; i0++)
+        bulge_[i0] = *values++;
+    values += 31;
+
+    // interior
+    for (auto i0=0; i0!=31; i0++)
+        internal_[i0] = *values++;
+    values += 31;
+
+    // ML_params
+    ml_base_[0] = *values++; values++;
+    ml_closing_[0] = *values++; values++;
+    ml_intern_[0] = *values++; values++;
+
+    // NINIO
+    ninio_[0] = *values++; values++;
+    max_ninio_[0] = *values++;
+
+    // Misc
+    duplex_init_[0] = *values++; values++;
+    terminalAU_[0] = *values++; values++;
+
+    return true;
+}
