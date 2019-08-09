@@ -3,6 +3,7 @@
 #include <limits>
 #include <queue>
 #include "fold.h"
+#include "parameter.h"
 
 bool allow_paired(char x, char y)
 {
@@ -13,8 +14,8 @@ bool allow_paired(char x, char y)
         (x=='g' && y=='u') || (x=='u' && y=='g');
 }
 
-template <class P>
-Fold<P>::Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length, size_t min_internal_loop_length)
+Fold::
+Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length, size_t min_internal_loop_length)
     :   param(std::move(p)), 
         min_hairpin_loop_length_(min_hairpin_loop_length),
         min_internal_loop_length_(min_internal_loop_length)
@@ -22,10 +23,11 @@ Fold<P>::Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length, size_t min
 
 }
 
-template <class P>
-bool Fold<P>::update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
+bool
+Fold::
+update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    if (max_v < new_v) 
+    if (max_v.item<float>() < new_v.item<float>()) 
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -34,10 +36,11 @@ bool Fold<P>::update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt
     return false;
 }
 
-template <class P>
-bool Fold<P>::update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
+bool 
+Fold::
+update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    if (max_v < new_v) 
+    if (max_v.item<float>() < new_v.item<float>()) 
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -46,12 +49,13 @@ bool Fold<P>::update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt
     return false;
 }
 
-template <class P>
-auto Fold<P>::compute_viterbi(const std::string& seq)
+auto 
+Fold::
+compute_viterbi(const std::string& seq)
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
-    const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
+    const ScoreType NEG_INF = torch::full({}, std::numeric_limits<float>::lowest());
     Cv_.clear();  Cv_.resize(L+1, VI(L+1, NEG_INF));
     Mv_.clear();  Mv_.resize(L+1, VI(L+1, NEG_INF));
     M1v_.clear(); M1v_.resize(L+1, VI(L+1, NEG_INF));
@@ -83,7 +87,7 @@ auto Fold<P>::compute_viterbi(const std::string& seq)
             if (j-i>min_hairpin_loop_length_ && allow_paired(seq[i-1], seq[j-1]))
                 update_max(Mv_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j), Mt_[i][j], TBType::M_PAIRED, i);
 
-            ScoreType t{0};
+            ScoreType t = torch::zeros({}, torch::dtype(torch::kFloat));
             for (auto u=i; u+1<j; u++)
             {
                 t += param->multi_unpaired(seq2, u);
@@ -124,8 +128,9 @@ auto Fold<P>::compute_viterbi(const std::string& seq)
     return Fv_[1];
 }
 
-template <class P>
-auto Fold<P>::traceback_viterbi()
+auto
+Fold::
+traceback_viterbi()
 {
     const auto L = Ft_.size()-1;
     std::vector<u_int32_t> pair(L+1, 0);
@@ -265,21 +270,23 @@ int main(int argc, char* argv[])
     //std::cout << ap.get<int>("--max-bp") << std::endl;
 
     //auto param = std::make_unique<MaximizeBP<>>();
-    auto param = std::make_unique<MFE<>>();
+    //auto param = std::make_unique<MFE<>>();
+    auto param = std::make_unique<MFETorch>();
+#if 0
     if (ap.get<std::string>("--param").empty())
         param->load_default();
     else
         param->load(ap.get<std::string>("--param"));
+#else
+    param->load_default();
+#endif
     Fold f(std::move(param));
-
-    auto p = MFETorch();
-    p.load_default();
 
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
 
     for (const auto& fa: fas) 
     {
-        std::cout << f.compute_viterbi(fa.seq()) << std::endl;
+        std::cout << f.compute_viterbi(fa.seq()).item<float>() << std::endl;
         auto p = f.traceback_viterbi();
         std::string s(p.size()-1, '.');
         for (size_t i=1; i!=p.size(); ++i)

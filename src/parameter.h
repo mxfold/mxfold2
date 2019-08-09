@@ -123,9 +123,22 @@ class MFE : public MFEfromVienna<S>
 
 struct MFETorch : torch::nn::Module
 {
+    using SeqType = std::vector<short>;
+    using ScoreType = torch::Tensor;
+    
     MFETorch();
     ~MFETorch() {}
+    auto convert_sequence(const std::string& seq) -> SeqType;
     bool load_default();
+
+    auto hairpin(const SeqType& seq, size_t i, size_t j) -> ScoreType;
+    auto single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) -> ScoreType;
+    auto multi_loop(const SeqType& seq, size_t i, size_t j) -> ScoreType;
+    auto multi_paired(const SeqType& seq, size_t i, size_t j) -> ScoreType;
+    auto multi_unpaired(const SeqType& seq, size_t i) -> ScoreType;
+    auto external_zero(const SeqType& seq) -> ScoreType;
+    auto external_paired(const SeqType& seq, size_t i, size_t j) -> ScoreType;
+    auto external_unpaired(const SeqType& seq, size_t i) -> ScoreType;
 
     torch::Tensor stack_;
     torch::Tensor hairpin_;
