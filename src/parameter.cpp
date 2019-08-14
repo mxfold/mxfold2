@@ -242,8 +242,10 @@ hairpin(const SeqType& s, size_t i, size_t j) -> ScoreType
 
     const auto type = ::pair[s[i]][s[j]];
     if (l == 3)
+    {
         if (type > 2)
             e += terminalAU_[0];
+    }
     else
         e += mismatch_hairpin_[type][s[i+1]][s[j-1]];
 

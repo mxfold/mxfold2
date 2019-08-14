@@ -2,6 +2,7 @@
 #include <cctype>
 #include <limits>
 #include <queue>
+#include <stack>
 #include "fold.h"
 #include "parameter.h"
 
@@ -14,18 +15,43 @@ bool allow_paired(char x, char y)
         (x=='g' && y=='u') || (x=='u' && y=='g');
 }
 
-auto make_constraint(const std::string& seq, const std::string& stru, u_int32_t max_bp, bool canonical_only=true)
+auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only=true)
 {
-    const auto L = stru.size();
+    const auto L = seq.size();
+    if (stru.empty())
+        stru = std::string(L, '.');
+    std::vector<uint> bp(L+1, 0);
+    std::stack<uint> st;
+    for (auto i=0u; i!=stru.size(); ++i)
+    {
+        switch (stru[i])
+        {
+        case '(':
+            st.push(i); break;
+        case ')':
+        {
+            auto j=st.top();
+            st.pop();
+            bp[i+1] = j+1;
+            bp[j+1] = i+1;
+        }
+        break;
+        default: break;
+        }
+    }
+
     std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
     std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
     for (auto i=L; i>=1; i--)
     {
         allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
-        allow_unpaired[i][i] = true;
+        allow_unpaired[i][i] = stru[i-1]=='.' || stru[i-1]=='x';
+        bool bp_l = stru[i-1]=='.' || stru[i-1]=='<' || stru[i-1]=='|';
         for (auto j=i+1; j<=L; j++)
         {
             allow_paired[i][j] = j-i > max_bp;
+            bool bp_r = stru[j-1]=='.' || stru[j-1]=='>' || stru[j-1]=='|';
+            allow_paired[i][j] = allow_paired[i][j] && ((bp_l && bp_r) || bp[i]==j);
             if (canonical_only)
                 allow_paired[i][j] = allow_paired[i][j] && ::allow_paired(seq[i-1], seq[j-1]);
             allow_unpaired[i][j] = allow_unpaired[i][j-1] && allow_unpaired[j][j];
@@ -71,7 +97,7 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, 
 
 auto 
 Fold::
-compute_viterbi(const std::string& seq) -> ScoreType
+compute_viterbi(const std::string& seq, const std::string& stru) -> ScoreType
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
@@ -84,23 +110,8 @@ compute_viterbi(const std::string& seq) -> ScoreType
     Mt_.clear();  Mt_.resize(L+1, VT(L+1));
     M1t_.clear(); M1t_.resize(L+1, VT(L+1));
     Ft_.clear();  Ft_.resize(L+1);
-#if 0
-    std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
-    std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
-    for (auto i=L; i>=1; i--)
-    {
-        allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
-        allow_unpaired[i][i] = true;
-        for (auto j=i+1; j<=L; j++)
-        {
-            allow_paired[i][j] = j-i > min_hairpin_loop_length_ && ::allow_paired(seq[i-1], seq[j-1]);
-            allow_unpaired[i][j] = allow_unpaired[i][j-1] && allow_unpaired[j][j];
-        }
-    }
-#else
-    std::string stru = std::string(L, '.');
-    auto [allow_paired, allow_unpaired] = make_constraint(seq, stru, min_hairpin_loop_length_);
-#endif
+
+    const auto [allow_paired, allow_unpaired] = make_constraint(seq, stru, min_hairpin_loop_length_);
 
     for (auto i=L; i>=1; i--)
     {

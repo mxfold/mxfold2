@@ -30,7 +30,7 @@ class Fold
 
     public:
         Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length=3, size_t max_internal_loop_length=30);
-        auto compute_viterbi(const std::string& seq) -> ScoreType;
+        auto compute_viterbi(const std::string& seq, const std::string& stru = std::string()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
 
     private:

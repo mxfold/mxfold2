@@ -1,8 +1,8 @@
 #include <limits>
 #include "default_params.h"
 
-const int DEF = -50;
-const int NST = 0;
+// const int DEF = -50;
+// const int NST = 0;
 const int INF = std::numeric_limits<int>::max();
 
 int32_t default_params[] = {
