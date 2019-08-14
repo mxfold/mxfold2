@@ -15,16 +15,13 @@ bool allow_paired(char x, char y)
         (x=='g' && y=='u') || (x=='u' && y=='g');
 }
 
-auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only=true)
+auto parse_paren(const std::string& paren)
 {
-    const auto L = seq.size();
-    if (stru.empty())
-        stru = std::string(L, '.');
-    std::vector<uint> bp(L+1, 0);
+    std::vector<uint> bp(paren.size()+1, 0);
     std::stack<uint> st;
-    for (auto i=0u; i!=stru.size(); ++i)
+    for (auto i=0u; i!=paren.size(); ++i)
     {
-        switch (stru[i])
+        switch (paren[i])
         {
         case '(':
             st.push(i); break;
@@ -39,6 +36,17 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
         default: break;
         }
     }
+    return bp;
+}
+
+auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only=true)
+{
+    const auto L = seq.size();
+    if (stru.size() < L)
+        stru.append(std::string(L-stru.size(), '.'));
+    else
+        stru = stru.substr(0, L);
+    auto bp = parse_paren(stru);
 
     std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
     std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
