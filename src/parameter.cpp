@@ -96,6 +96,8 @@ bool
 MFETorch::
 load_default()
 {
+    torch::NoGradGuard no_grad;
+
     //const auto NBPAIRS = 7;
     int32_t* values = default_params;
 

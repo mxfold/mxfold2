@@ -29,9 +29,9 @@ class Fold
         using VVT = std::vector<VT>;
 
     public:
-        Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length=3, size_t min_internal_loop_length=30);
-        auto compute_viterbi(const std::string& seq);
-        auto traceback_viterbi();
+        Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length=3, size_t max_internal_loop_length=30);
+        auto compute_viterbi(const std::string& seq) -> ScoreType;
+        auto traceback_viterbi() -> std::vector<u_int32_t>;
 
     private:
         bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k=0);
@@ -44,6 +44,6 @@ class Fold
         VVT Ct_, Mt_, M1t_;
         VT Ft_;
         size_t min_hairpin_loop_length_;
-        size_t min_internal_loop_length_;
+        size_t max_internal_loop_length_;
 };
 

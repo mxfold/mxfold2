@@ -14,11 +14,31 @@ bool allow_paired(char x, char y)
         (x=='g' && y=='u') || (x=='u' && y=='g');
 }
 
+auto make_constraint(const std::string& seq, const std::string& stru, u_int32_t max_bp, bool canonical_only=true)
+{
+    const auto L = stru.size();
+    std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
+    std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
+    for (auto i=L; i>=1; i--)
+    {
+        allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
+        allow_unpaired[i][i] = true;
+        for (auto j=i+1; j<=L; j++)
+        {
+            allow_paired[i][j] = j-i > max_bp;
+            if (canonical_only)
+                allow_paired[i][j] = allow_paired[i][j] && ::allow_paired(seq[i-1], seq[j-1]);
+            allow_unpaired[i][j] = allow_unpaired[i][j-1] && allow_unpaired[j][j];
+        }
+    }
+    return std::make_pair(allow_paired, allow_unpaired);
+}
+
 Fold::
-Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length, size_t min_internal_loop_length)
+Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length, size_t max_internal_loop_length)
     :   param(std::move(p)), 
         min_hairpin_loop_length_(min_hairpin_loop_length),
-        min_internal_loop_length_(min_internal_loop_length)
+        max_internal_loop_length_(max_internal_loop_length)
 {
 
 }
@@ -51,11 +71,11 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, 
 
 auto 
 Fold::
-compute_viterbi(const std::string& seq)
+compute_viterbi(const std::string& seq) -> ScoreType
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
-    const ScoreType NEG_INF = torch::full({}, std::numeric_limits<float>::lowest());
+    const ScoreType NEG_INF = torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
     Cv_.clear();  Cv_.resize(L+1, VI(L+1, NEG_INF));
     Mv_.clear();  Mv_.resize(L+1, VI(L+1, NEG_INF));
     M1v_.clear(); M1v_.resize(L+1, VI(L+1, NEG_INF));
@@ -64,19 +84,38 @@ compute_viterbi(const std::string& seq)
     Mt_.clear();  Mt_.resize(L+1, VT(L+1));
     M1t_.clear(); M1t_.resize(L+1, VT(L+1));
     Ft_.clear();  Ft_.resize(L+1);
+#if 0
+    std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
+    std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
+    for (auto i=L; i>=1; i--)
+    {
+        allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
+        allow_unpaired[i][i] = true;
+        for (auto j=i+1; j<=L; j++)
+        {
+            allow_paired[i][j] = j-i > min_hairpin_loop_length_ && ::allow_paired(seq[i-1], seq[j-1]);
+            allow_unpaired[i][j] = allow_unpaired[i][j-1] && allow_unpaired[j][j];
+        }
+    }
+#else
+    std::string stru = std::string(L, '.');
+    auto [allow_paired, allow_unpaired] = make_constraint(seq, stru, min_hairpin_loop_length_);
+#endif
 
     for (auto i=L; i>=1; i--)
     {
         for (auto j=i+1; j<=L; j++)
         {
-            if (j-i>min_hairpin_loop_length_ && allow_paired(seq[i-1], seq[j-1]))
+            if (allow_paired[i][j])
             {
-                update_max(Cv_[i][j], param->hairpin(seq2, i, j), Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                if (allow_unpaired[i+1][j-1])
+                    update_max(Cv_[i][j], param->hairpin(seq2, i, j), Ct_[i][j], TBType::C_HAIRPIN_LOOP);
 
-                for (auto k=i+1; (k-1)-(i+1)+1<min_internal_loop_length_ && k<j; k++)
-                    for (auto l=j-1; ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<min_internal_loop_length_ && l-k>min_hairpin_loop_length_; l--)
-                        if (allow_paired(seq[k-1], seq[l-1]))
-                            update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l), Ct_[i][j], TBType::C_INTERNAL_LOOP, k, l);
+                for (auto k=i+1; (k-1)-(i+1)+1<max_internal_loop_length_ && k<j; k++)
+                    if (allow_unpaired[i+1][k-1])
+                        for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<max_internal_loop_length_; l--)
+                            if (allow_paired[k][l] && allow_unpaired[l+1][j-1])
+                                update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l), Ct_[i][j], TBType::C_INTERNAL_LOOP, k, l);
 
                 for (auto u=i+1; u+1<=j-1; u++)
                     update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->multi_loop(seq2, i, j), Ct_[i][j], TBType::C_MULTI_LOOP, u);
@@ -84,14 +123,15 @@ compute_viterbi(const std::string& seq)
             }
 
             /////////////////
-            if (j-i>min_hairpin_loop_length_ && allow_paired(seq[i-1], seq[j-1]))
+            if (allow_paired[i][j])
                 update_max(Mv_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j), Mt_[i][j], TBType::M_PAIRED, i);
 
             ScoreType t = torch::zeros({}, torch::dtype(torch::kFloat));
             for (auto u=i; u+1<j; u++)
             {
+                if (!allow_unpaired[u][u]) break;
                 t += param->multi_unpaired(seq2, u);
-                if (j-(u+1)>min_hairpin_loop_length_ && allow_paired(seq[(u+1)-1], seq[j-1]))
+                if (allow_paired[u+1][j])
                 {
                     auto s = param->multi_paired(seq2, u+1, j) + t;
                     update_max(Mv_[i][j], Cv_[u+1][j]+s, Mt_[i][j], TBType::M_PAIRED, u+1);
@@ -99,16 +139,18 @@ compute_viterbi(const std::string& seq)
             }
 
             for (auto u=i; u+1<=j; u++)
-                if (j-(u+1)>min_hairpin_loop_length_ && allow_paired(seq[(u+1)-1], seq[j-1]))
+                if (allow_paired[u+1][j])
                     update_max(Mv_[i][j], Mv_[i][u]+Cv_[u+1][j] + param->multi_paired(seq2, u+1, j), Mt_[i][j], TBType::M_BIFURCATION, u);
 
-            update_max(Mv_[i][j], Mv_[i][j-1] + param->multi_unpaired(seq2, j), Mt_[i][j], TBType::M_UNPAIRED);
+            if (allow_unpaired[j][j])
+                update_max(Mv_[i][j], Mv_[i][j-1] + param->multi_unpaired(seq2, j), Mt_[i][j], TBType::M_UNPAIRED);
 
             /////////////////
-            if (j-i>min_hairpin_loop_length_ && allow_paired(seq[i-1], seq[j-1]))
+            if (allow_paired[i][j])
                 update_max(M1v_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j), M1t_[i][j], TBType::M1_PAIRED);
 
-            update_max(M1v_[i][j], M1v_[i][j-1] + param->multi_unpaired(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
+            if (allow_unpaired[j][j])
+                update_max(M1v_[i][j], M1v_[i][j-1] + param->multi_unpaired(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
         }
     }
 
@@ -116,10 +158,11 @@ compute_viterbi(const std::string& seq)
 
     for (auto i=L-1; i>=1; i--)
     {
-        update_max(Fv_[i], Fv_[i+1] + param->external_unpaired(seq2, i), Ft_[i], TBType::F_UNPAIRED);
+        if (allow_unpaired[i][i])
+            update_max(Fv_[i], Fv_[i+1] + param->external_unpaired(seq2, i), Ft_[i], TBType::F_UNPAIRED);
 
         for (auto k=i+1; k+1<=L; k++)
-            if (k-i>min_hairpin_loop_length_ && allow_paired(seq[i-1], seq[k-1]))
+            if (allow_paired[i][k])
                 update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->external_paired(seq2, i, k), Ft_[i], TBType::F_BIFURCATION, k);
     }
 
@@ -130,7 +173,7 @@ compute_viterbi(const std::string& seq)
 
 auto
 Fold::
-traceback_viterbi()
+traceback_viterbi() -> std::vector<u_int32_t>
 {
     const auto L = Ft_.size()-1;
     std::vector<u_int32_t> pair(L+1, 0);
@@ -217,6 +260,7 @@ traceback_viterbi()
     return pair;
 }
 
+#if 0
 auto nussinov(const std::string& seq)
 {
     const auto L = seq.size();
@@ -236,68 +280,4 @@ auto nussinov(const std::string& seq)
 
     return dp[1][L];
 }
-
-//// test
-#include <string>
-#include "argparse.hpp"
-#include "parameter.h"
-#include "fasta.h"
-
-using namespace std::literals::string_literals;
-
-int main(int argc, char* argv[])
-{
-    
-    argparse::ArgumentParser ap(argv[0]);
-    ap.add_argument("input_fasta")
-        .help("FASTA-formatted input file");
-    ap.add_argument("-p", "--param")
-        .help("Thermodynamic parameter file")
-        .default_value(""s);
-    ap.add_argument("--max-bp")
-        .help("maximum distance of base pairs")
-        .action([](const auto& v) { return std::stoi(v); })
-        .default_value(3);
-        
-    try {
-        ap.parse_args(argc, argv);
-    } catch (std::runtime_error& err) {
-        std::cout << err.what() << std::endl;
-        ap.print_help();
-        return 0;
-    }
-
-    //std::cout << ap.get<int>("--max-bp") << std::endl;
-
-    //auto param = std::make_unique<MaximizeBP<>>();
-    //auto param = std::make_unique<MFE<>>();
-    auto param = std::make_unique<MFETorch>();
-#if 0
-    if (ap.get<std::string>("--param").empty())
-        param->load_default();
-    else
-        param->load(ap.get<std::string>("--param"));
-#else
-    param->load_default();
 #endif
-    Fold f(std::move(param));
-
-    auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
-
-    for (const auto& fa: fas) 
-    {
-        std::cout << f.compute_viterbi(fa.seq()).item<float>() << std::endl;
-        auto p = f.traceback_viterbi();
-        std::string s(p.size()-1, '.');
-        for (size_t i=1; i!=p.size(); ++i)
-        {
-            if (p[i] != 0)
-                s[i-1] = p[i]>i ? '(' : ')';
-        }
-        std::cout << fa.seq() << std::endl << 
-                s << std::endl;
-
-        std::cout << nussinov(fa.seq()) << std::endl;
-    }
-    return 0;
-}

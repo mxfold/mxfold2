@@ -27,7 +27,7 @@ class MaximizeBP
         ScoreType external_unpaired(const SeqType& seq, size_t i) { return 0; }
 };
 
-struct MFETorch : torch::nn::Module
+struct MFETorch : public torch::nn::Module
 {
     using SeqType = std::vector<short>;
     using ScoreType = torch::Tensor;
