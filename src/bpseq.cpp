@@ -13,7 +13,7 @@ BPSEQ()
 
 BPSEQ::
 BPSEQ(const std::string& seq, const std::string& paren)
-  : seq_(seq), bp_(seq.size()+1,0)
+  : seq_(seq), bp_(seq.size()+1, 0)
 {
   std::stack<unsigned int> st;
   for (unsigned int i=0; i!=paren.size(); ++i)
@@ -68,6 +68,20 @@ save(const char* fname) const
   for (unsigned int i=1; i!=bp_.size(); ++i)
     os << i << " " << seq_[i-1] << " " << bp_[i] << std::endl;
   return true;
+}
+
+std::string
+BPSEQ::
+stru() const
+{
+  const auto L = bp_.size()-1;
+  std::string s(L, '.');
+  for (auto i=1; i!=bp_.size(); i++)
+  {
+    s[i-1] = '(';
+    s[bp_[i]-1] = ')';
+  }
+  return s;
 }
 
 std::vector<BPSEQ>

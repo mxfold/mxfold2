@@ -35,8 +35,9 @@ int main(int argc, char* argv[])
     for (const auto& s: seqs) 
     {
         optim.zero_grad();
-        auto sc = f.compute_viterbi(s.seq());
-        sc.backward();
+        auto pred = f.compute_viterbi(s.seq());
+        auto ref = f.compute_viterbi(s.seq(), s.stru());
+        //sc.backward();
         auto p = f.traceback_viterbi();
         optim.step();
 #if 0

@@ -15,6 +15,7 @@ public:
 
   const std::string& seq() const { return seq_; }
   const std::vector<int>& bp() const { return bp_; }
+  std::string stru() const;
 
   static std::vector<BPSEQ> load_from_list(const char* fname);
 
