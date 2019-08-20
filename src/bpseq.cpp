@@ -76,7 +76,7 @@ stru() const
 {
   const auto L = bp_.size()-1;
   std::string s(L, '.');
-  for (auto i=1; i!=bp_.size(); i++)
+  for (auto i=1u; i!=bp_.size(); i++)
   {
     s[i-1] = '(';
     s[bp_[i]-1] = ')';

@@ -105,7 +105,7 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, 
 
 auto 
 Fold::
-compute_viterbi(const std::string& seq, const std::string& stru) -> ScoreType
+compute_viterbi(const std::string& seq, Fold::options opts) -> ScoreType
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
@@ -119,7 +119,16 @@ compute_viterbi(const std::string& seq, const std::string& stru) -> ScoreType
     M1t_.clear(); M1t_.resize(L+1, VT(L+1));
     Ft_.clear();  Ft_.resize(L+1);
 
-    const auto [allow_paired, allow_unpaired] = make_constraint(seq, stru, min_hairpin_loop_length_);
+    const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, min_hairpin_loop_length_);
+
+    std::vector<std::vector<float>> penalty(L+1, std::vector<float>(L+1, 0.0));
+    if (opts.use_penalty)
+    {
+        auto bp = parse_paren(opts.ref);
+        for (auto i=L; i>=1; i--)
+            for (auto j=i+1; j<=L; j++)
+                penalty[i][j] = bp[i] == j ? opts.pos_penalty : opts.neg_penalty;
+    }
 
     for (auto i=L; i>=1; i--)
     {
@@ -128,22 +137,22 @@ compute_viterbi(const std::string& seq, const std::string& stru) -> ScoreType
             if (allow_paired[i][j])
             {
                 if (allow_unpaired[i+1][j-1])
-                    update_max(Cv_[i][j], param->hairpin(seq2, i, j), Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                    update_max(Cv_[i][j], param->hairpin(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
 
                 for (auto k=i+1; (k-1)-(i+1)+1<max_internal_loop_length_ && k<j; k++)
                     if (allow_unpaired[i+1][k-1])
                         for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<max_internal_loop_length_; l--)
                             if (allow_paired[k][l] && allow_unpaired[l+1][j-1])
-                                update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l), Ct_[i][j], TBType::C_INTERNAL_LOOP, k, l);
+                                update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k, l);
 
                 for (auto u=i+1; u+1<=j-1; u++)
-                    update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->multi_loop(seq2, i, j), Ct_[i][j], TBType::C_MULTI_LOOP, u);
+                    update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->multi_loop(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
 
             }
 
             /////////////////
             if (allow_paired[i][j])
-                update_max(Mv_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j), Mt_[i][j], TBType::M_PAIRED, i);
+                update_max(Mv_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j) + penalty[i][j], Mt_[i][j], TBType::M_PAIRED, i);
 
             ScoreType t = torch::zeros({}, torch::dtype(torch::kFloat));
             for (auto u=i; u+1<j; u++)
@@ -153,20 +162,20 @@ compute_viterbi(const std::string& seq, const std::string& stru) -> ScoreType
                 if (allow_paired[u+1][j])
                 {
                     auto s = param->multi_paired(seq2, u+1, j) + t;
-                    update_max(Mv_[i][j], Cv_[u+1][j]+s, Mt_[i][j], TBType::M_PAIRED, u+1);
+                    update_max(Mv_[i][j], Cv_[u+1][j] + s + penalty[u+1][j], Mt_[i][j], TBType::M_PAIRED, u+1);
                 }
             }
 
             for (auto u=i; u+1<=j; u++)
                 if (allow_paired[u+1][j])
-                    update_max(Mv_[i][j], Mv_[i][u]+Cv_[u+1][j] + param->multi_paired(seq2, u+1, j), Mt_[i][j], TBType::M_BIFURCATION, u);
+                    update_max(Mv_[i][j], Mv_[i][u]+Cv_[u+1][j] + param->multi_paired(seq2, u+1, j) + penalty[u+1][j], Mt_[i][j], TBType::M_BIFURCATION, u);
 
             if (allow_unpaired[j][j])
                 update_max(Mv_[i][j], Mv_[i][j-1] + param->multi_unpaired(seq2, j), Mt_[i][j], TBType::M_UNPAIRED);
 
             /////////////////
             if (allow_paired[i][j])
-                update_max(M1v_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j), M1t_[i][j], TBType::M1_PAIRED);
+                update_max(M1v_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j) + penalty[i][j], M1t_[i][j], TBType::M1_PAIRED);
 
             if (allow_unpaired[j][j])
                 update_max(M1v_[i][j], M1v_[i][j-1] + param->multi_unpaired(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
@@ -182,10 +191,11 @@ compute_viterbi(const std::string& seq, const std::string& stru) -> ScoreType
 
         for (auto k=i+1; k+1<=L; k++)
             if (allow_paired[i][k])
-                update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->external_paired(seq2, i, k), Ft_[i], TBType::F_BIFURCATION, k);
+                update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->external_paired(seq2, i, k) + penalty[i][k], Ft_[i], TBType::F_BIFURCATION, k);
     }
 
-    update_max(Fv_[1], Cv_[1][L] + param->external_paired(seq2, 1, L), Ft_[1], TBType::F_PAIRED);
+    if (allow_paired[1][L])
+        update_max(Fv_[1], Cv_[1][L] + param->external_paired(seq2, 1, L) + penalty[1][L], Ft_[1], TBType::F_PAIRED);
 
     return Fv_[1];
 }
