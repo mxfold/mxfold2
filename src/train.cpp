@@ -1,4 +1,5 @@
 #include <string>
+#include <random>
 #include "argparse.hpp"
 #include "parameter.h"
 #include "fasta.h"
@@ -19,15 +20,19 @@ int main(int argc, char* argv[])
     ap.add_argument("--l1-weight")
         .help("the weight for L1 regularization term")
         .action([](const auto& v) { return std::stof(v); })
-        .default_value(0.0);
+        .default_value(0.0f);
     ap.add_argument("--l2-weight")
         .help("the weight for L2 regularization term")
         .action([](const auto& v) { return std::stof(v); })
-        .default_value(0.0);
+        .default_value(0.0f);
     ap.add_argument("--learning-rate")
         .help("learning rate for SGD")
         .action([](const auto& v) { return std::stof(v); })
-        .default_value(0.1);
+        .default_value(0.1f);
+    ap.add_argument("--max-epochs")
+        .help("the maximum number of epochs")
+        .action([](const auto& v) { return std::stoi(v); } )
+        .default_value(10);
         
     try {
         ap.parse_args(argc, argv);
@@ -47,28 +52,38 @@ int main(int argc, char* argv[])
     torch::optim::SGD optim(param->parameters(), lr);
     Fold f(std::move(param));
 
-    for (const auto& s: seqs)
+    std::random_device seed_gen;
+    std::mt19937 engine(seed_gen());
+    std::vector<size_t> idx(seqs.size());
+    std::iota(idx.begin(), idx.end(), 0);
+    for (auto epoch = 0; epoch != ap.get<int>("--max-epochs"); ++epoch)
     {
-        auto seq = s.seq();
-        auto stru = s.stru();
-        optim.zero_grad();
-        auto pred = f.compute_viterbi(seq, Fold::penalty(stru, -1.0, +1.0));
-        //auto p = f.traceback_viterbi();
-        auto ref = f.compute_viterbi(seq, Fold::constraints(stru));
+        std::shuffle(idx.begin(), idx.end(), engine);
+        for (auto i: idx)
+        {
+            auto seq = seqs[i].seq();
+            auto stru = seqs[i].stru();
+            optim.zero_grad();
+            // torch::NoGradGuard nograd;
+            auto pred = f.compute_viterbi(seq, Fold::penalty(stru, -1.0, +1.0));
+            //auto p = f.traceback_viterbi();
+            auto ref = f.compute_viterbi(seq, Fold::constraints(stru));
+            
+            auto l1_reg = torch::zeros({}, torch::dtype(torch::kFloat));
+            if (l1_weight > .0)
+                for (const auto& m : optim.parameters())
+                    l1_reg += torch::sum(torch::abs(m));
 
-        auto l1_reg = torch::zeros({}, torch::dtype(torch::kFloat));
-        if (l1_weight > .0)
-            for (const auto& m : optim.parameters())
-                l1_reg += torch::sum(torch::abs(m));
+            auto l2_reg = torch::zeros({}, torch::dtype(torch::kFloat));
+            if (l2_weight > .0)
+                for (const auto& m : optim.parameters())
+                    l2_reg += torch::sum(m * m);
 
-        auto l2_reg = torch::zeros({}, torch::dtype(torch::kFloat));
-        if (l2_weight > .0)
-            for (const auto& m : optim.parameters())
-                l2_reg += torch::sum(m * m);
-
-        auto loss = pred - ref + l1_weight * l1_reg + l2_weight * l2_reg;
-        loss.backward();
-        optim.step();
+            auto loss = pred - ref + l1_weight * l1_reg + l2_weight * l2_reg;
+            loss.backward();
+            optim.step();
+            std::cout << loss.item<float>() << " " << pred.item<float>() << " " << ref.item<float>() << std::endl;
+        }
     }
     
     return 0;

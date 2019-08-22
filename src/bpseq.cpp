@@ -78,8 +78,11 @@ stru() const
   std::string s(L, '.');
   for (auto i=1u; i!=bp_.size(); i++)
   {
-    s[i-1] = '(';
-    s[bp_[i]-1] = ')';
+    if (bp_[i] > 0 && i < bp_[i])
+    {
+      s[i-1] = '(';
+      s[bp_[i]-1] = ')';
+    }
   }
   return s;
 }
