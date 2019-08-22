@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
     auto param = std::make_unique<MFETorch>();
     param->load_default();
     torch::optim::SGD optim(param->parameters(), lr);
-    Fold f(std::move(param));
+    Fold<MFETorch> f(std::move(param));
 
     std::random_device seed_gen;
     std::mt19937 engine(seed_gen());
@@ -65,9 +65,9 @@ int main(int argc, char* argv[])
             auto stru = seqs[i].stru();
             optim.zero_grad();
             // torch::NoGradGuard nograd;
-            auto pred = f.compute_viterbi(seq, Fold::penalty(stru, -1.0, +1.0));
+            auto pred = f.compute_viterbi(seq, Fold<MFETorch>::penalty(stru, -1.0, +1.0));
             //auto p = f.traceback_viterbi();
-            auto ref = f.compute_viterbi(seq, Fold::constraints(stru));
+            auto ref = f.compute_viterbi(seq, Fold<MFETorch>::constraints(stru));
             
             auto l1_reg = torch::zeros({}, torch::dtype(torch::kFloat));
             if (l1_weight > .0)

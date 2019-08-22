@@ -37,6 +37,21 @@ struct MFETorch : public torch::nn::Module
     auto convert_sequence(const std::string& seq) -> SeqType;
     bool load_default();
 
+    static float compare(const ScoreType& a, const ScoreType& b)
+    {
+        return a.item<float>() - b.item<float>();
+    }
+
+    static ScoreType NEG_INF() 
+    {
+        return torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
+    }
+
+    static ScoreType ZERO()
+    {
+        return torch::zeros({}, torch::dtype(torch::kFloat));
+    }
+
     auto hairpin(const SeqType& seq, size_t i, size_t j) -> ScoreType;
     auto single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) -> ScoreType;
     auto multi_loop(const SeqType& seq, size_t i, size_t j) -> ScoreType;

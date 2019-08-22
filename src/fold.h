@@ -5,13 +5,12 @@
 #include <tuple>
 #include <variant>
 #include <memory>
-#include <torch/torch.h>
-#include "parameter.h"
 
+template < typename P >
 class Fold
 {
     public:
-        using ScoreType = torch::Tensor;
+        using ScoreType = typename P::ScoreType;
 
         struct options {
             std::string stru;
@@ -66,7 +65,7 @@ class Fold
         using VVT = std::vector<VT>;
 
     public:
-        Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length=3, size_t max_internal_loop_length=30);
+        Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length=3, size_t max_internal_loop_length=30);
         auto compute_viterbi(const std::string& seq, options opt = options()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
 
@@ -75,7 +74,7 @@ class Fold
         bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q);
 
     private:
-        std::unique_ptr<MFETorch> param;
+        std::unique_ptr<P> param;
         VVI Cv_, Mv_, M1v_; 
         VI Fv_;
         VVT Ct_, Mt_, M1t_;

@@ -68,8 +68,9 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
     return std::make_pair(allow_paired, allow_unpaired);
 }
 
-Fold::
-Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length, size_t max_internal_loop_length)
+template < typename P >
+Fold<P>::
+Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length, size_t max_internal_loop_length)
     :   param(std::move(p)), 
         min_hairpin_loop_length_(min_hairpin_loop_length),
         max_internal_loop_length_(max_internal_loop_length)
@@ -77,11 +78,13 @@ Fold(std::unique_ptr<MFETorch>&& p, size_t min_hairpin_loop_length, size_t max_i
 
 }
 
+template < typename P >
 bool
-Fold::
+Fold<P>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    if (max_v.item<float>() < new_v.item<float>()) 
+    //if (max_v.item<float>() < new_v.item<float>()) 
+    if (P::compare(max_v, new_v) < 0)
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -90,11 +93,13 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
     return false;
 }
 
+template < typename P >
 bool 
-Fold::
+Fold<P>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    if (max_v.item<float>() < new_v.item<float>()) 
+    //if (max_v.item<float>() < new_v.item<float>()) 
+    if (P::compare(max_v, new_v) < 0)
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -103,13 +108,14 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, 
     return false;
 }
 
+template < typename P >
 auto 
-Fold::
-compute_viterbi(const std::string& seq, Fold::options opts) -> ScoreType
+Fold<P>::
+compute_viterbi(const std::string& seq, Fold<P>::options opts) -> ScoreType
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
-    const ScoreType NEG_INF = torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
+    const ScoreType NEG_INF = P::NEG_INF();
     Cv_.clear();  Cv_.resize(L+1, VI(L+1, NEG_INF));
     Mv_.clear();  Mv_.resize(L+1, VI(L+1, NEG_INF));
     M1v_.clear(); M1v_.resize(L+1, VI(L+1, NEG_INF));
@@ -154,7 +160,7 @@ compute_viterbi(const std::string& seq, Fold::options opts) -> ScoreType
             if (allow_paired[i][j])
                 update_max(Mv_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j) + penalty[i][j], Mt_[i][j], TBType::M_PAIRED, i);
 
-            ScoreType t = torch::zeros({}, torch::dtype(torch::kFloat));
+            ScoreType t = P::ZERO();
             for (auto u=i; u+1<j; u++)
             {
                 if (!allow_unpaired[u][u]) break;
@@ -200,8 +206,9 @@ compute_viterbi(const std::string& seq, Fold::options opts) -> ScoreType
     return Fv_[1];
 }
 
+template < typename P >
 auto
-Fold::
+Fold<P>::
 traceback_viterbi() -> std::vector<u_int32_t>
 {
     const auto L = Ft_.size()-1;
@@ -288,6 +295,13 @@ traceback_viterbi() -> std::vector<u_int32_t>
 
     return pair;
 }
+
+// instantiation
+#include <torch/torch.h>
+#include "parameter.h"
+
+template class Fold<MFETorch>;
+
 
 #if 0
 auto nussinov(const std::string& seq)
