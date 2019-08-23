@@ -83,7 +83,6 @@ bool
 Fold<P>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    //if (max_v.item<float>() < new_v.item<float>()) 
     if (P::compare(max_v, new_v) < 0)
     {
         max_v = new_v;
@@ -98,7 +97,6 @@ bool
 Fold<P>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    //if (max_v.item<float>() < new_v.item<float>()) 
     if (P::compare(max_v, new_v) < 0)
     {
         max_v = new_v;
@@ -148,9 +146,9 @@ compute_viterbi(const std::string& seq, Fold<P>::options opts) -> ScoreType
                 for (auto k=i+1; (k-1)-(i+1)+1<max_internal_loop_length_ && k<j; k++)
                     if (allow_unpaired[i+1][k-1])
                         for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<max_internal_loop_length_; l--)
-                            if (allow_paired[k][l] && allow_unpaired[l+1][j-1])
-                                update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k, l);
-
+                            if (allow_paired[k][l] && allow_unpaired[l+1][j-1]) {
+                                update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
+                            }
                 for (auto u=i+1; u+1<=j-1; u++)
                     update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->multi_loop(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
 
@@ -229,9 +227,14 @@ traceback_viterbi() -> std::vector<u_int32_t>
             }
             case TBType::C_INTERNAL_LOOP: {
                 const auto [p, q] = std::get<1>(kl);
-                pair[p] = q;
-                pair[q] = p;
-                tb_queue.emplace(Ct_[p][q], p, q);
+                const auto k = i+p;
+                const auto l = j-q;
+                assert(k < l);
+                assert(pair[k] == 0);
+                assert(pair[l] == 0);
+                pair[k] = l;
+                pair[l] = k;
+                tb_queue.emplace(Ct_[k][l], k, l);
                 break;
             }
             case TBType::C_MULTI_LOOP: {
@@ -242,6 +245,8 @@ traceback_viterbi() -> std::vector<u_int32_t>
             }
             case TBType::M_PAIRED: {
                 const auto k = std::get<0>(kl);
+                assert(pair[k] == 0);
+                assert(pair[j] == 0);
                 pair[k] = j;
                 pair[j] = k;
                 tb_queue.emplace(Ct_[k][j], k, j);
@@ -249,6 +254,8 @@ traceback_viterbi() -> std::vector<u_int32_t>
             }
             case TBType::M_BIFURCATION: {
                 const auto k = std::get<0>(kl);
+                assert(pair[k+1] == 0);
+                assert(pair[j] == 0);
                 pair[k+1] = j;
                 pair[j] = k+1;
                 tb_queue.emplace(Mt_[i][k], i, k);
@@ -260,6 +267,8 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }    
             case TBType::M1_PAIRED: {
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
                 pair[i] = j;
                 pair[j] = i;
                 tb_queue.emplace(Ct_[i][j], i, j);
@@ -278,6 +287,8 @@ traceback_viterbi() -> std::vector<u_int32_t>
             }
             case TBType::F_BIFURCATION: {
                 const auto k = std::get<0>(kl);
+                assert(pair[i] == 0);
+                assert(pair[k] == 0);
                 pair[i] = k;
                 pair[k] = i;
                 tb_queue.emplace(Ct_[i][k], i, k);
@@ -301,6 +312,7 @@ traceback_viterbi() -> std::vector<u_int32_t>
 #include "parameter.h"
 
 template class Fold<MFETorch>;
+template class Fold<MFE<>>;
 
 
 #if 0

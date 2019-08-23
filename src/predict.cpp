@@ -51,12 +51,14 @@ int main(int argc, char* argv[])
     {
         auto sc = f.compute_viterbi(fa.seq());
         std::cout << sc.item<float>() << std::endl;
+        //std::cout << sc << std::endl;
         auto p = f.traceback_viterbi();
         std::string s(p.size()-1, '.');
         for (size_t i=1; i!=p.size(); ++i)
         {
             if (p[i] != 0)
                 s[i-1] = p[i]>i ? '(' : ')';
+            //std::cout << i << " " << fa.seq()[i-1] << " " << p[i] << std::endl;
         }
         std::cout << fa.seq() << std::endl << 
                 s << std::endl;
