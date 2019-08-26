@@ -68,6 +68,7 @@ class Fold
         Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length=3, size_t max_internal_loop_length=30);
         auto compute_viterbi(const std::string& seq, options opt = options()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
+        auto traceback_viterbi(const std::string& seq) -> typename P::ScoreType;
 
     private:
         bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k=0);

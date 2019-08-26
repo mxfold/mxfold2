@@ -71,6 +71,8 @@ int main(int argc, char* argv[])
         std::cout << sc << std::endl;
 #endif
         auto p = f.traceback_viterbi();
+        auto sc2 = f.traceback_viterbi(fa.seq());
+        std::cout << sc2.item<float>() << std::endl;
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> dur = end-start;
         std::string s(p.size()-1, '.');

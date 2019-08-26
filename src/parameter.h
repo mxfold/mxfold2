@@ -49,16 +49,6 @@ class MFE
         bool load(const std::string& filename) { return load(filename.c_str());};
         bool load_default();
 
-        static ScoreType NEG_INF() 
-        {
-            return std::numeric_limits<ScoreType>::lowest();
-        }
-
-        static ScoreType ZERO()
-        {
-            return 0.;
-        }
-
         template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
         template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
         template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
@@ -104,16 +94,6 @@ struct MFETorch : public torch::nn::Module
     ~MFETorch() {}
     auto convert_sequence(const std::string& seq) -> SeqType;
     bool load_default();
-
-    static ScoreType NEG_INF() 
-    {
-        return torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
-    }
-
-    static ScoreType ZERO()
-    {
-        return torch::zeros({}, torch::dtype(torch::kFloat).requires_grad(false));
-    }
 
     template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
     template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);

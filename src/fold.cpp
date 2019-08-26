@@ -344,6 +344,102 @@ traceback_viterbi() -> std::vector<u_int32_t>
     return pair;
 }
 
+template < typename P, typename S >
+auto
+Fold<P, S>::
+traceback_viterbi(const std::string& seq) -> typename P::ScoreType
+{
+    const auto seq2 = param->convert_sequence(seq);
+    const auto L = Ft_.size()-1;
+    std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
+    tb_queue.emplace(Ft_[1], 1, L);
+    auto e = ::ZERO<typename P::ScoreType>();
+
+    while (!tb_queue.empty())
+    {
+        const auto [tb, i, j] = tb_queue.front();
+        const auto [tb_type, kl] = tb;
+        tb_queue.pop();
+
+        switch (tb_type)
+        {
+            case TBType::C_HAIRPIN_LOOP: {
+                e += param->template hairpin<typename P::ScoreType>(seq2, i, j);
+                break;
+            }
+            case TBType::C_INTERNAL_LOOP: {
+                const auto [p, q] = std::get<1>(kl);
+                const auto k = i+p;
+                const auto l = j-q;
+                assert(k < l);
+                e += param->template single_loop<typename P::ScoreType>(seq2, i, j, k, l);
+                tb_queue.emplace(Ct_[k][l], k, l);
+                break;
+            }
+            case TBType::C_MULTI_LOOP: {
+                const auto k = std::get<0>(kl);
+                e += param->template multi_loop<typename P::ScoreType>(seq2, i, j);
+                tb_queue.emplace(Mt_[i+1][k], i+1, k);
+                tb_queue.emplace(M1t_[k+1][j-1], k+1, j-1);
+                break;
+            }
+            case TBType::M_PAIRED: {
+                const auto k = std::get<0>(kl);
+                if (k-i > 0)
+                    e += static_cast<float>(k-i) * param->template multi_unpaired<typename P::ScoreType>(seq2, k);
+                e += param->template multi_paired<typename P::ScoreType>(seq2, k, j);
+                tb_queue.emplace(Ct_[k][j], k, j);
+                break;
+            }
+            case TBType::M_BIFURCATION: {
+                const auto k = std::get<0>(kl);
+                e += param->template multi_paired<typename P::ScoreType>(seq2, k+1, j);
+                tb_queue.emplace(Mt_[i][k], i, k);
+                tb_queue.emplace(Ct_[k+1][j], k+1, j);
+                break;
+            }
+            case TBType::M_UNPAIRED: {
+                e += param->template multi_unpaired<typename P::ScoreType>(seq2, j);
+                tb_queue.emplace(Mt_[i][j-1], i, j-1);
+                break;
+            }    
+            case TBType::M1_PAIRED: {
+                e += param->template multi_paired<typename P::ScoreType>(seq2, i, j);
+                tb_queue.emplace(Ct_[i][j], i, j);
+                break;
+            }
+            case TBType::M1_UNPAIRED: {
+                e += param->template multi_unpaired<typename P::ScoreType>(seq2, j);
+                tb_queue.emplace(M1t_[i][j-1], i, j-1);
+                break;
+            }
+            case TBType::F_ZERO: {
+                e += param->template external_zero<typename P::ScoreType>(seq2);
+                break;
+            }
+            case TBType::F_UNPAIRED: {
+                e += param->template external_unpaired<typename P::ScoreType>(seq2, i);
+                tb_queue.emplace(Ft_[i+1], i+1, j);
+                break;
+            }
+            case TBType::F_BIFURCATION: {
+                const auto k = std::get<0>(kl);
+                e += param->template external_paired<typename P::ScoreType>(seq2, i, k);
+                tb_queue.emplace(Ct_[i][k], i, k);
+                tb_queue.emplace(Ft_[k+1], k+1, j);
+                break;
+            }
+            case TBType::F_PAIRED: {
+                e += param->template external_paired<typename P::ScoreType>(seq2, i, j);
+                tb_queue.emplace(Ct_[i][j], i, j);
+                break;
+            }
+        }
+    }
+
+    return e;
+}
+
 // instantiation
 #include <torch/torch.h>
 #include "parameter.h"
