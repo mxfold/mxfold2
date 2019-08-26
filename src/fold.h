@@ -6,11 +6,11 @@
 #include <variant>
 #include <memory>
 
-template < typename P >
+template < typename P, typename S = typename P::ScoreType >
 class Fold
 {
     public:
-        using ScoreType = typename P::ScoreType;
+        using ScoreType = S;
 
         struct options {
             std::string stru;

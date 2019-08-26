@@ -27,11 +27,10 @@ class MaximizeBP
         ScoreType external_unpaired(const SeqType& seq, size_t i) { return 0; }
 };
 
-template <typename S = float>
 class MFE
 {
     public:
-        using ScoreType = S;
+        using ScoreType = float;
         using SeqType = std::vector<short>;
 
     private:
@@ -50,11 +49,6 @@ class MFE
         bool load(const std::string& filename) { return load(filename.c_str());};
         bool load_default();
 
-        static float compare(const ScoreType& a, const ScoreType& b)
-        {
-            return a - b;
-        }
-
         static ScoreType NEG_INF() 
         {
             return std::numeric_limits<ScoreType>::lowest();
@@ -65,14 +59,14 @@ class MFE
             return 0.;
         }
 
-        auto hairpin(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-        auto single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) -> ScoreType;
-        auto multi_loop(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-        auto multi_paired(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-        auto multi_unpaired(const SeqType& seq, size_t i) -> ScoreType;
-        auto external_zero(const SeqType& seq) -> ScoreType { return 0.; };
-        auto external_paired(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-        auto external_unpaired(const SeqType& seq, size_t i) -> ScoreType { return 0.; };
+        template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
+        template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T multi_paired(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T multi_unpaired(const SeqType& seq, size_t i);
+        template <typename T> T external_zero(const SeqType& seq) { return 0.0; }
+        template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T external_unpaired(const SeqType& seq, size_t i) { return 0.0; }
 
     private:
         VVI stack_;
@@ -111,11 +105,6 @@ struct MFETorch : public torch::nn::Module
     auto convert_sequence(const std::string& seq) -> SeqType;
     bool load_default();
 
-    static float compare(const ScoreType& a, const ScoreType& b)
-    {
-        return a.item<float>() - b.item<float>();
-    }
-
     static ScoreType NEG_INF() 
     {
         return torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
@@ -123,17 +112,17 @@ struct MFETorch : public torch::nn::Module
 
     static ScoreType ZERO()
     {
-        return torch::zeros({}, torch::dtype(torch::kFloat));
+        return torch::zeros({}, torch::dtype(torch::kFloat).requires_grad(false));
     }
 
-    auto hairpin(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-    auto single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) -> ScoreType;
-    auto multi_loop(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-    auto multi_paired(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-    auto multi_unpaired(const SeqType& seq, size_t i) -> ScoreType;
-    auto external_zero(const SeqType& seq) -> ScoreType;
-    auto external_paired(const SeqType& seq, size_t i, size_t j) -> ScoreType;
-    auto external_unpaired(const SeqType& seq, size_t i) -> ScoreType;
+    template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
+    template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
+    template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
+    template <typename T> T multi_paired(const SeqType& seq, size_t i, size_t j);
+    template <typename T> T multi_unpaired(const SeqType& seq, size_t i);
+    template <typename T> T external_zero(const SeqType& seq);
+    template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
+    template <typename T> T external_unpaired(const SeqType& seq, size_t i);
 
     torch::Tensor stack_;
     torch::Tensor hairpin_;

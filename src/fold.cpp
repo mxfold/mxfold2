@@ -3,6 +3,7 @@
 #include <limits>
 #include <queue>
 #include <stack>
+#include <torch/torch.h>
 #include "fold.h"
 #include "parameter.h"
 
@@ -68,8 +69,44 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
     return std::make_pair(allow_paired, allow_unpaired);
 }
 
-template < typename P >
-Fold<P>::
+template < typename T >
+float compare(const T& a, const T& b)
+{
+    return a - b;
+}
+
+template <>
+float compare(const torch::Tensor& a, const torch::Tensor& b)
+{
+    return a.item<float>() - b.item<float>();
+}
+
+template < typename T >
+T NEG_INF()
+{
+    return std::numeric_limits<T>::lowest();
+}
+
+template <>
+torch::Tensor NEG_INF()
+{
+    return torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
+}
+
+template < typename T >
+T ZERO()
+{
+    return 0.;
+}
+
+template <>
+torch::Tensor ZERO()
+{
+    return torch::zeros({}, torch::dtype(torch::kFloat));
+}
+
+template < typename P, typename S >
+Fold<P, S>::
 Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length, size_t max_internal_loop_length)
     :   param(std::move(p)), 
         min_hairpin_loop_length_(min_hairpin_loop_length),
@@ -78,12 +115,12 @@ Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length, size_t max_internal
 
 }
 
-template < typename P >
+template < typename P, typename S >
 bool
-Fold<P>::
+Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    if (P::compare(max_v, new_v) < 0)
+    if (::compare(max_v, new_v) < 0)
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -92,12 +129,12 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
     return false;
 }
 
-template < typename P >
+template < typename P, typename S >
 bool 
-Fold<P>::
+Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    if (P::compare(max_v, new_v) < 0)
+    if (::compare(max_v, new_v) < 0)
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -106,14 +143,14 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, 
     return false;
 }
 
-template < typename P >
+template < typename P, typename S >
 auto 
-Fold<P>::
-compute_viterbi(const std::string& seq, Fold<P>::options opts) -> ScoreType
+Fold<P, S>::
+compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
-    const ScoreType NEG_INF = P::NEG_INF();
+    const ScoreType NEG_INF = ::NEG_INF<ScoreType>();
     Cv_.clear();  Cv_.resize(L+1, VI(L+1, NEG_INF));
     Mv_.clear();  Mv_.resize(L+1, VI(L+1, NEG_INF));
     M1v_.clear(); M1v_.resize(L+1, VI(L+1, NEG_INF));
@@ -141,72 +178,72 @@ compute_viterbi(const std::string& seq, Fold<P>::options opts) -> ScoreType
             if (allow_paired[i][j])
             {
                 if (allow_unpaired[i+1][j-1])
-                    update_max(Cv_[i][j], param->hairpin(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                    update_max(Cv_[i][j], param->template hairpin<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
 
                 for (auto k=i+1; (k-1)-(i+1)+1<max_internal_loop_length_ && k<j; k++)
                     if (allow_unpaired[i+1][k-1])
                         for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<max_internal_loop_length_; l--)
                             if (allow_paired[k][l] && allow_unpaired[l+1][j-1]) {
-                                update_max(Cv_[i][j], Cv_[k][l] + param->single_loop(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
+                                update_max(Cv_[i][j], Cv_[k][l] + param->template single_loop<ScoreType>(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
                             }
                 for (auto u=i+1; u+1<=j-1; u++)
-                    update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->multi_loop(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
+                    update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->template multi_loop<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
 
             }
 
             /////////////////
             if (allow_paired[i][j])
-                update_max(Mv_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j) + penalty[i][j], Mt_[i][j], TBType::M_PAIRED, i);
+                update_max(Mv_[i][j], Cv_[i][j] + param->template multi_paired<ScoreType>(seq2, i, j) + penalty[i][j], Mt_[i][j], TBType::M_PAIRED, i);
 
-            ScoreType t = P::ZERO();
+            ScoreType t = ::ZERO<ScoreType>();
             for (auto u=i; u+1<j; u++)
             {
                 if (!allow_unpaired[u][u]) break;
-                t += param->multi_unpaired(seq2, u);
+                t += param->template multi_unpaired<ScoreType>(seq2, u);
                 if (allow_paired[u+1][j])
                 {
-                    auto s = param->multi_paired(seq2, u+1, j) + t;
+                    auto s = param->template multi_paired<ScoreType>(seq2, u+1, j) + t;
                     update_max(Mv_[i][j], Cv_[u+1][j] + s + penalty[u+1][j], Mt_[i][j], TBType::M_PAIRED, u+1);
                 }
             }
 
             for (auto u=i; u+1<=j; u++)
                 if (allow_paired[u+1][j])
-                    update_max(Mv_[i][j], Mv_[i][u]+Cv_[u+1][j] + param->multi_paired(seq2, u+1, j) + penalty[u+1][j], Mt_[i][j], TBType::M_BIFURCATION, u);
+                    update_max(Mv_[i][j], Mv_[i][u]+Cv_[u+1][j] + param->template multi_paired<ScoreType>(seq2, u+1, j) + penalty[u+1][j], Mt_[i][j], TBType::M_BIFURCATION, u);
 
             if (allow_unpaired[j][j])
-                update_max(Mv_[i][j], Mv_[i][j-1] + param->multi_unpaired(seq2, j), Mt_[i][j], TBType::M_UNPAIRED);
+                update_max(Mv_[i][j], Mv_[i][j-1] + param->template multi_unpaired<ScoreType>(seq2, j), Mt_[i][j], TBType::M_UNPAIRED);
 
             /////////////////
             if (allow_paired[i][j])
-                update_max(M1v_[i][j], Cv_[i][j] + param->multi_paired(seq2, i, j) + penalty[i][j], M1t_[i][j], TBType::M1_PAIRED);
+                update_max(M1v_[i][j], Cv_[i][j] + param->template multi_paired<ScoreType>(seq2, i, j) + penalty[i][j], M1t_[i][j], TBType::M1_PAIRED);
 
             if (allow_unpaired[j][j])
-                update_max(M1v_[i][j], M1v_[i][j-1] + param->multi_unpaired(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
+                update_max(M1v_[i][j], M1v_[i][j-1] + param->template multi_unpaired<ScoreType>(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
         }
     }
 
-    update_max(Fv_[L], param->external_zero(seq2), Ft_[L], TBType::F_ZERO);
+    update_max(Fv_[L], param->template external_zero<ScoreType>(seq2), Ft_[L], TBType::F_ZERO);
 
     for (auto i=L-1; i>=1; i--)
     {
         if (allow_unpaired[i][i])
-            update_max(Fv_[i], Fv_[i+1] + param->external_unpaired(seq2, i), Ft_[i], TBType::F_UNPAIRED);
+            update_max(Fv_[i], Fv_[i+1] + param->template external_unpaired<ScoreType>(seq2, i), Ft_[i], TBType::F_UNPAIRED);
 
         for (auto k=i+1; k+1<=L; k++)
             if (allow_paired[i][k])
-                update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->external_paired(seq2, i, k) + penalty[i][k], Ft_[i], TBType::F_BIFURCATION, k);
+                update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->template external_paired<ScoreType>(seq2, i, k) + penalty[i][k], Ft_[i], TBType::F_BIFURCATION, k);
     }
 
     if (allow_paired[1][L])
-        update_max(Fv_[1], Cv_[1][L] + param->external_paired(seq2, 1, L) + penalty[1][L], Ft_[1], TBType::F_PAIRED);
+        update_max(Fv_[1], Cv_[1][L] + param->template external_paired<ScoreType>(seq2, 1, L) + penalty[1][L], Ft_[1], TBType::F_PAIRED);
 
     return Fv_[1];
 }
 
-template < typename P >
+template < typename P, typename S >
 auto
-Fold<P>::
+Fold<P, S>::
 traceback_viterbi() -> std::vector<u_int32_t>
 {
     const auto L = Ft_.size()-1;
@@ -312,7 +349,8 @@ traceback_viterbi() -> std::vector<u_int32_t>
 #include "parameter.h"
 
 template class Fold<MFETorch>;
-template class Fold<MFE<>>;
+template class Fold<MFETorch, float>;
+template class Fold<MFE>;
 
 
 #if 0

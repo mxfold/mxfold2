@@ -155,9 +155,8 @@ auto read_values(int*& v, SIZE_T... dims)
     return detail::vector_builder<T, N>::read_values(v, d, s, e);
 }
 
-template <typename S>
 bool
-MFE<S>::
+MFE::
 load(const char* filename)
 {
     const auto NBPAIRS = 7;
@@ -276,9 +275,8 @@ load(const char* filename)
     return true;
 }
 
-template <typename S>
 bool
-MFE<S>::
+MFE::
 load_default()
 {
     const auto NBPAIRS = 7;
@@ -389,9 +387,8 @@ load_default()
     return true;
 }
 
-template <typename S>
 auto
-MFE<S>::
+MFE::
 convert_sequence(const std::string& seq) -> SeqType
 {
     const auto L = seq.size();
@@ -403,10 +400,10 @@ convert_sequence(const std::string& seq) -> SeqType
     return converted_seq;
 }
 
-template <typename S>
-auto
-MFE<S>::
-hairpin(const SeqType& s, size_t i, size_t j) -> ScoreType
+template <typename R>
+R
+MFE::
+hairpin(const SeqType& s, size_t i, size_t j)
 {
     const auto l = (j-1)-(i+1)+1;
     auto e = 0;
@@ -434,10 +431,15 @@ hairpin(const SeqType& s, size_t i, size_t j) -> ScoreType
     return e / -100.;
 }
 
-template <typename S>
-auto
-MFE<S>::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) -> ScoreType
+template
+float
+MFE::
+hairpin(const SeqType& s, size_t i, size_t j);
+
+template <typename R>
+R
+MFE::
+single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
 {
     const auto type1 = ::pair[s[i]][s[j]];
     const auto type2 = ::pair[s[l]][s[k]];
@@ -493,10 +495,15 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) -> ScoreTy
     return e / -100.;
 }
 
-template <typename S>
-auto
-MFE<S>::
-multi_loop(const SeqType& s, size_t i, size_t j) -> ScoreType
+template
+float
+MFE::
+single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l);
+
+template <typename R>
+R
+MFE::
+multi_loop(const SeqType& s, size_t i, size_t j) 
 {
     int e = 0;
     const auto type = ::pair[s[i]][s[j]];
@@ -513,11 +520,15 @@ multi_loop(const SeqType& s, size_t i, size_t j) -> ScoreType
 
     return e / -100.;
 }
+template
+float
+MFE::
+multi_loop(const SeqType& s, size_t i, size_t j);
 
-template <typename S>
-auto
-MFE<S>::
-multi_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
+template <typename R>
+R
+MFE::
+multi_paired(const SeqType& s, size_t i, size_t j)
 {
     int e = 0;
     const auto type = ::pair[s[j]][s[i]];
@@ -534,20 +545,30 @@ multi_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
     return e / -100.;
 }
 
-template <typename S>
-auto
-MFE<S>::
-multi_unpaired(const SeqType& s, size_t i) -> ScoreType
+template
+float
+MFE::
+multi_paired(const SeqType& s, size_t i, size_t j);
+
+template <typename R>
+R
+MFE::
+multi_unpaired(const SeqType& s, size_t i)
 {
     const auto e = ml_base_;
 
     return e / -100.;
 }
 
-template <typename S>
-auto
-MFE<S>::
-external_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
+template
+float
+MFE::
+multi_unpaired(const SeqType& s, size_t i);
+
+template <typename R>
+R
+MFE::
+external_paired(const SeqType& s, size_t i, size_t j)
 {
     int e = 0;
     const auto type = ::pair[s[i]][s[j]];
@@ -563,7 +584,10 @@ external_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
     return e / -100.;
 }
 
-template class MFE<>;
+template
+float
+MFE::
+external_paired(const SeqType& s, size_t i, size_t j);
 
 
 #define NBASES 4
@@ -741,14 +765,27 @@ load_default()
     return true;
 }
 
-auto
+template < typename T, typename U >
+T get_value(U v)
+{
+    return v;
+}
+
+template <>
+float get_value(torch::Tensor v)
+{
+    return v.item<float>();
+}
+
+template < typename R >
+R
 MFETorch::
-hairpin(const SeqType& s, size_t i, size_t j) -> ScoreType
+hairpin(const SeqType& s, size_t i, size_t j)
 {
     const auto l = (j-1)-(i+1)+1;
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat)));
 
-    e += l<=30 ? hairpin_[l] : hairpin_[30] + lxc_[0] * log(l / 30.);
+    e += l<=30 ? ::get_value<R>(hairpin_[l]) : ::get_value<R>(hairpin_[30]) + ::get_value<R>(lxc_[0]) * log(l / 30.);
 
     if (l < 3) return e;
 
@@ -765,142 +802,404 @@ hairpin(const SeqType& s, size_t i, size_t j) -> ScoreType
     if (l == 3)
     {
         if (type > 2)
-            e += terminalAU_[0];
+            e += ::get_value<R>(terminalAU_[0]);
     }
     else
-        e += mismatch_hairpin_[type][s[i+1]][s[j-1]];
+        e += ::get_value<R>(mismatch_hairpin_[type][s[i+1]][s[j-1]]);
 
     return -e / 100.;
 }
 
-auto
+template
+torch::Tensor
 MFETorch::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) -> ScoreType
+hairpin(const SeqType& s, size_t i, size_t j);
+
+template <>
+float
+MFETorch::
+hairpin(const SeqType& s, size_t i, size_t j)
+{
+    auto hairpin_a = hairpin_.accessor<float, 1>();
+    auto lxc_a = lxc_.accessor<float, 1>();
+    auto terminalAU_a = terminalAU_.accessor<float, 1>();
+    auto mismatch_hairpin_a = mismatch_hairpin_.accessor<float, 3>();
+
+    const auto l = (j-1)-(i+1)+1;
+    float e = 0.;
+
+    e += l<=30 ? hairpin_a[l] : hairpin_a[30] + lxc_a[0] * log(l / 30.);
+
+    if (l < 3) return e;
+
+#if 0 // todo: special loops
+    if (3 <= l && l <= 6) {
+        SeqType sl(&s[i], &s[j]+l);
+        auto it = special_loops_.find(sl);
+        if (it != std::end(special_loops_))
+            return it->second;
+    }           
+#endif
+
+    const auto type = ::pair[s[i]][s[j]];
+    if (l == 3)
+    {
+        if (type > 2)
+            e += terminalAU_a[0];
+    }
+    else
+        e += mismatch_hairpin_a[type][s[i+1]][s[j-1]];
+
+    return -e / 100.;
+}
+
+template <typename R>
+R
+MFETorch::
+single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
 {
     const auto type1 = ::pair[s[i]][s[j]];
     const auto type2 = ::pair[s[l]][s[k]];
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat)));
 
     if (ll==0) // stack
-        e += stack_[type1][type2];
+        e += ::get_value<R>(stack_[type1][type2]);
     else if (ls==0) // bulge
     {
-        e += ll<=30 ? bulge_[ll] : bulge_[30] + lxc_[0] * log(ll / 30.);
+        e += ll<=30 ? ::get_value<R>(bulge_[ll]) : ::get_value<R>(bulge_[30]) + ::get_value<R>(lxc_[0]) * log(ll / 30.);
         if (ll==1)
-            e +=stack_[type1][type2];
+            e += ::get_value<R>(stack_[type1][type2]);
         else
         {
             if (type1 > 2)
-                e += terminalAU_[0];
+                e += ::get_value<R>(terminalAU_[0]);
             if (type2 > 2)
-                e += terminalAU_[0];
+                e += ::get_value<R>(terminalAU_[0]);
         }
     }
     else if (ll==1 && ls==1) // 1x1 loop
-        e += int11_[type1][type2][s[i+1]][s[j-1]];
+        e += ::get_value<R>(int11_[type1][type2][s[i+1]][s[j-1]]);
     else if (l1==2 && l2==1) // 2x1 loop
-        e += int21_[type2][type1][s[l+1]][s[i+1]][s[k-1]];
+        e += ::get_value<R>(int21_[type2][type1][s[l+1]][s[i+1]][s[k-1]]);
     else if (l1==1 && l2==2) // 1x2 loop
-        e += int21_[type1][type2][s[i+1]][s[l+1]][s[j-1]];
+        e += ::get_value<R>(int21_[type1][type2][s[i+1]][s[l+1]][s[j-1]]);
     else if (ls==1) // 1xn loop
     {
-        e += ll+1 <= 30 ? internal_[ll+1] : internal_[30] + lxc_[0] * log((ll+1) / 30.);
-        e += torch::min(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
-        e += mismatch_internal_1n_[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_[type2][s[l+1]][s[k-1]];
+        e += ll+1 <= 30 ? ::get_value<R>(internal_[ll+1]) : ::get_value<R>(internal_[30]) + ::get_value<R>(lxc_[0]) * log((ll+1) / 30.);
+        e += ::get_value<R>(torch::min(max_ninio_[0], (int)(ll-ls) * ninio_[0]));
+        e += ::get_value<R>(mismatch_internal_1n_[type1][s[i+1]][s[j-1]]) + ::get_value<R>(mismatch_internal_1n_[type2][s[l+1]][s[k-1]]);
     }
     else if (ls==2 && ll==2) // 2x2 loop
-        e += int22_[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]];
+        e += ::get_value<R>(int22_[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]]);
     else if (ls==2 && ll==3) // 2x3 loop
     {
-        e += internal_[ls+ll] + ninio_[0];
-        e += mismatch_internal_23_[type1][s[i+1]][s[j-1]] + mismatch_internal_23_[type2][s[l+1]][s[k-1]];
+        e += ::get_value<R>(internal_[ls+ll]) + ::get_value<R>(ninio_[0]);
+        e += ::get_value<R>(mismatch_internal_23_[type1][s[i+1]][s[j-1]]) + ::get_value<R>(mismatch_internal_23_[type2][s[l+1]][s[k-1]]);
     }
     else // generic internal loop
     {
-        e += ls+ll <= 30 ? internal_[ls+ll] : internal_[30] + lxc_[0] * log((ls+ll) / 30.);
-        e += torch::min(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
-        e += mismatch_internal_[type1][s[i+1]][s[j-1]] + mismatch_internal_[type2][s[l+1]][s[k-1]];
+        e += ls+ll <= 30 ? ::get_value<R>(internal_[ls+ll]) : ::get_value<R>(internal_[30]) + ::get_value<R>(lxc_[0]) * log((ls+ll) / 30.);
+        e += ::get_value<R>(torch::min(max_ninio_[0], (int)(ll-ls) * ninio_[0]));
+        e += ::get_value<R>(mismatch_internal_[type1][s[i+1]][s[j-1]]) + ::get_value<R>(mismatch_internal_[type2][s[l+1]][s[k-1]]);
     }
     return -e / 100.;
 }
 
-auto
+template
+torch::Tensor
 MFETorch::
-multi_loop(const SeqType& s, size_t i, size_t j) -> ScoreType
+single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l);
+
+template <>
+float
+MFETorch::
+single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
 {
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto stack_a = stack_.accessor<float, 2>();
+    auto bulge_a = bulge_.accessor<float, 1>();
+    auto lxc_a = lxc_.accessor<float, 1>();
+    auto terminalAU_a = terminalAU_.accessor<float, 1>();
+    auto int11_a = int11_.accessor<float, 4>();
+    auto int21_a = int21_.accessor<float, 5>();
+    auto int22_a = int22_.accessor<float, 6>();
+    auto internal_a = internal_.accessor<float, 1>();
+    auto mismatch_internal_a = mismatch_internal_.accessor<float, 3>();
+    auto mismatch_internal_1n_a = mismatch_internal_1n_.accessor<float, 3>();
+    auto mismatch_internal_23_a = mismatch_internal_23_.accessor<float, 3>();
+    auto max_ninio_a = max_ninio_.accessor<float, 1>();
+    auto ninio_a = ninio_.accessor<float, 1>();
+
+    const auto type1 = ::pair[s[i]][s[j]];
+    const auto type2 = ::pair[s[l]][s[k]];
+    const auto l1 = (k-1)-(i+1)+1;
+    const auto l2 = (j-1)-(l+1)+1;
+    const auto [ls, ll] = std::minmax(l1, l2);
+    float e = 0.;
+
+    if (ll==0) // stack
+        e += stack_a[type1][type2];
+    else if (ls==0) // bulge
+    {
+        e += ll<=30 ? bulge_a[ll] : bulge_a[30] + lxc_a[0] * log(ll / 30.);
+        if (ll==1)
+            e += stack_a[type1][type2];
+        else
+        {
+            if (type1 > 2)
+                e += terminalAU_a[0];
+            if (type2 > 2)
+                e += terminalAU_a[0];
+        }
+    }
+    else if (ll==1 && ls==1) // 1x1 loop
+        e += int11_a[type1][type2][s[i+1]][s[j-1]];
+    else if (l1==2 && l2==1) // 2x1 loop
+        e += int21_a[type2][type1][s[l+1]][s[i+1]][s[k-1]];
+    else if (l1==1 && l2==2) // 1x2 loop
+        e += int21_a[type1][type2][s[i+1]][s[l+1]][s[j-1]];
+    else if (ls==1) // 1xn loop
+    {
+        e += ll+1 <= 30 ? internal_a[ll+1] : internal_a[30] + lxc_a[0] * log((ll+1) / 30.);
+        e += std::min(max_ninio_a[0], (int)(ll-ls) * ninio_a[0]);
+        e += mismatch_internal_1n_a[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_a[type2][s[l+1]][s[k-1]];
+    }
+    else if (ls==2 && ll==2) // 2x2 loop
+        e += int22_a[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]];
+    else if (ls==2 && ll==3) // 2x3 loop
+    {
+        e += internal_a[ls+ll] + ninio_a[0];
+        e += mismatch_internal_23_a[type1][s[i+1]][s[j-1]] + mismatch_internal_23_a[type2][s[l+1]][s[k-1]];
+    }
+    else // generic internal loop
+    {
+        e += ls+ll <= 30 ? internal_a[ls+ll] : internal_a[30] + lxc_a[0] * log((ls+ll) / 30.);
+        e += std::min(max_ninio_a[0], (int)(ll-ls) * ninio_a[0]);
+        e += mismatch_internal_a[type1][s[i+1]][s[j-1]] + mismatch_internal_a[type2][s[l+1]][s[k-1]];
+    }
+    return -e / 100.;
+}
+
+
+template <typename R>
+R
+MFETorch::
+multi_loop(const SeqType& s, size_t i, size_t j)
+{
+    auto e = ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat)));
     const auto type = ::pair[s[i]][s[j]];
     if (s[i+1] >= 0 && s[j-1] >= 0)
-        e += mismatch_multi_[type][s[i+1]][s[j-1]];
+        e += ::get_value<R>(mismatch_multi_[type][s[i+1]][s[j-1]]);
     else if (s[i+1] >= 0)
-        e += dangle5_[type][s[i+1]];
+        e += ::get_value<R>(dangle5_[type][s[i+1]]);
     else if (s[j-1] >= 0)
-        e += dangle3_[type][s[j-1]];
+        e += ::get_value<R>(dangle3_[type][s[j-1]]);
     if (type > 2) 
-        e += terminalAU_[0];
-    e += ml_intern_[0];
-    e += ml_closing_[0];
+        e += ::get_value<R>(terminalAU_[0]);
+    e += ::get_value<R>(ml_intern_[0]);
+    e += ::get_value<R>(ml_closing_[0]);
 
     return -e / 100.;
 }
 
-auto
+template
+torch::Tensor
 MFETorch::
-multi_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
+multi_loop(const SeqType& s, size_t i, size_t j);
+
+template <>
+float
+MFETorch::
+multi_loop(const SeqType& s, size_t i, size_t j)
 {
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto mismatch_multi_a = mismatch_multi_.accessor<float, 3>();
+    auto terminalAU_a = terminalAU_.accessor<float, 1>();
+    auto dangle5_a = dangle5_.accessor<float, 2>();
+    auto dangle3_a = dangle3_.accessor<float, 2>();
+    auto ml_intern_a = ml_intern_.accessor<float, 1>();
+    auto ml_closing_a = ml_closing_.accessor<float, 1>();
+
+    float e = 0.;
+    const auto type = ::pair[s[i]][s[j]];
+    if (s[i+1] >= 0 && s[j-1] >= 0)
+        e += mismatch_multi_a[type][s[i+1]][s[j-1]];
+    else if (s[i+1] >= 0)
+        e += dangle5_a[type][s[i+1]];
+    else if (s[j-1] >= 0)
+        e += dangle3_a[type][s[j-1]];
+    if (type > 2) 
+        e += terminalAU_a[0];
+    e += ml_intern_a[0];
+    e += ml_closing_a[0];
+
+    return -e / 100.;
+}
+
+
+template <typename R>
+R
+MFETorch::
+multi_paired(const SeqType& s, size_t i, size_t j)
+{
+    auto e = ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat)));
     const auto type = ::pair[s[j]][s[i]];
     if (s[j+1] >= 0 && s[i-1] >= 0)
-        e += mismatch_multi_[type][s[j+1]][s[i-1]];
+        e += ::get_value<R>(mismatch_multi_[type][s[j+1]][s[i-1]]);
     else if (s[j+1] >= 0)
-        e +=dangle5_[type][s[j+1]];
+        e += ::get_value<R>(dangle5_[type][s[j+1]]);
     else if (s[i-1] >= 0)
-        e += dangle3_[type][s[i-1]];
+        e += ::get_value<R>(dangle3_[type][s[i-1]]);
     if (type > 2) 
-        e +=terminalAU_[0];
-    e += ml_intern_[0];
+        e += ::get_value<R>(terminalAU_[0]);
+    e += ::get_value<R>(ml_intern_[0]);
 
     return -e / 100.;
 }
 
-auto
+template
+torch::Tensor
 MFETorch::
-multi_unpaired(const SeqType& s, size_t i) -> ScoreType
+multi_paired(const SeqType& s, size_t i, size_t j);
+
+template <>
+float
+MFETorch::
+multi_paired(const SeqType& s, size_t i, size_t j)
 {
-    return -ml_base_[0] / 100.;
+    auto mismatch_multi_a = mismatch_multi_.accessor<float, 3>();
+    auto terminalAU_a = terminalAU_.accessor<float, 1>();
+    auto dangle5_a = dangle5_.accessor<float, 2>();
+    auto dangle3_a = dangle3_.accessor<float, 2>();
+    auto ml_intern_a = ml_intern_.accessor<float, 1>();
+
+    float e = 0.;
+    const auto type = ::pair[s[j]][s[i]];
+    if (s[j+1] >= 0 && s[i-1] >= 0)
+        e += mismatch_multi_a[type][s[j+1]][s[i-1]];
+    else if (s[j+1] >= 0)
+        e += dangle5_a[type][s[j+1]];
+    else if (s[i-1] >= 0)
+        e += dangle3_a[type][s[i-1]];
+    if (type > 2) 
+        e += terminalAU_a[0];
+    e += ml_intern_a[0];
+
+    return -e / 100.;
 }
 
-auto
+
+template <typename R>
+R
 MFETorch::
-external_zero(const SeqType& seq) -> ScoreType
+multi_unpaired(const SeqType& s, size_t i)
 {
-    return torch::zeros({}, torch::dtype(torch::kFloat)); 
+    return -::get_value<R>(ml_base_[0]) / 100.;
 }
 
-auto
+template
+torch::Tensor
 MFETorch::
-external_paired(const SeqType& s, size_t i, size_t j) -> ScoreType
+multi_unpaired(const SeqType& s, size_t i);
+
+template <>
+float
+MFETorch::
+multi_unpaired(const SeqType& s, size_t i)
 {
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto ml_base_a = ml_base_.accessor<float, 1>();
+    return -ml_base_a[0] / 100.;
+}
+
+template <typename R>
+R
+MFETorch::
+external_zero(const SeqType& seq)
+{
+    return ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat))); 
+}
+
+template
+torch::Tensor
+MFETorch::
+external_zero(const SeqType& seq);
+
+template <>
+float
+MFETorch::
+external_zero(const SeqType& seq)
+{
+    return 0.;
+}
+
+
+template <typename R>
+R
+MFETorch::
+external_paired(const SeqType& s, size_t i, size_t j)
+{
+    auto e = ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat)));
     const auto type = ::pair[s[i]][s[j]];
     if (s[i+1] >= 0 && s[j-1] >= 0)
-        e += mismatch_external_[type][s[i+1]][s[j-1]];
+        e += ::get_value<R>(mismatch_external_[type][s[i+1]][s[j-1]]);
     else if (s[i+1] >= 0)
-        e += dangle5_[type][s[i+1]];
+        e += ::get_value<R>(dangle5_[type][s[i+1]]);
     else if (s[j-1] >= 0)
-        e += dangle3_[type][s[j-1]];
+        e += ::get_value<R>(dangle3_[type][s[j-1]]);
     if (type > 2) 
-        e += terminalAU_[0];
+        e += ::get_value<R>(terminalAU_[0]);
     
     return -e / 100.;
 }
 
-auto
+template
+torch::Tensor
 MFETorch::
-external_unpaired(const SeqType& seq, size_t i) -> ScoreType
+external_paired(const SeqType& s, size_t i, size_t j);
+
+template <>
+float
+MFETorch::
+external_paired(const SeqType& s, size_t i, size_t j)
 {
-    return torch::zeros({}, torch::dtype(torch::kFloat));
+    auto mismatch_external_a = mismatch_external_.accessor<float, 3>();
+    auto dangle5_a = dangle5_.accessor<float, 2>();
+    auto dangle3_a = dangle3_.accessor<float, 2>();
+    auto terminalAU_a = terminalAU_.accessor<float, 1>();
+
+    float e = 0.;
+    const auto type = ::pair[s[i]][s[j]];
+    if (s[i+1] >= 0 && s[j-1] >= 0)
+        e += mismatch_external_a[type][s[i+1]][s[j-1]];
+    else if (s[i+1] >= 0)
+        e += dangle5_a[type][s[i+1]];
+    else if (s[j-1] >= 0)
+        e += dangle3_a[type][s[j-1]];
+    if (type > 2) 
+        e += terminalAU_a[0];
+    
+    return -e / 100.;
+}
+
+
+template <typename R>
+R
+MFETorch::
+external_unpaired(const SeqType& seq, size_t i)
+{
+    return ::get_value<R>(torch::zeros({}, torch::dtype(torch::kFloat)));
+}
+
+template
+torch::Tensor
+MFETorch::
+external_unpaired(const SeqType& seq, size_t i);
+
+template <>
+float
+MFETorch::
+external_unpaired(const SeqType& seq, size_t i)
+{
+    return 0.;
 }

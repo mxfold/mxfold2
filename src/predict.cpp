@@ -1,5 +1,5 @@
-//// test
 #include <string>
+#include <chrono>
 #include "argparse.hpp"
 #include "parameter.h"
 #include "fasta.h"
@@ -29,10 +29,19 @@ int main(int argc, char* argv[])
     }
 
     //std::cout << ap.get<int>("--max-bp") << std::endl;
-
     //auto param = std::make_unique<MaximizeBP<>>();
-    //auto param = std::make_unique<MFE<>>();
+
+#define USE_TORCH    
+#define USE_TORCH_FLOAT
+
+#ifdef USE_TORCH
+    torch::NoGradGuard no_grad;
     auto param = std::make_unique<MFETorch>();
+    param->eval();
+#else
+    auto param = std::make_unique<MFE>();
+#endif
+
 #if 0
     if (ap.get<std::string>("--param").empty())
         param->load_default();
@@ -41,18 +50,29 @@ int main(int argc, char* argv[])
 #else
     param->load_default();
     //torch::save(*param, "model.pt");
- #endif
+#endif
+
+#ifdef USE_TORCH_FLOAT
+    Fold<MFETorch, float> f(std::move(param));
+#else
     Fold f(std::move(param));
-    torch::NoGradGuard no_grad;
+#endif
 
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
 
     for (const auto& fa: fas) 
     {
+        auto start = std::chrono::system_clock::now();
         auto sc = f.compute_viterbi(fa.seq());
+#if defined(USE_TORCH) && ! defined(USE_TORCH_FLOAT)
         std::cout << sc.item<float>() << std::endl;
         //std::cout << sc << std::endl;
+#else
+        std::cout << sc << std::endl;
+#endif
         auto p = f.traceback_viterbi();
+        auto end = std::chrono::system_clock::now();
+        std::chrono::duration<double> dur = end-start;
         std::string s(p.size()-1, '.');
         for (size_t i=1; i!=p.size(); ++i)
         {
@@ -62,8 +82,7 @@ int main(int argc, char* argv[])
         }
         std::cout << fa.seq() << std::endl << 
                 s << std::endl;
-
-        //std::cout << nussinov(fa.seq()) << std::endl;
+        std::cout << dur.count() << std::endl;
     }
     return 0;
 }
