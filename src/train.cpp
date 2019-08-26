@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
     auto param = std::make_unique<MFETorch>();
     param->load_default();
     torch::optim::SGD optim(param->parameters(), lr);
-    Fold<MFETorch> f(std::move(param));
+    Fold<MFETorch, float> f(std::move(param) /*, 3, 100*/ );
 
     std::random_device seed_gen;
     std::mt19937 engine(seed_gen());
@@ -64,10 +64,13 @@ int main(int argc, char* argv[])
             auto seq = seqs[i].seq();
             auto stru = seqs[i].stru();
             optim.zero_grad();
-            // torch::NoGradGuard nograd;
-            auto pred = f.compute_viterbi(seq, Fold<MFETorch>::penalty(stru, -1.0, +1.0));
-            //auto p = f.traceback_viterbi();
-            auto ref = f.compute_viterbi(seq, Fold<MFETorch>::constraints(stru));
+            std::cout << seq << std::endl << stru << std::endl;
+
+            auto pred_score = f.compute_viterbi(seq, Fold<MFETorch, float>::penalty(stru, -1.0, +1.0));
+            auto pred = f.traceback_viterbi(seq);
+            
+            auto ref_score = f.compute_viterbi(seq, Fold<MFETorch, float>::constraints(stru));
+            auto ref = f.traceback_viterbi(seq);
             
             auto l1_reg = torch::zeros({}, torch::dtype(torch::kFloat));
             if (l1_weight > .0)
@@ -82,7 +85,7 @@ int main(int argc, char* argv[])
             auto loss = pred - ref + l1_weight * l1_reg + l2_weight * l2_reg;
             loss.backward();
             optim.step();
-            std::cout << loss.item<float>() << " " << pred.item<float>() << " " << ref.item<float>() << std::endl;
+            std::cout << loss.item<float>() << " " << pred_score << " " << ref_score << std::endl;
         }
     }
     
