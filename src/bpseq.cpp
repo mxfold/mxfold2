@@ -75,7 +75,7 @@ BPSEQ::
 stru() const
 {
   const auto L = bp_.size()-1;
-  std::string s(L, '.');
+  std::string s(L, 'x');
   for (auto i=1u; i!=bp_.size(); i++)
   {
     if (bp_[i] > 0 && i < bp_[i])

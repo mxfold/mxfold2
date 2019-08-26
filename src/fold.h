@@ -13,18 +13,38 @@ class Fold
         using ScoreType = S;
 
         struct options {
+            size_t min_hairpin;
+            size_t max_internal;
+            bool use_stru;
             std::string stru;
             bool use_penalty;
             std::string ref;
             float pos_penalty;
             float neg_penalty;
 
-            options() : use_penalty(false)
+            options() : 
+                min_hairpin(3),
+                max_internal(30),
+                use_penalty(false), 
+                use_stru(false)
             {    
+            }
+
+            options& min_hairpin_loop_length(size_t s)
+            {
+                this->min_hairpin = s;
+                return *this;
+            }
+
+            options& max_internal_loop_length(size_t s)
+            {
+                this->max_internal = s;
+                return *this;
             }
 
             options& constraints(const std::string& s)
             {
+                this->use_stru;
                 this->stru = s;
                 return *this;
             }
@@ -38,6 +58,16 @@ class Fold
                 return *this;
             }
         };
+
+        static options min_hairpin_loop_length(size_t s)
+        {
+            return options().min_hairpin_loop_length(s);
+        }
+
+        static options max_internal_loop_length(size_t s)
+        {
+            return options().max_internal_loop_length(s);
+        }
 
         static options constraints(const std::string& s)
         {
@@ -65,7 +95,7 @@ class Fold
         using VVT = std::vector<VT>;
 
     public:
-        Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length=3, size_t max_internal_loop_length=30);
+        Fold(std::unique_ptr<P>&& p);
         auto compute_viterbi(const std::string& seq, options opt = options()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
         auto traceback_viterbi(const std::string& seq) -> typename P::ScoreType;
@@ -80,7 +110,5 @@ class Fold
         VI Fv_;
         VVT Ct_, Mt_, M1t_;
         VT Ft_;
-        size_t min_hairpin_loop_length_;
-        size_t max_internal_loop_length_;
 };
 

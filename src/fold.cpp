@@ -49,6 +49,14 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
         stru = stru.substr(0, L);
     auto bp = parse_paren(stru);
 
+    if (canonical_only) // delete non-canonical base-pairs
+        for (auto i=L; i>=1; i--)
+            if (bp[i] > 0 && !::allow_paired(seq[i-1], seq[bp[i]-1]))
+            {
+                stru[i-1] = stru[bp[i]-1] = 'x';
+                bp[i] = bp[bp[i]] = 0;
+            }
+
     std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
     std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
     for (auto i=L; i>=1; i--)
@@ -107,10 +115,8 @@ torch::Tensor ZERO()
 
 template < typename P, typename S >
 Fold<P, S>::
-Fold(std::unique_ptr<P>&& p, size_t min_hairpin_loop_length, size_t max_internal_loop_length)
-    :   param(std::move(p)), 
-        min_hairpin_loop_length_(min_hairpin_loop_length),
-        max_internal_loop_length_(max_internal_loop_length)
+Fold(std::unique_ptr<P>&& p)
+    :   param(std::move(p))
 {
 
 }
@@ -160,7 +166,7 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
     M1t_.clear(); M1t_.resize(L+1, VT(L+1));
     Ft_.clear();  Ft_.resize(L+1);
 
-    const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, min_hairpin_loop_length_);
+    const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, opts.min_hairpin);
 
     std::vector<std::vector<float>> penalty(L+1, std::vector<float>(L+1, 0.0));
     if (opts.use_penalty)
@@ -180,12 +186,19 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
                 if (allow_unpaired[i+1][j-1])
                     update_max(Cv_[i][j], param->template hairpin<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
 
-                for (auto k=i+1; (k-1)-(i+1)+1<max_internal_loop_length_ && k<j; k++)
-                    if (allow_unpaired[i+1][k-1])
-                        for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<max_internal_loop_length_; l--)
-                            if (allow_paired[k][l] && allow_unpaired[l+1][j-1]) {
-                                update_max(Cv_[i][j], Cv_[k][l] + param->template single_loop<ScoreType>(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
-                            }
+                for (auto k=i+1; (k-1)-(i+1)+1<opts.max_internal && k<j; k++)
+                {
+                    if (!allow_unpaired[i+1][k-1]) break;
+                    for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<opts.max_internal; l--)
+                    {
+                        if (!allow_unpaired[l+1][j-1]) break;
+                        if (allow_paired[k][l])
+                        {
+                            update_max(Cv_[i][j], Cv_[k][l] + param->template single_loop<ScoreType>(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
+                        }
+                    }
+                }
+
                 for (auto u=i+1; u+1<=j-1; u++)
                     update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->template multi_loop<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
 
