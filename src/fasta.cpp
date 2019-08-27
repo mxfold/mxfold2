@@ -56,7 +56,8 @@ load(const char* file)
       continue;
     } 
 
-    if (std::strchr("()[].?xle ", line[0])==NULL) { // seq
+    //if (std::strchr("()[].?xle ", line[0])==NULL) { // seq
+    if (std::strchr("()[]<>|x.", line[0])==NULL) { // seq
       uint i;
       for (i=0; i!=line.size(); ++i)
         if (!isalpha(line[i])) break;
@@ -64,7 +65,8 @@ load(const char* file)
     } else {
       uint i;
       for (i=0; i!=line.size(); ++i)
-        if (std::strchr("()[].?xle ", line[i])==NULL) break;
+        //if (std::strchr("()[].?xle ", line[i])==NULL) break;
+        if (std::strchr("()[]<>|x.", line[i])==NULL) break;
       str+=line.substr(0, i);
     }
   }

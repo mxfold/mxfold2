@@ -21,8 +21,9 @@ int main(int argc, char* argv[])
         .default_value(3);
     ap.add_argument("--constraint")
         .help("constraint folding")
-        .default_value(""s);
-        
+        .default_value(false)
+        .implicit_value(true);
+
     try {
         ap.parse_args(argc, argv);
     } catch (std::runtime_error& err) {
@@ -61,19 +62,20 @@ int main(int argc, char* argv[])
 #endif
 
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
-    auto stru = ap.get<std::string>("--constraint");
+    auto use_constraint = ap.get<bool>("--constraint");
 
     for (const auto& fa: fas) 
     {
-        //auto start = std::chrono::system_clock::now();
-        auto opts = Fold<MFETorch, float>::constraints(stru);
+        auto start = std::chrono::system_clock::now();
+        auto opts = Fold<MFETorch, float>::options();
+        if (use_constraint) opts.constraints(fa.str());
         auto sc = f.compute_viterbi(fa.seq(), opts);
         std::cout << sc << std::endl;
         auto p = f.traceback_viterbi();
         auto sc2 = f.traceback_viterbi(fa.seq());
         //std::cout << sc2.item<float>() << std::endl;
-        //auto end = std::chrono::system_clock::now();
-        //std::chrono::duration<double> dur = end-start;
+        auto end = std::chrono::system_clock::now();
+        std::chrono::duration<double> dur = end-start;
         std::string s(p.size()-1, '.');
         for (size_t i=1; i!=p.size(); ++i)
         {
@@ -83,7 +85,7 @@ int main(int argc, char* argv[])
         }
         std::cout << fa.seq() << std::endl << 
                 s << std::endl;
-        //std::cout << dur.count() << std::endl;
+        std::cout << dur.count() << std::endl;
     }
     return 0;
 }

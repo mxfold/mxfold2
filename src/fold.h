@@ -82,7 +82,7 @@ class Fold
             C_HAIRPIN_LOOP, C_INTERNAL_LOOP, C_MULTI_LOOP,
             M_PAIRED, M_BIFURCATION, M_UNPAIRED,
             M1_PAIRED, M1_UNPAIRED,
-            F_ZERO, F_UNPAIRED, F_BIFURCATION, F_PAIRED
+            F_ZERO, F_UNPAIRED, F_BIFURCATION
         };
         using TB = std::tuple<TBType, std::variant<u_int32_t, std::pair<u_int8_t, u_int8_t>>>;
 

@@ -505,8 +505,8 @@ MFE::
 multi_loop(const SeqType& s, size_t i, size_t j) 
 {
     int e = 0;
-    const auto type = ::pair[s[i]][s[j]];
-    e += mismatch_multi_[type][s[i+1]][s[j-1]];
+    const auto type = ::pair[s[j]][s[i]];
+    e += mismatch_multi_[type][s[j-1]][s[i+1]];
     if (type > 2) 
         e += terminalAU_;
     e += ml_intern_;
@@ -526,13 +526,13 @@ multi_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
     int e = 0;
-    const auto type = ::pair[s[j]][s[i]];
+    const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_[type][s[j+1]][s[i-1]];
-    else if (j+1<=L)
-        e += dangle5_[type][s[j+1]];
+        e += mismatch_multi_[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle3_[type][s[i-1]];
+        e += dangle5_[type][s[i-1]];
+    else if (j+1<=L)
+        e += dangle3_[type][s[j+1]];
     if (type > 2) 
         e += terminalAU_;
     e += ml_intern_;
@@ -566,18 +566,18 @@ MFE::
 external_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
-    int e = 0;
-    const auto type = ::pair[s[j]][s[i]];
+    auto e = 0.;
+    const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_external_[type][s[j+1]][s[i-1]];
-    else if (j+1<=L)
-        e += dangle5_[type][s[j+1]];
+        e += mismatch_external_[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle3_[type][s[i-1]];
+        e += dangle5_[type][s[i-1]];
+    else if (j+1<=L)
+        e += dangle3_[type][s[j+1]];
     if (type > 2) 
         e += terminalAU_;
     
-    return e / -100.;
+    return -e / 100.;
 }
 
 template
@@ -963,8 +963,8 @@ MFETorch::
 multi_loop(const SeqType& s, size_t i, size_t j)
 {
     auto e = torch::zeros({}, torch::dtype(torch::kFloat));
-    const auto type = ::pair[s[i]][s[j]];
-    e += mismatch_multi_[type][s[i+1]][s[j-1]];
+    const auto type = ::pair[s[j]][s[i]];
+    e += mismatch_multi_[type][s[j-1]][s[i+1]];
     if (type > 2) 
         e += terminalAU_[0];
     e += ml_intern_[0];
@@ -979,8 +979,8 @@ MFETorch::
 multi_loop(const SeqType& s, size_t i, size_t j)
 {
     float e = 0.;
-    const auto type = ::pair[s[i]][s[j]];
-    e += mismatch_multi_a_[type][s[i+1]][s[j-1]];
+    const auto type = ::pair[s[j]][s[i]];
+    e += mismatch_multi_a_[type][s[j-1]][s[i+1]];
     if (type > 2) 
         e += terminalAU_a_[0];
     e += ml_intern_a_[0];
@@ -996,13 +996,13 @@ multi_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
     auto e = torch::zeros({}, torch::dtype(torch::kFloat));
-    const auto type = ::pair[s[j]][s[i]];
+    const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_[type][s[j+1]][s[i-1]];
-    else if (j+1<=L)
-        e += dangle5_[type][s[j+1]];
+        e += mismatch_multi_[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle3_[type][s[i-1]];
+        e += dangle5_[type][s[i-1]];
+    else if (j+1<=L)
+        e += dangle3_[type][s[j+1]];
     if (type > 2) 
         e += terminalAU_[0];
     e += ml_intern_[0];
@@ -1017,13 +1017,13 @@ multi_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
     float e = 0.;
-    const auto type = ::pair[s[j]][s[i]];
+    const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_a_[type][s[j+1]][s[i-1]];
-    else if (j+1<=L)
-        e += dangle5_a_[type][s[j+1]];
+        e += mismatch_multi_a_[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle3_a_[type][s[i-1]];
+        e += dangle5_a_[type][s[i-1]];
+    else if (j+1<=L)
+        e += dangle3_a_[type][s[j+1]];
     if (type > 2) 
         e += terminalAU_a_[0];
     e += ml_intern_a_[0];
@@ -1070,13 +1070,13 @@ external_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
     auto e = torch::zeros({}, torch::dtype(torch::kFloat));
-    const auto type = ::pair[s[j]][s[i]];
+    const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_external_[type][s[j+1]][s[i-1]];
-    else if (j+1<=L)
-        e += dangle5_[type][s[j+1]];
+        e += mismatch_external_[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle3_[type][s[i-1]];
+        e += dangle5_[type][s[i-1]];
+    else if (j+1<=L)
+        e += dangle3_[type][s[j+1]];
     if (type > 2) 
         e += terminalAU_[0];
     
@@ -1090,13 +1090,13 @@ external_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
     float e = 0.;
-    const auto type = ::pair[s[j]][s[i]];
+    const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_external_a_[type][s[j+1]][s[i-1]];
-    else if (j+1<=L)
-        e += dangle5_a_[type][s[j+1]];
+        e += mismatch_external_a_[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle3_a_[type][s[i-1]];
+        e += dangle5_a_[type][s[i-1]];
+    else if (j+1<=L)
+        e += dangle3_a_[type][s[j+1]];
     if (type > 2) 
         e += terminalAU_a_[0];
     
