@@ -72,16 +72,16 @@ save(const char* fname) const
 
 std::string
 BPSEQ::
-stru() const
+stru(char unpaired, const char* paired) const
 {
   const auto L = bp_.size()-1;
-  std::string s(L, 'x');
+  std::string s(L, unpaired);
   for (auto i=1u; i!=bp_.size(); i++)
   {
     if (bp_[i] > 0 && i < bp_[i])
     {
-      s[i-1] = '(';
-      s[bp_[i]-1] = ')';
+      s[i-1] = paired[0];
+      s[bp_[i]-1] = paired[1];
     }
   }
   return s;

@@ -3,6 +3,8 @@
 #include <limits>
 #include <queue>
 #include <stack>
+#include <list>
+#include <cassert>
 #include <torch/torch.h>
 #include "fold.h"
 #include "parameter.h"
@@ -201,22 +203,16 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
 
                 for (auto u=i+1; u+1<=j-1; u++)
                     update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->template multi_loop<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
-
             }
 
             /////////////////
-            if (allow_paired[i][j])
-                update_max(Mv_[i][j], Cv_[i][j] + param->template multi_paired<ScoreType>(seq2, i, j) + penalty[i][j], Mt_[i][j], TBType::M_PAIRED, i);
-
-            ScoreType t = ::ZERO<ScoreType>();
-            for (auto u=i; u+1<j; u++)
+            for (auto u=i; u<j; u++)
             {
-                if (!allow_unpaired[u][u]) break;
-                t += param->template multi_unpaired<ScoreType>(seq2, u);
-                if (allow_paired[u+1][j])
+                if (allow_unpaired[i][u-1] && allow_paired[u][j]) 
                 {
-                    auto s = param->template multi_paired<ScoreType>(seq2, u+1, j) + t;
-                    update_max(Mv_[i][j], Cv_[u+1][j] + s + penalty[u+1][j], Mt_[i][j], TBType::M_PAIRED, u+1);
+                    auto t = param->template multi_unpaired<ScoreType>(seq2, u-1) * (u-i);
+                    auto s = param->template multi_paired<ScoreType>(seq2, u, j);
+                    update_max(Mv_[i][j], Cv_[u][j] + s + t + penalty[u][j], Mt_[i][j], TBType::M_PAIRED, u);
                 }
             }
 
@@ -378,6 +374,7 @@ traceback_viterbi(const std::string& seq) -> typename P::ScoreType
         {
             case TBType::C_HAIRPIN_LOOP: {
                 e += param->template hairpin<typename P::ScoreType>(seq2, i, j);
+                //std::cout << "hairpin: " << i << ", " << j << ", " << param->template hairpin<typename P::ScoreType>(seq2, i, j).template item<float>() << std::endl;
                 break;
             }
             case TBType::C_INTERNAL_LOOP: {
@@ -386,6 +383,7 @@ traceback_viterbi(const std::string& seq) -> typename P::ScoreType
                 const auto l = j-q;
                 assert(k < l);
                 e += param->template single_loop<typename P::ScoreType>(seq2, i, j, k, l);
+                //std::cout << "single_loop: " << i << ", " << j << ", " << k << ", " << l << ", " << param->template single_loop<typename P::ScoreType>(seq2, i, j, k, l).template item<float>() << std::endl;
                 tb_queue.emplace(Ct_[k][l], k, l);
                 break;
             }
@@ -432,18 +430,21 @@ traceback_viterbi(const std::string& seq) -> typename P::ScoreType
             }
             case TBType::F_UNPAIRED: {
                 e += param->template external_unpaired<typename P::ScoreType>(seq2, i);
+                //std::cout << "ext_unpaired: " << i << ", " << j << ", " << param->template external_unpaired<typename P::ScoreType>(seq2, i).template item<float>() << std::endl;
                 tb_queue.emplace(Ft_[i+1], i+1, j);
                 break;
             }
             case TBType::F_BIFURCATION: {
                 const auto k = std::get<0>(kl);
                 e += param->template external_paired<typename P::ScoreType>(seq2, i, k);
+                //std::cout << "ext_buf: " << i << ", " << j << ", " << k << ", " << param->template external_paired<typename P::ScoreType>(seq2, i, k).template item<float>() << std::endl;
                 tb_queue.emplace(Ct_[i][k], i, k);
                 tb_queue.emplace(Ft_[k+1], k+1, j);
                 break;
             }
             case TBType::F_PAIRED: {
                 e += param->template external_paired<typename P::ScoreType>(seq2, i, j);
+                //std::cout << "ext_paired: " << i << ", " << j << ", " << param->template external_paired<typename P::ScoreType>(seq2, i, j).template item<float>() << std::endl;
                 tb_queue.emplace(Ct_[i][j], i, j);
                 break;
             }
@@ -457,9 +458,9 @@ traceback_viterbi(const std::string& seq) -> typename P::ScoreType
 #include <torch/torch.h>
 #include "parameter.h"
 
-template class Fold<MFETorch>;
+// template class Fold<MFETorch>;
 template class Fold<MFETorch, float>;
-template class Fold<MFE>;
+//template class Fold<MFE>;
 
 
 #if 0

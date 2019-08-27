@@ -15,7 +15,6 @@ class Fold
         struct options {
             size_t min_hairpin;
             size_t max_internal;
-            bool use_stru;
             std::string stru;
             bool use_penalty;
             std::string ref;
@@ -25,8 +24,7 @@ class Fold
             options() : 
                 min_hairpin(3),
                 max_internal(30),
-                use_penalty(false), 
-                use_stru(false)
+                use_penalty(false)
             {    
             }
 
@@ -44,7 +42,6 @@ class Fold
 
             options& constraints(const std::string& s)
             {
-                this->use_stru;
                 this->stru = s;
                 return *this;
             }

@@ -19,6 +19,9 @@ int main(int argc, char* argv[])
         .help("maximum distance of base pairs")
         .action([](const auto& v) { return std::stoi(v); })
         .default_value(3);
+    ap.add_argument("--constraint")
+        .help("constraint folding")
+        .default_value(""s);
         
     try {
         ap.parse_args(argc, argv);
@@ -32,7 +35,6 @@ int main(int argc, char* argv[])
     //auto param = std::make_unique<MaximizeBP<>>();
 
 #define USE_TORCH    
-#define USE_TORCH_FLOAT
 
 #ifdef USE_TORCH
     torch::NoGradGuard no_grad;
@@ -52,29 +54,26 @@ int main(int argc, char* argv[])
     //torch::save(*param, "model.pt");
 #endif
 
-#ifdef USE_TORCH_FLOAT
+#ifdef USE_TORCH
     Fold<MFETorch, float> f(std::move(param));
 #else
     Fold f(std::move(param));
 #endif
 
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
+    auto stru = ap.get<std::string>("--constraint");
 
     for (const auto& fa: fas) 
     {
-        auto start = std::chrono::system_clock::now();
-        auto sc = f.compute_viterbi(fa.seq());
-#if defined(USE_TORCH) && ! defined(USE_TORCH_FLOAT)
-        std::cout << sc.item<float>() << std::endl;
-        //std::cout << sc << std::endl;
-#else
+        //auto start = std::chrono::system_clock::now();
+        auto opts = Fold<MFETorch, float>::constraints(stru);
+        auto sc = f.compute_viterbi(fa.seq(), opts);
         std::cout << sc << std::endl;
-#endif
         auto p = f.traceback_viterbi();
         auto sc2 = f.traceback_viterbi(fa.seq());
         //std::cout << sc2.item<float>() << std::endl;
-        auto end = std::chrono::system_clock::now();
-        std::chrono::duration<double> dur = end-start;
+        //auto end = std::chrono::system_clock::now();
+        //std::chrono::duration<double> dur = end-start;
         std::string s(p.size()-1, '.');
         for (size_t i=1; i!=p.size(); ++i)
         {

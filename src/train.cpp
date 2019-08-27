@@ -62,7 +62,7 @@ int main(int argc, char* argv[])
         for (auto i: idx)
         {
             auto seq = seqs[i].seq();
-            auto stru = seqs[i].stru();
+            auto stru = seqs[i].stru('x');
             optim.zero_grad();
             //std::cout << seq << std::endl << stru << std::endl;
 
