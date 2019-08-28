@@ -132,7 +132,8 @@ bool
 Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    if (::compare(max_v, new_v) < 0)
+    static const auto NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
+    if (::compare(max_v, new_v) < 0 && NEG_INF2 < new_v)
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -146,7 +147,8 @@ bool
 Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    if (::compare(max_v, new_v) < 0)
+    static const auto NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
+    if (::compare(max_v, new_v) < 0 && NEG_INF2 < new_v)
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -183,36 +185,48 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
                 penalty[i][j] = bp[i] == j ? opts.pos_penalty : opts.neg_penalty;
     }
 
+    std::vector<std::vector<u_int32_t>> split_point_c_l(L+1);
+    std::vector<std::vector<u_int32_t>> split_point_c_r(L+1);
+    std::vector<std::vector<u_int32_t>> split_point_m1_l(L+1);
+
     for (auto i=L; i>=1; i--)
     {
         for (auto j=i+1; j<=L; j++)
         {
             if (allow_paired[i][j])
             {
+                bool suc = false;
                 if (allow_unpaired[i+1][j-1])
-                    update_max(Cv_[i][j], param->template hairpin<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                    suc |= update_max(Cv_[i][j], param->template hairpin<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
 
-                for (auto k=i+1; (k-1)-(i+1)+1<opts.max_internal && k<j; k++)
+                for (auto k=i+1; k<j && (k-1)-(i+1)+1<opts.max_internal; k++)
                 {
                     if (!allow_unpaired[i+1][k-1]) break;
                     for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<opts.max_internal; l--)
                     {
                         if (!allow_unpaired[l+1][j-1]) break;
                         if (allow_paired[k][l])
-                        {
-                            update_max(Cv_[i][j], Cv_[k][l] + param->template single_loop<ScoreType>(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
-                        }
+                            suc |= update_max(Cv_[i][j], Cv_[k][l] + param->template single_loop<ScoreType>(seq2, i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
                     }
                 }
 
-                for (auto u=i+1; u+1<=j-1; u++)
-                    update_max(Cv_[i][j], Mv_[i+1][u]+M1v_[u+1][j-1] + param->template multi_loop<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
+                //for (auto u=i+2; u<=j-1; u++)
+                for (auto u: split_point_m1_l[j-1])
+                    if (i+1<=u-1)
+                        suc |= update_max(Cv_[i][j], Mv_[i+1][u-1]+M1v_[u][j-1] + param->template multi_loop<ScoreType>(seq2, i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
+            
+                if (suc)
+                {
+                    split_point_c_l[j].push_back(i);
+                    split_point_c_r[i].push_back(j);
+                }
             }
 
             /////////////////
-            for (auto u=i; u<j; u++)
+            //for (auto u=i; u<j; u++)
+            for (auto u: split_point_c_l[j])
             {
-                if (allow_unpaired[i][u-1] && allow_paired[u][j]) 
+                if (allow_unpaired[i][u-1] /*&& allow_paired[u][j]*/) 
                 {
                     auto t = param->template multi_unpaired<ScoreType>(seq2, u-1) * (u-i);
                     auto s = param->template multi_paired<ScoreType>(seq2, u, j);
@@ -220,19 +234,23 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
                 }
             }
 
-            for (auto u=i; u+1<=j; u++)
-                if (allow_paired[u+1][j])
-                    update_max(Mv_[i][j], Mv_[i][u]+Cv_[u+1][j] + param->template multi_paired<ScoreType>(seq2, u+1, j) + penalty[u+1][j], Mt_[i][j], TBType::M_BIFURCATION, u);
+            //for (auto u=i+1; u<=j; u++)
+            for (auto u: split_point_c_l[j])
+                //if (allow_paired[u][j])
+                    update_max(Mv_[i][j], Mv_[i][u-1]+Cv_[u][j] + param->template multi_paired<ScoreType>(seq2, u, j) + penalty[u][j], Mt_[i][j], TBType::M_BIFURCATION, u);
 
             if (allow_unpaired[j][j])
                 update_max(Mv_[i][j], Mv_[i][j-1] + param->template multi_unpaired<ScoreType>(seq2, j), Mt_[i][j], TBType::M_UNPAIRED);
 
             /////////////////
+            bool suc = false;
             if (allow_paired[i][j])
-                update_max(M1v_[i][j], Cv_[i][j] + param->template multi_paired<ScoreType>(seq2, i, j) + penalty[i][j], M1t_[i][j], TBType::M1_PAIRED);
+                suc |= update_max(M1v_[i][j], Cv_[i][j] + param->template multi_paired<ScoreType>(seq2, i, j) + penalty[i][j], M1t_[i][j], TBType::M1_PAIRED);
 
             if (allow_unpaired[j][j])
-                update_max(M1v_[i][j], M1v_[i][j-1] + param->template multi_unpaired<ScoreType>(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
+                suc |= update_max(M1v_[i][j], M1v_[i][j-1] + param->template multi_unpaired<ScoreType>(seq2, j), M1t_[i][j], TBType::M1_UNPAIRED);
+
+            if (suc) split_point_m1_l[j].push_back(i);
         }
     }
 
@@ -243,8 +261,9 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
         if (allow_unpaired[i][i])
             update_max(Fv_[i], Fv_[i+1] + param->template external_unpaired<ScoreType>(seq2, i), Ft_[i], TBType::F_UNPAIRED);
 
-        for (auto k=i+1; k<=L; k++)
-            if (allow_paired[i][k])
+        //for (auto k=i+1; k<=L; k++)
+        for (auto k: split_point_c_r[i])
+            //if (allow_paired[i][k])
                 update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->template external_paired<ScoreType>(seq2, i, k) + penalty[i][k], Ft_[i], TBType::F_BIFURCATION, k);
     }
 
@@ -285,9 +304,9 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }
             case TBType::C_MULTI_LOOP: {
-                const auto k = std::get<0>(kl);
-                tb_queue.emplace(Mt_[i+1][k], i+1, k);
-                tb_queue.emplace(M1t_[k+1][j-1], k+1, j-1);
+                const auto u = std::get<0>(kl);
+                tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
+                tb_queue.emplace(M1t_[u][j-1], u, j-1);
                 break;
             }
             case TBType::M_PAIRED: {
@@ -300,13 +319,13 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }
             case TBType::M_BIFURCATION: {
-                const auto k = std::get<0>(kl);
-                assert(pair[k+1] == 0);
+                const auto u = std::get<0>(kl);
+                assert(pair[u] == 0);
                 assert(pair[j] == 0);
-                pair[k+1] = j;
-                pair[j] = k+1;
-                tb_queue.emplace(Mt_[i][k], i, k);
-                tb_queue.emplace(Ct_[k+1][j], k+1, j);
+                pair[u] = j;
+                pair[j] = u;
+                tb_queue.emplace(Mt_[i][u-1], i, u-1);
+                tb_queue.emplace(Ct_[u][j], u, j);
                 break;
             }
             case TBType::M_UNPAIRED: {
@@ -389,14 +408,14 @@ traceback_viterbi(const std::string& seq) -> typename P::ScoreType
                 break;
             }
             case TBType::C_MULTI_LOOP: {
-                const auto k = std::get<0>(kl);
+                const auto u = std::get<0>(kl);
                 e += param->template multi_loop<typename P::ScoreType>(seq2, i, j);
 #if 0
                 std::cout << "C_MULTI_LOOP: " << i << ", " << j << ", " << k << ", "
                     << param->template multi_loop<typename P::ScoreType>(seq2, i, j).template item<float>() << std::endl;
 #endif
-                tb_queue.emplace(Mt_[i+1][k], i+1, k);
-                tb_queue.emplace(M1t_[k+1][j-1], k+1, j-1);
+                tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
+                tb_queue.emplace(M1t_[u][j-1], u, j-1);
                 break;
             }
             case TBType::M_PAIRED: {
@@ -413,14 +432,14 @@ traceback_viterbi(const std::string& seq) -> typename P::ScoreType
                 break;
             }
             case TBType::M_BIFURCATION: {
-                const auto k = std::get<0>(kl);
-                e += param->template multi_paired<typename P::ScoreType>(seq2, k+1, j);
+                const auto u = std::get<0>(kl);
+                e += param->template multi_paired<typename P::ScoreType>(seq2, u, j);
 #if 0
                 std::cout << "M_BIRURCATION: " << i << ", " << j << ", " << k << ", "
                     << param->template multi_paired<typename P::ScoreType>(seq2, k+1, j).template item<float>() << std::endl;
 #endif
-                tb_queue.emplace(Mt_[i][k], i, k);
-                tb_queue.emplace(Ct_[k+1][j], k+1, j);
+                tb_queue.emplace(Mt_[i][u-1], i, u-1);
+                tb_queue.emplace(Ct_[u][j], u, j);
                 break;
             }
             case TBType::M_UNPAIRED: {
