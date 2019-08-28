@@ -50,7 +50,8 @@ int main(int argc, char* argv[])
     
     auto param = std::make_unique<MFETorch>();
     param->load_default();
-    torch::optim::SGD optim(param->parameters(), lr);
+    //torch::optim::SGD optim(param->parameters(), lr);
+    torch::optim::Adam optim(param->parameters(), torch::optim::AdamOptions(lr));
     Fold<MFETorch, float> f(std::move(param) /*, 3, 100*/);
 
     //std::random_device seed_gen;
@@ -68,19 +69,11 @@ int main(int argc, char* argv[])
             //std::cout << seq << std::endl << stru << std::endl;
 
             auto pred_opts = Fold<MFETorch, float>::penalty(stru, -1.0, +1.0);
-            float pred_score;
-            {
-                torch::NoGradGuard no_grad;
-                pred_score = f.compute_viterbi(seq, pred_opts);
-            }
+            auto pred_score = f.compute_viterbi(seq, pred_opts);
             auto pred = f.traceback_viterbi(seq, pred_opts);
             std::cout << seq << std::endl << stru << std::endl;
 
-            float ref_score;
-            {
-                torch::NoGradGuard no_grad;
-                ref_score = f.compute_viterbi(seq, Fold<MFETorch, float>::constraints(stru).max_internal_loop_length(seq.size()));
-            }
+            float ref_score = f.compute_viterbi(seq, Fold<MFETorch, float>::constraints(stru).max_internal_loop_length(seq.size()));
             auto ref = f.traceback_viterbi(seq);
             
             auto l1_reg = torch::zeros({}, torch::dtype(torch::kFloat));

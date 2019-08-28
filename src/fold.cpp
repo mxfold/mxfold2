@@ -147,7 +147,7 @@ Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
     static const auto NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
-    if (::compare(max_v, new_v) < 0 && NEG_INF2 < new_v)
+    if (::compare(max_v, new_v) < 0 /* && ::compare(NEG_INF2, new_v) < 0*/)
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -162,7 +162,7 @@ Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
     static const auto NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
-    if (::compare(max_v, new_v) < 0 && NEG_INF2 < new_v)
+    if (::compare(max_v, new_v) < 0 /*&& ::compare(NEG_INF2, new_v) < 0*/)
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -232,9 +232,9 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
             //for (auto u=i; u<j; u++)
             for (auto u: split_point_c_l[j])
             {
-                if (allow_unpaired[i][u-1] /*&& allow_paired[u][j]*/) 
+                if (i<=u && allow_unpaired[i][u-1] /*&& allow_paired[u][j]*/) 
                 {
-                    auto t = param->template multi_unpaired<ScoreType>(seq2, u-1) * (u-i);
+                    auto t = param->template multi_unpaired<ScoreType>(seq2, u-1) * static_cast<float>(u-i);
                     auto s = param->template multi_paired<ScoreType>(seq2, u, j);
                     update_max(Mv_[i][j], Cv_[u][j] + s + t + penalty[u][j], Mt_[i][j], TBType::M_PAIRED, u);
                 }
@@ -242,7 +242,7 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
 
             //for (auto u=i+1; u<=j; u++)
             for (auto u: split_point_c_l[j])
-                //if (allow_paired[u][j])
+                if (i<u /*&& allow_paired[u][j]*/)
                     update_max(Mv_[i][j], Mv_[i][u-1]+Cv_[u][j] + param->template multi_paired<ScoreType>(seq2, u, j) + penalty[u][j], Mt_[i][j], TBType::M_BIFURCATION, u);
 
             if (allow_unpaired[j][j])
@@ -269,7 +269,7 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
 
         //for (auto k=i+1; k<=L; k++)
         for (auto k: split_point_c_r[i])
-            //if (allow_paired[i][k])
+            if (i<k /*&& allow_paired[i][k]*/)
                 update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param->template external_paired<ScoreType>(seq2, i, k) + penalty[i][k], Ft_[i], TBType::F_BIFURCATION, k);
     }
 
@@ -514,7 +514,7 @@ traceback_viterbi(const std::string& seq, Fold<P, S>::options opts) -> typename 
 #include <torch/torch.h>
 #include "parameter.h"
 
-// template class Fold<MFETorch>;
+template class Fold<MFETorch>;
 template class Fold<MFETorch, float>;
 //template class Fold<MFE>;
 
