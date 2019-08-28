@@ -786,6 +786,30 @@ load_default()
     duplex_init_[0] = *values++; values++;
     terminalAU_[0] = *values++; values++;
 
+    stack_ /= -100.;
+    hairpin_ /= -100.;
+    bulge_ /= -100.;
+    internal_ /= -100.;
+    mismatch_external_ /= -100.;
+    mismatch_hairpin_ /= -100.;
+    mismatch_internal_ /= -100.;
+    mismatch_internal_1n_ /= -100.;
+    mismatch_internal_23_ /= -100.;
+    mismatch_multi_ /= -100.;
+    int11_ /= -100.;
+    int21_ /= -100.;
+    int22_ /= -100.;
+    dangle5_ /= -100.;
+    dangle3_ /= -100.;
+    ml_base_ /= -100.;
+    ml_closing_ /= -100.;
+    ml_intern_ /= -100.;
+    ninio_ /= -100.;
+    max_ninio_ /= -100.;
+    duplex_init_ /= -100.;
+    terminalAU_ /= -100.;
+    lxc_ /= -100.;
+
     return true;
 }
 
@@ -819,7 +843,7 @@ hairpin(const SeqType& s, size_t i, size_t j)
     else
         e += mismatch_hairpin_[type][s[i+1]][s[j-1]];
 
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -852,7 +876,7 @@ hairpin(const SeqType& s, size_t i, size_t j)
     else
         e += mismatch_hairpin_a_.value()[type][s[i+1]][s[j-1]];
 
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -891,7 +915,7 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     else if (ls==1) // 1xn loop
     {
         e += ll+1 <= 30 ? internal_[ll+1] : internal_[30] + lxc_[0] * log((ll+1) / 30.);
-        e += torch::min(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
+        e += torch::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
         e += mismatch_internal_1n_[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_[type2][s[l+1]][s[k-1]];
     }
     else if (ls==2 && ll==2) // 2x2 loop
@@ -904,10 +928,10 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     else // generic internal loop
     {
         e += ls+ll <= 30 ? internal_[ls+ll] : internal_[30] + lxc_[0] * log((ls+ll) / 30.);
-        e += torch::min(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
+        e += torch::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
         e += mismatch_internal_[type1][s[i+1]][s[j-1]] + mismatch_internal_[type2][s[l+1]][s[k-1]];
     }
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -946,7 +970,7 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     else if (ls==1) // 1xn loop
     {
         e += ll+1 <= 30 ? internal_a_.value()[ll+1] : internal_a_.value()[30] + lxc_a_.value()[0] * log((ll+1) / 30.);
-        e += std::min(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
+        e += std::max(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
         e += mismatch_internal_1n_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_a_.value()[type2][s[l+1]][s[k-1]];
     }
     else if (ls==2 && ll==2) // 2x2 loop
@@ -959,10 +983,10 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     else // generic internal loop
     {
         e += ls+ll <= 30 ? internal_a_.value()[ls+ll] : internal_a_.value()[30] + lxc_a_.value()[0] * log((ls+ll) / 30.);
-        e += std::min(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
+        e += std::max(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
         e += mismatch_internal_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_a_.value()[type2][s[l+1]][s[k-1]];
     }
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -978,7 +1002,7 @@ multi_loop(const SeqType& s, size_t i, size_t j)
     e += ml_intern_[0];
     e += ml_closing_[0];
 
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -994,7 +1018,7 @@ multi_loop(const SeqType& s, size_t i, size_t j)
     e += ml_intern_a_.value()[0];
     e += ml_closing_a_.value()[0];
 
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -1015,7 +1039,7 @@ multi_paired(const SeqType& s, size_t i, size_t j)
         e += terminalAU_[0];
     e += ml_intern_[0];
 
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -1036,7 +1060,7 @@ multi_paired(const SeqType& s, size_t i, size_t j)
         e += terminalAU_a_.value()[0];
     e += ml_intern_a_.value()[0];
 
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -1044,7 +1068,7 @@ torch::Tensor
 MFETorch::
 multi_unpaired(const SeqType& s, size_t i)
 {
-    return -ml_base_[0] / 100.;
+    return ml_base_[0];
 }
 
 template <>
@@ -1052,7 +1076,7 @@ float
 MFETorch::
 multi_unpaired(const SeqType& s, size_t i)
 {
-    return -ml_base_a_.value()[0] / 100.;
+    return ml_base_a_.value()[0];
 }
 
 template <>
@@ -1088,7 +1112,7 @@ external_paired(const SeqType& s, size_t i, size_t j)
     if (type > 2) 
         e += terminalAU_[0];
     
-    return -e / 100.;
+    return e;
 }
 
 template <>
@@ -1108,7 +1132,7 @@ external_paired(const SeqType& s, size_t i, size_t j)
     if (type > 2) 
         e += terminalAU_a_.value()[0];
     
-    return -e / 100.;
+    return e;
 }
 
 template <>

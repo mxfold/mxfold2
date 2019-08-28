@@ -146,8 +146,8 @@ bool
 Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    static const auto NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
-    if (::compare(max_v, new_v) < 0 /* && ::compare(NEG_INF2, new_v) < 0*/)
+    static const ScoreType NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
+    if (::compare(max_v, new_v) < 0 && ::compare(NEG_INF2, new_v) < 0)
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -161,8 +161,8 @@ bool
 Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    static const auto NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
-    if (::compare(max_v, new_v) < 0 /*&& ::compare(NEG_INF2, new_v) < 0*/)
+    static const ScoreType NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
+    if (::compare(max_v, new_v) < 0 && ::compare(NEG_INF2, new_v) < 0)
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -514,7 +514,7 @@ traceback_viterbi(const std::string& seq, Fold<P, S>::options opts) -> typename 
 #include <torch/torch.h>
 #include "parameter.h"
 
-template class Fold<MFETorch>;
+//template class Fold<MFETorch>;
 template class Fold<MFETorch, float>;
 //template class Fold<MFE>;
 
