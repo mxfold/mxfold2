@@ -3,12 +3,12 @@
 #include <limits>
 #include <queue>
 #include <stack>
-#include <list>
 #include <cassert>
 #include <torch/torch.h>
 #include "fold.h"
 #include "parameter.h"
 
+static
 bool allow_paired(char x, char y)
 {
     x = std::tolower(x);
@@ -18,6 +18,7 @@ bool allow_paired(char x, char y)
         (x=='g' && y=='u') || (x=='u' && y=='g');
 }
 
+static
 auto parse_paren(const std::string& paren)
 {
     std::vector<uint> bp(paren.size()+1, 0);
@@ -42,6 +43,7 @@ auto parse_paren(const std::string& paren)
     return bp;
 }
 
+static
 auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only=true)
 {
     const auto L = seq.size();
@@ -59,8 +61,10 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
                 bp[i] = bp[bp[i]] = 0;
             }
 
-    std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1));
-    std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1));
+    std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1, false));
+    std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1, false));
+    //TriMatrix<bool> allow_paired(L+1, false, -1);
+    //TriMatrix<bool> allow_unpaired(L+1, false, -1);
     for (auto i=L; i>=1; i--)
     {
         allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
@@ -159,18 +163,18 @@ compute_viterbi(const std::string& seq, Fold<P, S>::options opts) -> ScoreType
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
     const ScoreType NEG_INF = ::NEG_INF<ScoreType>();
-    Cv_.clear();  Cv_.resize(L+1, VI(L+1, NEG_INF));
-    Mv_.clear();  Mv_.resize(L+1, VI(L+1, NEG_INF));
-    M1v_.clear(); M1v_.resize(L+1, VI(L+1, NEG_INF));
+    Cv_.clear();  Cv_.resize(L+1, NEG_INF);
+    Mv_.clear();  Mv_.resize(L+1, NEG_INF);
+    M1v_.clear(); M1v_.resize(L+1, NEG_INF);
     Fv_.clear();  Fv_.resize(L+2, NEG_INF);
-    Ct_.clear();  Ct_.resize(L+1, VT(L+1));
-    Mt_.clear();  Mt_.resize(L+1, VT(L+1));
-    M1t_.clear(); M1t_.resize(L+1, VT(L+1));
+    Ct_.clear();  Ct_.resize(L+1);
+    Mt_.clear();  Mt_.resize(L+1);
+    M1t_.clear(); M1t_.resize(L+1);
     Ft_.clear();  Ft_.resize(L+2);
 
     const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, opts.min_hairpin);
 
-    std::vector<std::vector<float>> penalty(L+1, std::vector<float>(L+1, 0.0));
+    TriMatrix penalty(L+1, 0.0);
     if (opts.use_penalty)
     {
         auto bp = parse_paren(opts.ref);

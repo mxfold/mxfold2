@@ -5,6 +5,7 @@
 #include <tuple>
 #include <variant>
 #include <memory>
+#include "trimatrix.h"
 
 template < typename P, typename S = typename P::ScoreType >
 class Fold
@@ -86,11 +87,6 @@ class Fold
         };
         using TB = std::tuple<TBType, std::variant<u_int32_t, std::pair<u_int8_t, u_int8_t>>>;
 
-        using VI = std::vector<ScoreType>;
-        using VVI = std::vector<VI>;
-        using VT = std::vector<Fold::TB>;
-        using VVT = std::vector<VT>;
-
     public:
         Fold(std::unique_ptr<P>&& p);
         auto compute_viterbi(const std::string& seq, options opt = options()) -> ScoreType;
@@ -103,9 +99,9 @@ class Fold
 
     private:
         std::unique_ptr<P> param;
-        VVI Cv_, Mv_, M1v_; 
-        VI Fv_;
-        VVT Ct_, Mt_, M1t_;
-        VT Ft_;
+        TriMatrix<ScoreType> Cv_, Mv_, M1v_; 
+        std::vector<ScoreType> Fv_;
+        TriMatrix<Fold::TB> Ct_, Mt_, M1t_;
+        std::vector<Fold::TB> Ft_;
 };
 
