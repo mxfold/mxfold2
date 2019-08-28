@@ -613,38 +613,46 @@ MFETorch() :
     max_ninio_(register_parameter("max_ninio", torch::zeros({1}, torch::dtype(torch::kFloat)))),
     duplex_init_(register_parameter("duplex_init", torch::zeros({1}, torch::dtype(torch::kFloat)))),
     terminalAU_(register_parameter("terminalAU", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    lxc_(torch::full({1}, 107.856, torch::dtype(torch::kFloat))),
-    stack_a_(stack_.accessor<float, 2>()),
-    hairpin_a_(hairpin_.accessor<float, 1>()),
-    bulge_a_(bulge_.accessor<float, 1>()),
-    internal_a_(internal_.accessor<float, 1>()),
-    mismatch_external_a_(mismatch_external_.accessor<float, 3>()),
-    mismatch_hairpin_a_(mismatch_hairpin_.accessor<float, 3>()),
-    mismatch_internal_a_(mismatch_internal_.accessor<float, 3>()),
-    mismatch_internal_1n_a_(mismatch_internal_1n_.accessor<float, 3>()),
-    mismatch_internal_23_a_(mismatch_internal_23_.accessor<float, 3>()),
-    mismatch_multi_a_(mismatch_multi_.accessor<float, 3>()),
-    int11_a_(int11_.accessor<float, 4>()),
-    int21_a_(int21_.accessor<float, 5>()),
-    int22_a_(int22_.accessor<float, 6>()),
-    dangle5_a_(dangle5_.accessor<float, 2>()),
-    dangle3_a_(dangle3_.accessor<float, 2>()),
-    ml_base_a_(ml_base_.accessor<float, 1>()),
-    ml_closing_a_(ml_closing_.accessor<float, 1>()),
-    ml_intern_a_(ml_intern_.accessor<float, 1>()),
-    ninio_a_(ninio_.accessor<float, 1>()),
-    max_ninio_a_(max_ninio_.accessor<float, 1>()),
-    duplex_init_a_(duplex_init_.accessor<float, 1>()),
-    terminalAU_a_(terminalAU_.accessor<float, 1>()),
-    lxc_a_(lxc_.accessor<float, 1>())
+    lxc_(torch::full({1}, 107.856, torch::dtype(torch::kFloat)))
 {
 
+}
+
+void
+MFETorch::
+init_accessors()
+{
+    stack_a_ = stack_.accessor<float, 2>();
+    hairpin_a_ = hairpin_.accessor<float, 1>();
+    bulge_a_ = bulge_.accessor<float, 1>();
+    internal_a_ = internal_.accessor<float, 1>();
+    mismatch_external_a_ = mismatch_external_.accessor<float, 3>();
+    mismatch_hairpin_a_ = mismatch_hairpin_.accessor<float, 3>();
+    mismatch_internal_a_ = mismatch_internal_.accessor<float, 3>();
+    mismatch_internal_1n_a_ = mismatch_internal_1n_.accessor<float, 3>();
+    mismatch_internal_23_a_ = mismatch_internal_23_.accessor<float, 3>();
+    mismatch_multi_a_ = mismatch_multi_.accessor<float, 3>();
+    int11_a_ = int11_.accessor<float, 4>();
+    int21_a_ = int21_.accessor<float, 5>();
+    int22_a_ = int22_.accessor<float, 6>();
+    dangle5_a_ = dangle5_.accessor<float, 2>();
+    dangle3_a_ = dangle3_.accessor<float, 2>();
+    ml_base_a_ = ml_base_.accessor<float, 1>();
+    ml_closing_a_ = ml_closing_.accessor<float, 1>();
+    ml_intern_a_ = ml_intern_.accessor<float, 1>();
+    ninio_a_ = ninio_.accessor<float, 1>();
+    max_ninio_a_ = max_ninio_.accessor<float, 1>();
+    duplex_init_a_ = duplex_init_.accessor<float, 1>();
+    terminalAU_a_ = terminalAU_.accessor<float, 1>();
+    lxc_a_ = lxc_.accessor<float, 1>();
 }
 
 auto
 MFETorch::
 convert_sequence(const std::string& seq) -> SeqType
 {
+    init_accessors();
+
     const auto L = seq.size();
     SeqType converted_seq(L+2);
     ::convert_sequence(std::begin(seq), std::end(seq), &converted_seq[1]);
@@ -822,7 +830,7 @@ hairpin(const SeqType& s, size_t i, size_t j)
     const auto l = (j-1)-(i+1)+1;
     float e = 0.;
 
-    e += l<=30 ? hairpin_a_[l] : hairpin_a_[30] + lxc_a_[0] * log(l / 30.);
+    e += l<=30 ? hairpin_a_.value()[l] : hairpin_a_.value()[30] + lxc_a_.value()[0] * log(l / 30.);
 
     if (l < 3) return e;
 
@@ -839,10 +847,10 @@ hairpin(const SeqType& s, size_t i, size_t j)
     if (l == 3)
     {
         if (type > 2)
-            e += terminalAU_a_[0];
+            e += terminalAU_a_.value()[0];
     }
     else
-        e += mismatch_hairpin_a_[type][s[i+1]][s[j-1]];
+        e += mismatch_hairpin_a_.value()[type][s[i+1]][s[j-1]];
 
     return -e / 100.;
 }
@@ -915,44 +923,44 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     float e = 0.;
 
     if (ll==0) // stack
-        e += stack_a_[type1][type2];
+        e += stack_a_.value()[type1][type2];
     else if (ls==0) // bulge
     {
-        e += ll<=30 ? bulge_a_[ll] : bulge_a_[30] + lxc_a_[0] * log(ll / 30.);
+        e += ll<=30 ? bulge_a_.value()[ll] : bulge_a_.value()[30] + lxc_a_.value()[0] * log(ll / 30.);
         if (ll==1)
-            e += stack_a_[type1][type2];
+            e += stack_a_.value()[type1][type2];
         else
         {
             if (type1 > 2)
-                e += terminalAU_a_[0];
+                e += terminalAU_a_.value()[0];
             if (type2 > 2)
-                e += terminalAU_a_[0];
+                e += terminalAU_a_.value()[0];
         }
     }
     else if (ll==1 && ls==1) // 1x1 loop
-        e += int11_a_[type1][type2][s[i+1]][s[j-1]];
+        e += int11_a_.value()[type1][type2][s[i+1]][s[j-1]];
     else if (l1==2 && l2==1) // 2x1 loop
-        e += int21_a_[type2][type1][s[l+1]][s[i+1]][s[k-1]];
+        e += int21_a_.value()[type2][type1][s[l+1]][s[i+1]][s[k-1]];
     else if (l1==1 && l2==2) // 1x2 loop
-        e += int21_a_[type1][type2][s[i+1]][s[l+1]][s[j-1]];
+        e += int21_a_.value()[type1][type2][s[i+1]][s[l+1]][s[j-1]];
     else if (ls==1) // 1xn loop
     {
-        e += ll+1 <= 30 ? internal_a_[ll+1] : internal_a_[30] + lxc_a_[0] * log((ll+1) / 30.);
-        e += std::min(max_ninio_a_[0], (int)(ll-ls) * ninio_a_[0]);
-        e += mismatch_internal_1n_a_[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_a_[type2][s[l+1]][s[k-1]];
+        e += ll+1 <= 30 ? internal_a_.value()[ll+1] : internal_a_.value()[30] + lxc_a_.value()[0] * log((ll+1) / 30.);
+        e += std::min(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
+        e += mismatch_internal_1n_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_a_.value()[type2][s[l+1]][s[k-1]];
     }
     else if (ls==2 && ll==2) // 2x2 loop
-        e += int22_a_[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]];
+        e += int22_a_.value()[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]];
     else if (ls==2 && ll==3) // 2x3 loop
     {
-        e += internal_a_[ls+ll] + ninio_a_[0];
-        e += mismatch_internal_23_a_[type1][s[i+1]][s[j-1]] + mismatch_internal_23_a_[type2][s[l+1]][s[k-1]];
+        e += internal_a_.value()[ls+ll] + ninio_a_.value()[0];
+        e += mismatch_internal_23_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_23_a_.value()[type2][s[l+1]][s[k-1]];
     }
     else // generic internal loop
     {
-        e += ls+ll <= 30 ? internal_a_[ls+ll] : internal_a_[30] + lxc_a_[0] * log((ls+ll) / 30.);
-        e += std::min(max_ninio_a_[0], (int)(ll-ls) * ninio_a_[0]);
-        e += mismatch_internal_a_[type1][s[i+1]][s[j-1]] + mismatch_internal_a_[type2][s[l+1]][s[k-1]];
+        e += ls+ll <= 30 ? internal_a_.value()[ls+ll] : internal_a_.value()[30] + lxc_a_.value()[0] * log((ls+ll) / 30.);
+        e += std::min(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
+        e += mismatch_internal_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_a_.value()[type2][s[l+1]][s[k-1]];
     }
     return -e / 100.;
 }
@@ -980,11 +988,11 @@ multi_loop(const SeqType& s, size_t i, size_t j)
 {
     float e = 0.;
     const auto type = ::pair[s[j]][s[i]];
-    e += mismatch_multi_a_[type][s[j-1]][s[i+1]];
+    e += mismatch_multi_a_.value()[type][s[j-1]][s[i+1]];
     if (type > 2) 
-        e += terminalAU_a_[0];
-    e += ml_intern_a_[0];
-    e += ml_closing_a_[0];
+        e += terminalAU_a_.value()[0];
+    e += ml_intern_a_.value()[0];
+    e += ml_closing_a_.value()[0];
 
     return -e / 100.;
 }
@@ -1019,14 +1027,14 @@ multi_paired(const SeqType& s, size_t i, size_t j)
     float e = 0.;
     const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_a_[type][s[i-1]][s[j+1]];
+        e += mismatch_multi_a_.value()[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle5_a_[type][s[i-1]];
+        e += dangle5_a_.value()[type][s[i-1]];
     else if (j+1<=L)
-        e += dangle3_a_[type][s[j+1]];
+        e += dangle3_a_.value()[type][s[j+1]];
     if (type > 2) 
-        e += terminalAU_a_[0];
-    e += ml_intern_a_[0];
+        e += terminalAU_a_.value()[0];
+    e += ml_intern_a_.value()[0];
 
     return -e / 100.;
 }
@@ -1044,7 +1052,7 @@ float
 MFETorch::
 multi_unpaired(const SeqType& s, size_t i)
 {
-    return -ml_base_a_[0] / 100.;
+    return -ml_base_a_.value()[0] / 100.;
 }
 
 template <>
@@ -1092,13 +1100,13 @@ external_paired(const SeqType& s, size_t i, size_t j)
     float e = 0.;
     const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_external_a_[type][s[i-1]][s[j+1]];
+        e += mismatch_external_a_.value()[type][s[i-1]][s[j+1]];
     else if (i-1>=1)
-        e += dangle5_a_[type][s[i-1]];
+        e += dangle5_a_.value()[type][s[i-1]];
     else if (j+1<=L)
-        e += dangle3_a_[type][s[j+1]];
+        e += dangle3_a_.value()[type][s[j+1]];
     if (type > 2) 
-        e += terminalAU_a_[0];
+        e += terminalAU_a_.value()[0];
     
     return -e / 100.;
 }

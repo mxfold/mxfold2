@@ -68,12 +68,13 @@ int main(int argc, char* argv[])
     {
         auto start = std::chrono::system_clock::now();
         auto opts = Fold<MFETorch, float>::options();
-        if (use_constraint) opts.constraints(fa.str());
+        if (use_constraint)
+            opts.constraints(fa.str()).max_internal_loop_length(fa.seq().size());
         auto sc = f.compute_viterbi(fa.seq(), opts);
         std::cout << sc << std::endl;
         auto p = f.traceback_viterbi();
         auto sc2 = f.traceback_viterbi(fa.seq());
-        //std::cout << sc2.item<float>() << std::endl;
+        std::cout << sc2.item<float>() << std::endl;
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> dur = end-start;
         std::string s(p.size()-1, '.');

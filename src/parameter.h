@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <torch/torch.h>
 
 template <typename S = float>
@@ -92,6 +93,7 @@ struct MFETorch : public torch::nn::Module
     
     MFETorch();
     ~MFETorch() {}
+    void init_accessors();
     auto convert_sequence(const std::string& seq) -> SeqType;
     bool load_default();
 
@@ -129,28 +131,28 @@ struct MFETorch : public torch::nn::Module
     torch::Tensor terminalAU_;
     torch::Tensor lxc_;
 
-    torch::TensorAccessor<float, 2> stack_a_;
-    torch::TensorAccessor<float, 1> hairpin_a_;
-    torch::TensorAccessor<float, 1> bulge_a_;
-    torch::TensorAccessor<float, 1> internal_a_;
-    torch::TensorAccessor<float, 3> mismatch_external_a_;
-    torch::TensorAccessor<float, 3> mismatch_hairpin_a_;
-    torch::TensorAccessor<float, 3> mismatch_internal_a_;
-    torch::TensorAccessor<float, 3> mismatch_internal_1n_a_;
-    torch::TensorAccessor<float, 3> mismatch_internal_23_a_;
-    torch::TensorAccessor<float, 3> mismatch_multi_a_;
-    torch::TensorAccessor<float, 4> int11_a_;
-    torch::TensorAccessor<float, 5> int21_a_;
-    torch::TensorAccessor<float, 6> int22_a_;
-    torch::TensorAccessor<float, 2> dangle5_a_;
-    torch::TensorAccessor<float, 2> dangle3_a_;
-    torch::TensorAccessor<float, 1> ml_base_a_;
-    torch::TensorAccessor<float, 1> ml_closing_a_;
-    torch::TensorAccessor<float, 1> ml_intern_a_;
-    torch::TensorAccessor<float, 1> ninio_a_;
-    torch::TensorAccessor<float, 1> max_ninio_a_;
+    std::optional<torch::TensorAccessor<float, 2>> stack_a_;
+    std::optional<torch::TensorAccessor<float, 1>> hairpin_a_;
+    std::optional<torch::TensorAccessor<float, 1>> bulge_a_;
+    std::optional<torch::TensorAccessor<float, 1>> internal_a_;
+    std::optional<torch::TensorAccessor<float, 3>> mismatch_external_a_;
+    std::optional<torch::TensorAccessor<float, 3>> mismatch_hairpin_a_;
+    std::optional<torch::TensorAccessor<float, 3>> mismatch_internal_a_;
+    std::optional<torch::TensorAccessor<float, 3>> mismatch_internal_1n_a_;
+    std::optional<torch::TensorAccessor<float, 3>> mismatch_internal_23_a_;
+    std::optional<torch::TensorAccessor<float, 3>> mismatch_multi_a_;
+    std::optional<torch::TensorAccessor<float, 4>> int11_a_;
+    std::optional<torch::TensorAccessor<float, 5>> int21_a_;
+    std::optional<torch::TensorAccessor<float, 6>> int22_a_;
+    std::optional<torch::TensorAccessor<float, 2>> dangle5_a_;
+    std::optional<torch::TensorAccessor<float, 2>> dangle3_a_;
+    std::optional<torch::TensorAccessor<float, 1>> ml_base_a_;
+    std::optional<torch::TensorAccessor<float, 1>> ml_closing_a_;
+    std::optional<torch::TensorAccessor<float, 1>> ml_intern_a_;
+    std::optional<torch::TensorAccessor<float, 1>> ninio_a_;
+    std::optional<torch::TensorAccessor<float, 1>> max_ninio_a_;
     //std::map<SeqType, int> special_loops_;
-    torch::TensorAccessor<float, 1> duplex_init_a_;
-    torch::TensorAccessor<float, 1> terminalAU_a_;
-    torch::TensorAccessor<float, 1> lxc_a_;
+    std::optional<torch::TensorAccessor<float, 1>> duplex_init_a_;
+    std::optional<torch::TensorAccessor<float, 1>> terminalAU_a_;
+    std::optional<torch::TensorAccessor<float, 1>> lxc_a_;
 };

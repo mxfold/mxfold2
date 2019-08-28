@@ -42,6 +42,7 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    torch::manual_seed(0);
     auto seqs = BPSEQ::load_from_list(ap.get<std::string>("input_list").c_str());
     auto lr = ap.get<float>("--learning-rate");
     auto l1_weight = ap.get<float>("--l1-weight");
@@ -52,8 +53,8 @@ int main(int argc, char* argv[])
     torch::optim::SGD optim(param->parameters(), lr);
     Fold<MFETorch, float> f(std::move(param) /*, 3, 100*/);
 
-    std::random_device seed_gen;
-    std::mt19937 engine(seed_gen());
+    //std::random_device seed_gen;
+    std::mt19937 engine(0 /*seed_gen()*/);
     std::vector<size_t> idx(seqs.size());
     std::iota(idx.begin(), idx.end(), 0);
     for (auto epoch = 0; epoch != ap.get<int>("--max-epochs"); ++epoch)
@@ -66,10 +67,20 @@ int main(int argc, char* argv[])
             optim.zero_grad();
             //std::cout << seq << std::endl << stru << std::endl;
 
-            auto pred_score = f.compute_viterbi(seq, Fold<MFETorch, float>::penalty(stru, -1.0, +1.0));
-            auto pred = f.traceback_viterbi(seq);
-            
-            auto ref_score = f.compute_viterbi(seq, Fold<MFETorch, float>::constraints(stru).max_internal_loop_length(seq.size()));
+            auto pred_opts = Fold<MFETorch, float>::penalty(stru, -1.0, +1.0);
+            float pred_score;
+            {
+                torch::NoGradGuard no_grad;
+                pred_score = f.compute_viterbi(seq, pred_opts);
+            }
+            auto pred = f.traceback_viterbi(seq, pred_opts);
+            std::cout << seq << std::endl << stru << std::endl;
+
+            float ref_score;
+            {
+                torch::NoGradGuard no_grad;
+                ref_score = f.compute_viterbi(seq, Fold<MFETorch, float>::constraints(stru).max_internal_loop_length(seq.size()));
+            }
             auto ref = f.traceback_viterbi(seq);
             
             auto l1_reg = torch::zeros({}, torch::dtype(torch::kFloat));
@@ -85,7 +96,7 @@ int main(int argc, char* argv[])
             auto loss = pred - ref + l1_weight * l1_reg + l2_weight * l2_reg;
             loss.backward();
             optim.step();
-            std::cout << loss.item<float>() << " " << pred_score << " " << ref_score << std::endl;
+            std::cout << loss.item<float>() << " " << pred.item<float>() << " " << pred_score << " " << ref.item<float>() << " " << ref_score << std::endl;
         }
     }
     
