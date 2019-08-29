@@ -613,7 +613,7 @@ MFETorch() :
     max_ninio_(register_parameter("max_ninio", torch::zeros({1}, torch::dtype(torch::kFloat)))),
     duplex_init_(register_parameter("duplex_init", torch::zeros({1}, torch::dtype(torch::kFloat)))),
     terminalAU_(register_parameter("terminalAU", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    lxc_(torch::full({1}, 107.856, torch::dtype(torch::kFloat)))
+    lxc_(register_parameter("lxc", torch::full({1}, 107.856, torch::dtype(torch::kFloat))))
 {
 
 }
@@ -1149,4 +1149,50 @@ MFETorch::
 external_unpaired(const SeqType& seq, size_t i)
 {
     return 0.;
+}
+
+bool is_empty(at::Tensor x)
+{
+    if (x.defined() && x.dim() > 0 && x.size(0) != 0 && x.numel() > 0)
+        return false;
+    else
+        return true;
+}
+
+bool
+MFETorch::
+save_state_dict(const char* filename) const
+{
+    auto cu = std::make_shared<torch::jit::script::CompilationUnit>();
+    torch::serialize::OutputArchive archive(cu);
+    auto params = this->named_parameters(true /*recurse*/);
+    auto buffers = this->named_buffers(true /*recurse*/);
+    for (const auto& val : params) {
+        if (!is_empty(val.value())) {
+            archive.write(val.key(), val.value());
+        }
+    }  
+    for (const auto& val : buffers) {
+        if (!is_empty(val.value())) {
+            archive.write(val.key(), val.value(), /*is_buffer*/ true);
+        }
+    }
+    archive.save_to(filename);
+}
+
+bool
+MFETorch::
+load_state_dict(const char* filename)
+{
+    torch::serialize::InputArchive archive;
+    archive.load_from(filename);
+    torch::NoGradGuard no_grad;
+    auto params = this->named_parameters(true /*recurse*/);
+    auto buffers = this->named_buffers(true /*recurse*/);
+    for (auto& val : params) {
+        archive.read(val.key(), val.value());
+    }
+    for (auto& val : buffers) {
+        archive.read(val.key(), val.value(), /*is_buffer*/ true);
+    }
 }

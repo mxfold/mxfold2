@@ -7,75 +7,79 @@
 #include <memory>
 #include "trimatrix.h"
 
+struct FoldOptions {
+    size_t min_hairpin;
+    size_t max_internal;
+    std::string stru;
+    bool use_penalty;
+    std::string ref;
+    float pos_penalty;
+    float neg_penalty;
+
+    FoldOptions() : 
+        min_hairpin(3),
+        max_internal(30),
+        use_penalty(false)
+    {    
+    }
+
+    FoldOptions& min_hairpin_loop_length(size_t s)
+    {
+        this->min_hairpin = s;
+        return *this;
+    }
+
+    FoldOptions& max_internal_loop_length(size_t s)
+    {
+        this->max_internal = s;
+        return *this;
+    }
+
+    FoldOptions& constraints(const std::string& s)
+    {
+        this->stru = s;
+        return *this;
+    }
+
+    FoldOptions& penalty(const std::string& ref, float pos_penalty, float neg_penalty)
+    {
+        this->use_penalty = true;
+        this->ref = ref;
+        this->pos_penalty = pos_penalty;
+        this->neg_penalty = neg_penalty;
+        return *this;
+    }
+#if 0
+    static FoldOptions min_hairpin_loop_length(size_t s)
+    {
+        return FoldOptions().min_hairpin_loop_length(s);
+    }
+
+    static FoldOptions max_internal_loop_length(size_t s)
+    {
+        return FoldOtions().max_internal_loop_length(s);
+    }
+
+    static FoldOptions constraints(const std::string& s)
+    {
+        return FoldOptions().constraints(s);
+    }
+
+    static FoldOptions penalty(const std::string& ref, float pos_penalty, float neg_penalty)
+    {
+        return FoldOptions().penalty(ref, pos_penalty, neg_penalty);
+    }
+#endif
+};
+
+
+
 template < typename P, typename S = typename P::ScoreType >
 class Fold
 {
     public:
         using ScoreType = S;
 
-        struct options {
-            size_t min_hairpin;
-            size_t max_internal;
-            std::string stru;
-            bool use_penalty;
-            std::string ref;
-            float pos_penalty;
-            float neg_penalty;
-
-            options() : 
-                min_hairpin(3),
-                max_internal(30),
-                use_penalty(false)
-            {    
-            }
-
-            options& min_hairpin_loop_length(size_t s)
-            {
-                this->min_hairpin = s;
-                return *this;
-            }
-
-            options& max_internal_loop_length(size_t s)
-            {
-                this->max_internal = s;
-                return *this;
-            }
-
-            options& constraints(const std::string& s)
-            {
-                this->stru = s;
-                return *this;
-            }
-
-            options& penalty(const std::string& ref, float pos_penalty, float neg_penalty)
-            {
-                this->use_penalty = true;
-                this->ref = ref;
-                this->pos_penalty = pos_penalty;
-                this->neg_penalty = neg_penalty;
-                return *this;
-            }
-        };
-
-        static options min_hairpin_loop_length(size_t s)
-        {
-            return options().min_hairpin_loop_length(s);
-        }
-
-        static options max_internal_loop_length(size_t s)
-        {
-            return options().max_internal_loop_length(s);
-        }
-
-        static options constraints(const std::string& s)
-        {
-            return options().constraints(s);
-        }
-
-        static options penalty(const std::string& ref, float pos_penalty, float neg_penalty)
-        {
-            return options().penalty(ref, pos_penalty, neg_penalty);
-        }
 
     private:
         enum TBType
@@ -89,9 +93,10 @@ class Fold
 
     public:
         Fold(std::unique_ptr<P>&& p);
-        auto compute_viterbi(const std::string& seq, options opt = options()) -> ScoreType;
+        auto compute_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
-        auto traceback_viterbi(const std::string& seq, options opt = options()) -> typename P::ScoreType;
+        auto traceback_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> typename P::ScoreType;
+        const P& param_model() const { return *param; }
 
     private:
         bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k=0);

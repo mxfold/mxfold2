@@ -12,8 +12,8 @@ int main(int argc, char* argv[])
     argparse::ArgumentParser ap(argv[0]);
     ap.add_argument("input_fasta")
         .help("FASTA-formatted input file");
-    ap.add_argument("-p", "--param")
-        .help("Thermodynamic parameter file")
+    ap.add_argument("--model")
+        .help("model parameter file")
         .default_value(""s);
     ap.add_argument("--max-bp")
         .help("maximum distance of base pairs")
@@ -32,51 +32,32 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    //std::cout << ap.get<int>("--max-bp") << std::endl;
-    //auto param = std::make_unique<MaximizeBP<>>();
-
-#define USE_TORCH    
-
-#ifdef USE_TORCH
     torch::NoGradGuard no_grad;
     auto param = std::make_unique<MFETorch>();
     param->eval();
-#else
-    auto param = std::make_unique<MFE>();
-#endif
 
-#if 0
-    if (ap.get<std::string>("--param").empty())
+    if (ap.get("--model").empty())
         param->load_default();
     else
-        param->load(ap.get<std::string>("--param"));
-#else
-    param->load_default();
-    //torch::save(*param, "model.pt");
-#endif
+        param->load_state_dict(ap.get("--model").c_str());
 
-#ifdef USE_TORCH
     Fold<MFETorch, float> f(std::move(param));
-#else
-    Fold f(std::move(param));
-#endif
 
     auto fas = Fasta::load(ap.get<std::string>("input_fasta"));
     auto use_constraint = ap.get<bool>("--constraint");
 
     for (const auto& fa: fas) 
     {
-        auto start = std::chrono::system_clock::now();
-        auto opts = Fold<MFETorch, float>::options();
+        //auto start = std::chrono::system_clock::now();
+        auto opts = FoldOptions();
         if (use_constraint)
             opts.constraints(fa.str()).max_internal_loop_length(fa.seq().size());
         auto sc = f.compute_viterbi(fa.seq(), opts);
-        std::cout << sc << std::endl;
         auto p = f.traceback_viterbi();
-        auto sc2 = f.traceback_viterbi(fa.seq());
-        std::cout << sc2.item<float>() << std::endl;
-        auto end = std::chrono::system_clock::now();
-        std::chrono::duration<double> dur = end-start;
+        //auto end = std::chrono::system_clock::now();
+        //std::chrono::duration<double> dur = end-start;
+        //std::cout << dur.count() << std::endl;
+
         std::string s(p.size()-1, '.');
         for (size_t i=1; i!=p.size(); ++i)
         {
@@ -84,9 +65,10 @@ int main(int argc, char* argv[])
                 s[i-1] = p[i]>i ? '(' : ')';
             //std::cout << i << " " << fa.seq()[i-1] << " " << p[i] << std::endl;
         }
-        std::cout << fa.seq() << std::endl << 
-                s << std::endl;
-        std::cout << dur.count() << std::endl;
+
+        std::cout << ">" << fa.name() << std::endl
+            <<  fa.seq() << std::endl 
+            << s << " (" << sc << ")" <<std::endl;
     }
     return 0;
 }

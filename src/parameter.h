@@ -96,6 +96,8 @@ struct MFETorch : public torch::nn::Module
     void init_accessors();
     auto convert_sequence(const std::string& seq) -> SeqType;
     bool load_default();
+    bool save_state_dict(const char* filename) const;
+    bool load_state_dict(const char* filename);
 
     template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
     template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
