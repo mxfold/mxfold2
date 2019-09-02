@@ -4,7 +4,6 @@
 #include <queue>
 #include <stack>
 #include <cassert>
-#include <torch/torch.h>
 #include "fold.h"
 #include "parameter.h"
 
@@ -103,34 +102,16 @@ float compare(const T& a, const T& b)
     return a - b;
 }
 
-template <>
-float compare(const torch::Tensor& a, const torch::Tensor& b)
-{
-    return a.item<float>() - b.item<float>();
-}
-
 template < typename T >
 T NEG_INF()
 {
     return std::numeric_limits<T>::lowest();
 }
 
-template <>
-torch::Tensor NEG_INF()
-{
-    return torch::full({}, std::numeric_limits<float>::lowest(), torch::requires_grad(false));
-}
-
 template < typename T >
 T ZERO()
 {
     return 0.;
-}
-
-template <>
-torch::Tensor ZERO()
-{
-    return torch::zeros({}, torch::dtype(torch::kFloat));
 }
 
 template < typename P, typename S >
@@ -266,7 +247,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
         }
     }
 
-    update_max(Fv_[L+1], param->template external_zero<ScoreType>(seq2), Ft_[L+1], TBType::F_ZERO);
+    update_max(Fv_[L+1], param->template external_zero<ScoreType>(seq2), Ft_[L+1], TBType::F_START);
 
     for (auto i=L; i>=1; i--)
     {
@@ -356,7 +337,7 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 tb_queue.emplace(M1t_[i][j-1], i, j-1);
                 break;
             }
-            case TBType::F_ZERO: {
+            case TBType::F_START: {
                 break;
             }
             case TBType::F_UNPAIRED: {
@@ -482,10 +463,10 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 tb_queue.emplace(M1t_[i][j-1], i, j-1);
                 break;
             }
-            case TBType::F_ZERO: {
+            case TBType::F_START: {
                 e += param->template external_zero<typename P::ScoreType>(seq2);
 #if 0
-                std::cout << "F_ZERO: " << i << ", " << j << ", " 
+                std::cout << "F_START: " << i << ", " << j << ", " 
                     << param->template external_zero<typename P::ScoreType>(seq2).template item<float>() << std::endl;
 #endif
                 break;
@@ -517,32 +498,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
 }
 
 // instantiation
-#include <torch/torch.h>
 #include "parameter.h"
 
-//template class Fold<MFETorch>;
-template class Fold<MFETorch, float>;
-//template class Fold<MFE>;
-
-
-#if 0
-auto nussinov(const std::string& seq)
-{
-    const auto L = seq.size();
-    std::vector dp(L+1, std::vector(L+1, 0));
-    for (auto i=L; i>=1; i--)
-    {
-        for (auto j=i+1; j<=L; j++)
-        {
-            if (j-i>3 && allow_paired(seq[i-1], seq[j-1]))
-                dp[i][j] = std::max(dp[i][j], dp[i+1][j-1]+1);
-            dp[i][j] = std::max(dp[i][j], dp[i+1][j]);
-            dp[i][j] = std::max(dp[i][j], dp[i][j-1]);  
-            for (auto k=i+1; k<j-1; k++)
-                dp[i][j]  = std::max(dp[i][j], dp[i][k]+dp[k+1][j]);
-        }
-    }
-
-    return dp[1][L];
-}
-#endif
+template class Fold<MFE>;
+template class Fold<PyMFE>;

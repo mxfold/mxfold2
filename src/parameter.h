@@ -2,31 +2,9 @@
 
 #include <string>
 #include <vector>
-#include <iostream>
 #include <map>
-#include <optional>
-#include <torch/torch.h>
-
-template <typename S = float>
-class MaximizeBP
-{
-    public:
-        using ScoreType = S;
-        using SeqType = std::string;
-
-    public:
-        MaximizeBP() {};
-
-        auto convert_sequence(const std::string& seq) -> SeqType { return seq; };
-        ScoreType hairpin(const SeqType& seq, size_t i, size_t j) { return 1; }
-        ScoreType single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) { return 1; }
-        ScoreType multi_loop(const SeqType& seq, size_t i, size_t j) { return 1; }
-        ScoreType multi_paired(const SeqType& seq, size_t i, size_t j) { return 0; }
-        ScoreType multi_unpaired(const SeqType& seq, size_t i) { return 0; }
-        ScoreType external_zero(const SeqType& seq) { return 0; }
-        ScoreType external_paired(const SeqType& seq, size_t i, size_t j) { return 0; }
-        ScoreType external_unpaired(const SeqType& seq, size_t i) { return 0; }
-};
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 
 class MFE
 {
@@ -59,7 +37,7 @@ class MFE
         template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
         template <typename T> T external_unpaired(const SeqType& seq, size_t i) { return 0.0; }
 
-    private:
+    public:
         VVI stack_;
         VI hairpin_;
         VI bulge_;
@@ -86,75 +64,55 @@ class MFE
         float lxc_;
 };
 
-struct MFETorch : public torch::nn::Module
+class PyMFE
 {
-    using SeqType = std::vector<short>;
-    using ScoreType = torch::Tensor;
-    
-    MFETorch();
-    ~MFETorch() {}
-    void init_accessors();
-    auto convert_sequence(const std::string& seq) -> SeqType;
-    bool load_default();
-    bool save_state_dict(const char* filename) const;
-    bool load_state_dict(const char* filename);
+    public:
+        using ScoreType = float;
+        using SeqType = std::vector<short>;
 
-    template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
-    template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
-    template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
-    template <typename T> T multi_paired(const SeqType& seq, size_t i, size_t j);
-    template <typename T> T multi_unpaired(const SeqType& seq, size_t i);
-    template <typename T> T external_zero(const SeqType& seq);
-    template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
-    template <typename T> T external_unpaired(const SeqType& seq, size_t i);
+    private:
+        template<int D> using ParamType = pybind11::detail::unchecked_reference<float, D> ;
 
-    torch::Tensor stack_;
-    torch::Tensor hairpin_;
-    torch::Tensor bulge_;
-    torch::Tensor internal_;
-    torch::Tensor mismatch_external_;
-    torch::Tensor mismatch_hairpin_;
-    torch::Tensor mismatch_internal_;
-    torch::Tensor mismatch_internal_1n_;
-    torch::Tensor mismatch_internal_23_;
-    torch::Tensor mismatch_multi_;
-    torch::Tensor int11_;
-    torch::Tensor int21_;
-    torch::Tensor int22_;
-    torch::Tensor dangle5_;
-    torch::Tensor dangle3_;
-    torch::Tensor ml_base_;
-    torch::Tensor ml_closing_;
-    torch::Tensor ml_intern_;
-    torch::Tensor ninio_;
-    torch::Tensor max_ninio_;
-    //std::map<SeqType, int> special_loops_;
-    torch::Tensor duplex_init_;
-    torch::Tensor terminalAU_;
-    torch::Tensor lxc_;
+    public:
+        PyMFE(pybind11::object obj);
+        ~PyMFE() {};
+        auto convert_sequence(const std::string& seq) -> SeqType;
+        bool load(const char* filename);
+        bool load(const std::string& filename) { return load(filename.c_str());};
+        bool load_default();
 
-    std::optional<torch::TensorAccessor<float, 2>> stack_a_;
-    std::optional<torch::TensorAccessor<float, 1>> hairpin_a_;
-    std::optional<torch::TensorAccessor<float, 1>> bulge_a_;
-    std::optional<torch::TensorAccessor<float, 1>> internal_a_;
-    std::optional<torch::TensorAccessor<float, 3>> mismatch_external_a_;
-    std::optional<torch::TensorAccessor<float, 3>> mismatch_hairpin_a_;
-    std::optional<torch::TensorAccessor<float, 3>> mismatch_internal_a_;
-    std::optional<torch::TensorAccessor<float, 3>> mismatch_internal_1n_a_;
-    std::optional<torch::TensorAccessor<float, 3>> mismatch_internal_23_a_;
-    std::optional<torch::TensorAccessor<float, 3>> mismatch_multi_a_;
-    std::optional<torch::TensorAccessor<float, 4>> int11_a_;
-    std::optional<torch::TensorAccessor<float, 5>> int21_a_;
-    std::optional<torch::TensorAccessor<float, 6>> int22_a_;
-    std::optional<torch::TensorAccessor<float, 2>> dangle5_a_;
-    std::optional<torch::TensorAccessor<float, 2>> dangle3_a_;
-    std::optional<torch::TensorAccessor<float, 1>> ml_base_a_;
-    std::optional<torch::TensorAccessor<float, 1>> ml_closing_a_;
-    std::optional<torch::TensorAccessor<float, 1>> ml_intern_a_;
-    std::optional<torch::TensorAccessor<float, 1>> ninio_a_;
-    std::optional<torch::TensorAccessor<float, 1>> max_ninio_a_;
-    //std::map<SeqType, int> special_loops_;
-    std::optional<torch::TensorAccessor<float, 1>> duplex_init_a_;
-    std::optional<torch::TensorAccessor<float, 1>> terminalAU_a_;
-    std::optional<torch::TensorAccessor<float, 1>> lxc_a_;
+        template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
+        template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T multi_paired(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T multi_unpaired(const SeqType& seq, size_t i);
+        template <typename T> T external_zero(const SeqType& seq) { return 0.0; }
+        template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
+        template <typename T> T external_unpaired(const SeqType& seq, size_t i) { return 0.0; }
+
+    public:
+        ParamType<2> stack_;
+        ParamType<1> hairpin_;
+        ParamType<1> bulge_;
+        ParamType<1> internal_;
+        ParamType<3> mismatch_external_;
+        ParamType<3> mismatch_hairpin_;
+        ParamType<3> mismatch_internal_;
+        ParamType<3> mismatch_internal_1n_;
+        ParamType<3> mismatch_internal_23_;
+        ParamType<3> mismatch_multi_;
+        ParamType<4> int11_;
+        ParamType<5> int21_;
+        ParamType<6> int22_;
+        ParamType<2> dangle5_;
+        ParamType<2> dangle3_;
+        ParamType<1> ml_base_;
+        ParamType<1> ml_closing_;
+        ParamType<1> ml_intern_;
+        ParamType<1> ninio_;
+        ParamType<1> max_ninio_;
+        //std::map<SeqType, int> special_loops_;
+        ParamType<1> duplex_init_;
+        ParamType<1> terminalAU_;
+        ParamType<1> lxc_;
 };

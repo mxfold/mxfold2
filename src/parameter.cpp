@@ -3,11 +3,10 @@
 #include <sstream>
 #include <string>
 #include <regex>
+#include <cmath>
 #include <cstdlib>
 #include <cassert>
 #include "parameter.h"
-
-using namespace std::literals::string_literals;
 
 #include "default_params.h"
 
@@ -586,73 +585,39 @@ MFE::
 external_paired(const SeqType& s, size_t i, size_t j);
 
 
-#define NBASES 4
-#define NBPAIRS 7
-
-MFETorch::
-MFETorch() :
-    stack_(register_parameter("stack", torch::zeros({NBPAIRS+1, NBPAIRS+1u}, torch::dtype(torch::kFloat)))),
-    hairpin_(register_parameter("hairpin", torch::zeros({31}, torch::dtype(torch::kFloat)))),
-    bulge_(register_parameter("bulge", torch::zeros({31}, torch::dtype(torch::kFloat)))),
-    internal_(register_parameter("internal", torch::zeros({31}, torch::dtype(torch::kFloat)))),
-    mismatch_external_(register_parameter("mismatch_external", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    mismatch_hairpin_(register_parameter("mismatch_hairpin", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    mismatch_internal_(register_parameter("mismatch_internal", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    mismatch_internal_1n_(register_parameter("mismatch_internal_1n", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    mismatch_internal_23_(register_parameter("mismatch_internal_23", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    mismatch_multi_(register_parameter("mismatch_multi", torch::zeros({NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    int11_(register_parameter("int11", torch::zeros({NBPAIRS+1, NBPAIRS+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    int21_(register_parameter("int21", torch::zeros({NBPAIRS+1, NBPAIRS+1, NBASES+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    int22_(register_parameter("int22", torch::zeros({NBPAIRS+1, NBPAIRS+1, NBASES+1, NBASES+1, NBASES+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    dangle5_(register_parameter("dangle5", torch::zeros({NBPAIRS+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    dangle3_(register_parameter("dangle3", torch::zeros({NBPAIRS+1, NBASES+1}, torch::dtype(torch::kFloat)))),
-    ml_base_(register_parameter("ml_base", torch::zeros({1}))),
-    ml_closing_(register_parameter("ml_closing", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    ml_intern_(register_parameter("ml_intern", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    ninio_(register_parameter("ninio", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    max_ninio_(register_parameter("max_ninio", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    duplex_init_(register_parameter("duplex_init", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    terminalAU_(register_parameter("terminalAU", torch::zeros({1}, torch::dtype(torch::kFloat)))),
-    lxc_(register_parameter("lxc", torch::full({1}, 107.856, torch::dtype(torch::kFloat))))
+PyMFE::
+PyMFE(pybind11::object obj) :
+    stack_(obj.attr("stack").cast<pybind11::array_t<float>>().unchecked<2>()),
+    hairpin_(obj.attr("hairpin").cast<pybind11::array_t<float>>().unchecked<1>()),
+    bulge_(obj.attr("bulge").cast<pybind11::array_t<float>>().unchecked<1>()),
+    internal_(obj.attr("internal").cast<pybind11::array_t<float>>().unchecked<1>()),
+    mismatch_external_(obj.attr("mismatch_external").cast<pybind11::array_t<float>>().unchecked<3>()),
+    mismatch_hairpin_(obj.attr("mismatch_hairpin").cast<pybind11::array_t<float>>().unchecked<3>()),
+    mismatch_internal_(obj.attr("mismatch_internal").cast<pybind11::array_t<float>>().unchecked<3>()),
+    mismatch_internal_1n_(obj.attr("mismatch_internal_1n").cast<pybind11::array_t<float>>().unchecked<3>()),
+    mismatch_internal_23_(obj.attr("mismatch_internal_23").cast<pybind11::array_t<float>>().unchecked<3>()),
+    mismatch_multi_(obj.attr("mismatch_multi").cast<pybind11::array_t<float>>().unchecked<3>()),
+    int11_(obj.attr("int11").cast<pybind11::array_t<float>>().unchecked<4>()),
+    int21_(obj.attr("int21").cast<pybind11::array_t<float>>().unchecked<5>()),
+    int22_(obj.attr("int22").cast<pybind11::array_t<float>>().unchecked<6>()),
+    dangle5_(obj.attr("dangle5").cast<pybind11::array_t<float>>().unchecked<2>()),
+    dangle3_(obj.attr("dangle3").cast<pybind11::array_t<float>>().unchecked<2>()),
+    ml_base_(obj.attr("ml_base").cast<pybind11::array_t<float>>().unchecked<1>()),
+    ml_closing_(obj.attr("ml_closing").cast<pybind11::array_t<float>>().unchecked<1>()),
+    ml_intern_(obj.attr("ml_intern").cast<pybind11::array_t<float>>().unchecked<1>()),
+    ninio_(obj.attr("ninio").cast<pybind11::array_t<float>>().unchecked<1>()),
+    max_ninio_(obj.attr("max_ninio").cast<pybind11::array_t<float>>().unchecked<1>()),
+    duplex_init_(obj.attr("duplex_init").cast<pybind11::array_t<float>>().unchecked<1>()),
+    terminalAU_(obj.attr("terminalAU").cast<pybind11::array_t<float>>().unchecked<1>()),
+    lxc_(obj.attr("lxc").cast<pybind11::array_t<float>>().unchecked<1>())
 {
 
-}
-
-void
-MFETorch::
-init_accessors()
-{
-    stack_a_ = stack_.accessor<float, 2>();
-    hairpin_a_ = hairpin_.accessor<float, 1>();
-    bulge_a_ = bulge_.accessor<float, 1>();
-    internal_a_ = internal_.accessor<float, 1>();
-    mismatch_external_a_ = mismatch_external_.accessor<float, 3>();
-    mismatch_hairpin_a_ = mismatch_hairpin_.accessor<float, 3>();
-    mismatch_internal_a_ = mismatch_internal_.accessor<float, 3>();
-    mismatch_internal_1n_a_ = mismatch_internal_1n_.accessor<float, 3>();
-    mismatch_internal_23_a_ = mismatch_internal_23_.accessor<float, 3>();
-    mismatch_multi_a_ = mismatch_multi_.accessor<float, 3>();
-    int11_a_ = int11_.accessor<float, 4>();
-    int21_a_ = int21_.accessor<float, 5>();
-    int22_a_ = int22_.accessor<float, 6>();
-    dangle5_a_ = dangle5_.accessor<float, 2>();
-    dangle3_a_ = dangle3_.accessor<float, 2>();
-    ml_base_a_ = ml_base_.accessor<float, 1>();
-    ml_closing_a_ = ml_closing_.accessor<float, 1>();
-    ml_intern_a_ = ml_intern_.accessor<float, 1>();
-    ninio_a_ = ninio_.accessor<float, 1>();
-    max_ninio_a_ = max_ninio_.accessor<float, 1>();
-    duplex_init_a_ = duplex_init_.accessor<float, 1>();
-    terminalAU_a_ = terminalAU_.accessor<float, 1>();
-    lxc_a_ = lxc_.accessor<float, 1>();
 }
 
 auto
-MFETorch::
+PyMFE::
 convert_sequence(const std::string& seq) -> SeqType
 {
-    init_accessors();
-
     const auto L = seq.size();
     SeqType converted_seq(L+2);
     ::convert_sequence(std::begin(seq), std::end(seq), &converted_seq[1]);
@@ -662,226 +627,47 @@ convert_sequence(const std::string& seq) -> SeqType
     return converted_seq;
 }
 
-bool
-MFETorch::
-load_default()
-{
-    torch::NoGradGuard no_grad;
-
-    //const auto NBPAIRS = 7;
-    int32_t* values = default_params;
-
-    // stack
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=1; i1!=NBPAIRS+1; i1++)
-            stack_[i0][i1] = *values++;
-    values += NBPAIRS*NBPAIRS;
-    
-    // mismatch_hairpin
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                mismatch_hairpin_[i0][i1][i2] = *values++;
-    values += NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // mismatch_interior
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                mismatch_internal_[i0][i1][i2] = *values++;
-    values += NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // mismatch_interior_1n
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                mismatch_internal_1n_[i0][i1][i2] = *values++;
-    values += NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // mismatch_interior_23
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                mismatch_internal_23_[i0][i1][i2] = *values++;
-    values += NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // mismatch_multi
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                mismatch_multi_[i0][i1][i2] = *values++;
-    values += NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // mismatch_exterior
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                mismatch_external_[i0][i1][i2] = *values++;
-    values += NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // dangle5
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            dangle5_[i0][i1] = *values++;
-    values += NBPAIRS*(NBASES+1);
-
-    // dangle3
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=0; i1!=NBASES+1; i1++)
-            dangle3_[i0][i1] = *values++;
-    values += NBPAIRS*(NBASES+1);
-
-    // int11
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=1; i1!=NBPAIRS+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                for (auto i3=0; i3!=NBASES+1; i3++)
-                    int11_[i0][i1][i2][i3] = *values++;
-    values += NBPAIRS*NBPAIRS*(NBASES+1)*(NBASES+1);
-
-    // int21
-    for (auto i0=1; i0!=NBPAIRS+1; i0++)
-        for (auto i1=1; i1!=NBPAIRS+1; i1++)
-            for (auto i2=0; i2!=NBASES+1; i2++)
-                for (auto i3=0; i3!=NBASES+1; i3++)
-                    for (auto i4=0; i4!=NBASES+1; i4++)
-                        int21_[i0][i1][i2][i3][i4] = *values++;
-    values += NBPAIRS*NBPAIRS*(NBASES+1)*(NBASES+1)*(NBASES+1);
-
-    // int22
-    for (auto i0=1; i0!=NBPAIRS; i0++)
-        for (auto i1=1; i1!=NBPAIRS; i1++)
-            for (auto i2=1; i2!=NBASES+1; i2++)
-                for (auto i3=1; i3!=NBASES+1; i3++)
-                    for (auto i4=1; i4!=NBASES+1; i4++)
-                        for (auto i5=1; i5!=NBASES+1; i5++)
-                        int22_[i0][i1][i2][i3][i4][i5] = *values++;
-    values += (NBPAIRS-1)*(NBPAIRS-1)*NBASES*NBASES*NBASES*NBASES;
-
-    // hairpin
-    for (auto i0=0; i0!=31; i0++)
-        hairpin_[i0] = *values++;
-    values += 31;
-
-    // bulge
-    for (auto i0=0; i0!=31; i0++)
-        bulge_[i0] = *values++;
-    values += 31;
-
-    // interior
-    for (auto i0=0; i0!=31; i0++)
-        internal_[i0] = *values++;
-    values += 31;
-
-    // ML_params
-    ml_base_[0] = *values++; values++;
-    ml_closing_[0] = *values++; values++;
-    ml_intern_[0] = *values++; values++;
-
-    // NINIO
-    ninio_[0] = *values++; values++;
-    max_ninio_[0] = *values++;
-
-    // Misc
-    duplex_init_[0] = *values++; values++;
-    terminalAU_[0] = *values++; values++;
-
-    stack_ /= -100.;
-    hairpin_ /= -100.;
-    bulge_ /= -100.;
-    internal_ /= -100.;
-    mismatch_external_ /= -100.;
-    mismatch_hairpin_ /= -100.;
-    mismatch_internal_ /= -100.;
-    mismatch_internal_1n_ /= -100.;
-    mismatch_internal_23_ /= -100.;
-    mismatch_multi_ /= -100.;
-    int11_ /= -100.;
-    int21_ /= -100.;
-    int22_ /= -100.;
-    dangle5_ /= -100.;
-    dangle3_ /= -100.;
-    ml_base_ /= -100.;
-    ml_closing_ /= -100.;
-    ml_intern_ /= -100.;
-    ninio_ /= -100.;
-    max_ninio_ /= -100.;
-    duplex_init_ /= -100.;
-    terminalAU_ /= -100.;
-    lxc_ /= -100.;
-
-    return true;
-}
-
-template <>
-torch::Tensor
-MFETorch::
+template <typename R>
+R
+PyMFE::
 hairpin(const SeqType& s, size_t i, size_t j)
 {
     const auto l = (j-1)-(i+1)+1;
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = 0.;
 
-    e += l<=30 ? hairpin_[l] : hairpin_[30] + lxc_[0] * log(l / 30.);
+    if (l <= 30)
+        e += hairpin_[l];
+    else
+        e += hairpin_[30] + (int)(lxc_[0] * log(l / 30.) / 100.);
 
     if (l < 3) return e;
 
-#if 0 // todo: special loops
+#if 0
     if (3 <= l && l <= 6) {
-        SeqType sl(&s[i], &s[j]+l);
+        SeqType sl(&s[i], &s[j]+1);
         auto it = special_loops_.find(sl);
         if (it != std::end(special_loops_))
-            return it->second;
+            return it->second / -100.;
     }           
 #endif
 
     const auto type = ::pair[s[i]][s[j]];
     if (l == 3)
-    {
-        if (type > 2)
-            e += terminalAU_[0];
-    }
+        e += type > 2 ? terminalAU_[0] : 0;
     else
-        e += mismatch_hairpin_[type][s[i+1]][s[j-1]];
+        e += mismatch_hairpin_(type, s[i+1], s[j-1]);
 
     return e;
 }
 
-template <>
+template
 float
-MFETorch::
-hairpin(const SeqType& s, size_t i, size_t j)
-{
-    const auto l = (j-1)-(i+1)+1;
-    float e = 0.;
+PyMFE::
+hairpin(const SeqType& s, size_t i, size_t j);
 
-    e += l<=30 ? hairpin_a_.value()[l] : hairpin_a_.value()[30] + lxc_a_.value()[0] * log(l / 30.);
-
-    if (l < 3) return e;
-
-#if 0 // todo: special loops
-    if (3 <= l && l <= 6) {
-        SeqType sl(&s[i], &s[j]+l);
-        auto it = special_loops_.find(sl);
-        if (it != std::end(special_loops_))
-            return it->second;
-    }           
-#endif
-
-    const auto type = ::pair[s[i]][s[j]];
-    if (l == 3)
-    {
-        if (type > 2)
-            e += terminalAU_a_.value()[0];
-    }
-    else
-        e += mismatch_hairpin_a_.value()[type][s[i+1]][s[j-1]];
-
-    return e;
-}
-
-template <>
-torch::Tensor
-MFETorch::
+template <typename R>
+R
+PyMFE::
 single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
 {
     const auto type1 = ::pair[s[i]][s[j]];
@@ -889,15 +675,15 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = std::numeric_limits<ScoreType>::lowest();
 
     if (ll==0) // stack
-        e += stack_[type1][type2];
+        return stack_(type1, type2);
     else if (ls==0) // bulge
     {
-        e += ll<=30 ? bulge_[ll] : bulge_[30] + lxc_[0] * log(ll / 30.);
-        if (ll==1)
-            e += stack_[type1][type2];
+        auto e = ll<=30 ? bulge_[ll] : bulge_[30] + (int)(lxc_[0] * log(ll / 30.) / 100.);
+        if (ll==1) 
+            e += stack_(type1, type2);
         else
         {
             if (type1 > 2)
@@ -905,98 +691,55 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
             if (type2 > 2)
                 e += terminalAU_[0];
         }
+        return e;
     }
-    else if (ll==1 && ls==1) // 1x1 loop
-        e += int11_[type1][type2][s[i+1]][s[j-1]];
-    else if (l1==2 && l2==1) // 2x1 loop
-        e += int21_[type2][type1][s[l+1]][s[i+1]][s[k-1]];
-    else if (l1==1 && l2==2) // 1x2 loop
-        e += int21_[type1][type2][s[i+1]][s[l+1]][s[j-1]];
-    else if (ls==1) // 1xn loop
+    else // internal loop
     {
-        e += ll+1 <= 30 ? internal_[ll+1] : internal_[30] + lxc_[0] * log((ll+1) / 30.);
-        e += torch::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
-        e += mismatch_internal_1n_[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_[type2][s[l+1]][s[k-1]];
-    }
-    else if (ls==2 && ll==2) // 2x2 loop
-        e += int22_[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]];
-    else if (ls==2 && ll==3) // 2x3 loop
-    {
-        e += internal_[ls+ll] + ninio_[0];
-        e += mismatch_internal_23_[type1][s[i+1]][s[j-1]] + mismatch_internal_23_[type2][s[l+1]][s[k-1]];
-    }
-    else // generic internal loop
-    {
-        e += ls+ll <= 30 ? internal_[ls+ll] : internal_[30] + lxc_[0] * log((ls+ll) / 30.);
-        e += torch::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
-        e += mismatch_internal_[type1][s[i+1]][s[j-1]] + mismatch_internal_[type2][s[l+1]][s[k-1]];
+        if (ll==1 && ls==1) // 1x1 loop
+            return int11_(type1, type2, s[i+1], s[j-1]);
+        else if (l1==2 && l2==1) // 2x1 loop
+            return int21_(type2, type1, s[l+1], s[i+1], s[k-1]);
+        else if (l1==1 && l2==2) // 1x2 loop
+            return int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
+        else if (ls==1) // 1xn loop
+        {
+            auto e = ll+1 <= 30 ? internal_[ll+1] : internal_[30] + (int)(lxc_[0] * log((ll+1) / 30.) / 100.);
+            e += std::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
+            e += mismatch_internal_1n_(type1, s[i+1], s[j-1]) + mismatch_internal_1n_(type2, s[l+1], s[k-1]);
+            return e;
+        }
+        else if (ls==2 && ll==2) // 2x2 loop
+            return int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]);
+        else if (ls==2 && ll==3) // 2x3 loop
+        {
+            auto e = internal_[ls+ll] + ninio_[0];
+            e += mismatch_internal_23_(type1, s[i+1], s[j-1]) + mismatch_internal_23_(type2, s[l+1], s[k-1]);
+            return e;
+        }
+        else // generic internal loop
+        {
+            auto e = ls+ll <= 30 ? internal_[ls+ll] : internal_[30] + (int)(lxc_[0] * log((ls+ll) / 30.) / 100.);
+            e += std::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
+            e += mismatch_internal_(type1, s[i+1], s[j-1]) + mismatch_internal_(type2, s[l+1], s[k-1]);
+            return e;
+        }
     }
     return e;
 }
 
-template <>
+template
 float
-MFETorch::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
-{
-    const auto type1 = ::pair[s[i]][s[j]];
-    const auto type2 = ::pair[s[l]][s[k]];
-    const auto l1 = (k-1)-(i+1)+1;
-    const auto l2 = (j-1)-(l+1)+1;
-    const auto [ls, ll] = std::minmax(l1, l2);
-    float e = 0.;
+PyMFE::
+single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l);
 
-    if (ll==0) // stack
-        e += stack_a_.value()[type1][type2];
-    else if (ls==0) // bulge
-    {
-        e += ll<=30 ? bulge_a_.value()[ll] : bulge_a_.value()[30] + lxc_a_.value()[0] * log(ll / 30.);
-        if (ll==1)
-            e += stack_a_.value()[type1][type2];
-        else
-        {
-            if (type1 > 2)
-                e += terminalAU_a_.value()[0];
-            if (type2 > 2)
-                e += terminalAU_a_.value()[0];
-        }
-    }
-    else if (ll==1 && ls==1) // 1x1 loop
-        e += int11_a_.value()[type1][type2][s[i+1]][s[j-1]];
-    else if (l1==2 && l2==1) // 2x1 loop
-        e += int21_a_.value()[type2][type1][s[l+1]][s[i+1]][s[k-1]];
-    else if (l1==1 && l2==2) // 1x2 loop
-        e += int21_a_.value()[type1][type2][s[i+1]][s[l+1]][s[j-1]];
-    else if (ls==1) // 1xn loop
-    {
-        e += ll+1 <= 30 ? internal_a_.value()[ll+1] : internal_a_.value()[30] + lxc_a_.value()[0] * log((ll+1) / 30.);
-        e += std::max(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
-        e += mismatch_internal_1n_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_1n_a_.value()[type2][s[l+1]][s[k-1]];
-    }
-    else if (ls==2 && ll==2) // 2x2 loop
-        e += int22_a_.value()[type1][type2][s[i+1]][s[k-1]][s[l+1]][s[j-1]];
-    else if (ls==2 && ll==3) // 2x3 loop
-    {
-        e += internal_a_.value()[ls+ll] + ninio_a_.value()[0];
-        e += mismatch_internal_23_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_23_a_.value()[type2][s[l+1]][s[k-1]];
-    }
-    else // generic internal loop
-    {
-        e += ls+ll <= 30 ? internal_a_.value()[ls+ll] : internal_a_.value()[30] + lxc_a_.value()[0] * log((ls+ll) / 30.);
-        e += std::max(max_ninio_a_.value()[0], (int)(ll-ls) * ninio_a_.value()[0]);
-        e += mismatch_internal_a_.value()[type1][s[i+1]][s[j-1]] + mismatch_internal_a_.value()[type2][s[l+1]][s[k-1]];
-    }
-    return e;
-}
-
-template <>
-torch::Tensor
-MFETorch::
-multi_loop(const SeqType& s, size_t i, size_t j)
+template <typename R>
+R
+PyMFE::
+multi_loop(const SeqType& s, size_t i, size_t j) 
 {
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = 0.;
     const auto type = ::pair[s[j]][s[i]];
-    e += mismatch_multi_[type][s[j-1]][s[i+1]];
+    e += mismatch_multi_(type, s[j-1], s[i+1]);
     if (type > 2) 
         e += terminalAU_[0];
     e += ml_intern_[0];
@@ -1004,37 +747,25 @@ multi_loop(const SeqType& s, size_t i, size_t j)
 
     return e;
 }
-
-template <>
+template
 float
-MFETorch::
-multi_loop(const SeqType& s, size_t i, size_t j)
-{
-    float e = 0.;
-    const auto type = ::pair[s[j]][s[i]];
-    e += mismatch_multi_a_.value()[type][s[j-1]][s[i+1]];
-    if (type > 2) 
-        e += terminalAU_a_.value()[0];
-    e += ml_intern_a_.value()[0];
-    e += ml_closing_a_.value()[0];
+PyMFE::
+multi_loop(const SeqType& s, size_t i, size_t j);
 
-    return e;
-}
-
-template <>
-torch::Tensor
-MFETorch::
+template <typename R>
+R
+PyMFE::
 multi_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = 0.;
     const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_[type][s[i-1]][s[j+1]];
+        e += mismatch_multi_(type, s[i-1], s[j+1]);
     else if (i-1>=1)
-        e += dangle5_[type][s[i-1]];
+        e += dangle5_(type, s[i-1]);
     else if (j+1<=L)
-        e += dangle3_[type][s[j+1]];
+        e += dangle3_(type, s[j+1]);
     if (type > 2) 
         e += terminalAU_[0];
     e += ml_intern_[0];
@@ -1042,157 +773,45 @@ multi_paired(const SeqType& s, size_t i, size_t j)
     return e;
 }
 
-template <>
+template
 float
-MFETorch::
-multi_paired(const SeqType& s, size_t i, size_t j)
-{
-    const auto L = s.size()-2;
-    float e = 0.;
-    const auto type = ::pair[s[i]][s[j]];
-    if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_a_.value()[type][s[i-1]][s[j+1]];
-    else if (i-1>=1)
-        e += dangle5_a_.value()[type][s[i-1]];
-    else if (j+1<=L)
-        e += dangle3_a_.value()[type][s[j+1]];
-    if (type > 2) 
-        e += terminalAU_a_.value()[0];
-    e += ml_intern_a_.value()[0];
+PyMFE::
+multi_paired(const SeqType& s, size_t i, size_t j);
 
-    return e;
-}
-
-template <>
-torch::Tensor
-MFETorch::
+template <typename R>
+R
+PyMFE::
 multi_unpaired(const SeqType& s, size_t i)
 {
     return ml_base_[0];
 }
 
-template <>
+template
 float
-MFETorch::
-multi_unpaired(const SeqType& s, size_t i)
-{
-    return ml_base_a_.value()[0];
-}
+PyMFE::
+multi_unpaired(const SeqType& s, size_t i);
 
-template <>
-torch::Tensor
-MFETorch::
-external_zero(const SeqType& seq)
-{
-    return torch::zeros({}, torch::dtype(torch::kFloat)); 
-}
-
-template <>
-float
-MFETorch::
-external_zero(const SeqType& seq)
-{
-    return 0.;
-}
-
-template <>
-torch::Tensor
-MFETorch::
+template <typename R>
+R
+PyMFE::
 external_paired(const SeqType& s, size_t i, size_t j)
 {
     const auto L = s.size()-2;
-    auto e = torch::zeros({}, torch::dtype(torch::kFloat));
+    auto e = 0.;
     const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_external_[type][s[i-1]][s[j+1]];
+        e += mismatch_external_(type, s[i-1], s[j+1]);
     else if (i-1>=1)
-        e += dangle5_[type][s[i-1]];
+        e += dangle5_(type, s[i-1]);
     else if (j+1<=L)
-        e += dangle3_[type][s[j+1]];
+        e += dangle3_(type, s[j+1]);
     if (type > 2) 
         e += terminalAU_[0];
     
     return e;
 }
 
-template <>
+template
 float
-MFETorch::
-external_paired(const SeqType& s, size_t i, size_t j)
-{
-    const auto L = s.size()-2;
-    float e = 0.;
-    const auto type = ::pair[s[i]][s[j]];
-    if (i-1>=1 && j+1<=L)
-        e += mismatch_external_a_.value()[type][s[i-1]][s[j+1]];
-    else if (i-1>=1)
-        e += dangle5_a_.value()[type][s[i-1]];
-    else if (j+1<=L)
-        e += dangle3_a_.value()[type][s[j+1]];
-    if (type > 2) 
-        e += terminalAU_a_.value()[0];
-    
-    return e;
-}
-
-template <>
-torch::Tensor
-MFETorch::
-external_unpaired(const SeqType& seq, size_t i)
-{
-    return torch::zeros({}, torch::dtype(torch::kFloat));
-}
-
-template <>
-float
-MFETorch::
-external_unpaired(const SeqType& seq, size_t i)
-{
-    return 0.;
-}
-
-bool is_empty(at::Tensor x)
-{
-    if (x.defined() && x.dim() > 0 && x.size(0) != 0 && x.numel() > 0)
-        return false;
-    else
-        return true;
-}
-
-bool
-MFETorch::
-save_state_dict(const char* filename) const
-{
-    auto cu = std::make_shared<torch::jit::script::CompilationUnit>();
-    torch::serialize::OutputArchive archive(cu);
-    auto params = this->named_parameters(true /*recurse*/);
-    auto buffers = this->named_buffers(true /*recurse*/);
-    for (const auto& val : params) {
-        if (!is_empty(val.value())) {
-            archive.write(val.key(), val.value());
-        }
-    }  
-    for (const auto& val : buffers) {
-        if (!is_empty(val.value())) {
-            archive.write(val.key(), val.value(), /*is_buffer*/ true);
-        }
-    }
-    archive.save_to(filename);
-}
-
-bool
-MFETorch::
-load_state_dict(const char* filename)
-{
-    torch::serialize::InputArchive archive;
-    archive.load_from(filename);
-    torch::NoGradGuard no_grad;
-    auto params = this->named_parameters(true /*recurse*/);
-    auto buffers = this->named_buffers(true /*recurse*/);
-    for (auto& val : params) {
-        archive.read(val.key(), val.value());
-    }
-    for (auto& val : buffers) {
-        archive.read(val.key(), val.value(), /*is_buffer*/ true);
-    }
-}
+PyMFE::
+external_paired(const SeqType& s, size_t i, size_t j);
