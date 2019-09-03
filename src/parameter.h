@@ -23,21 +23,21 @@ class MFE
     public:
         MFE() : lxc_(107.856) {};
         ~MFE() {};
-        auto convert_sequence(const std::string& seq) -> SeqType;
+        auto convert_sequence(const std::string& seq) const -> SeqType;
         bool load(const char* filename);
         bool load(const std::string& filename) { return load(filename.c_str());};
         bool load_default();
 
-        template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
-        template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T multi_paired(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T multi_unpaired(const SeqType& seq, size_t i);
-        template <typename T> T external_zero(const SeqType& seq) { return 0.0; }
-        template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T external_unpaired(const SeqType& seq, size_t i) { return 0.0; }
+        ScoreType score_hairpin(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) const;
+        ScoreType score_multi_loop(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_multi_paired(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_multi_unpaired(const SeqType& seq, size_t i) const;
+        ScoreType score_external_zero(const SeqType& seq) const { return 0.0; }
+        ScoreType score_external_paired(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_external_unpaired(const SeqType& seq, size_t i) const { return 0.0; }
 
-    public:
+    private:
         VVI stack_;
         VI hairpin_;
         VI bulge_;
@@ -76,21 +76,18 @@ class PyMFE
     public:
         PyMFE(pybind11::object obj);
         ~PyMFE() {};
-        auto convert_sequence(const std::string& seq) -> SeqType;
-        bool load(const char* filename);
-        bool load(const std::string& filename) { return load(filename.c_str());};
-        bool load_default();
+        auto convert_sequence(const std::string& seq) const -> SeqType;
 
-        template <typename T> T hairpin(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l);
-        template <typename T> T multi_loop(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T multi_paired(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T multi_unpaired(const SeqType& seq, size_t i);
-        template <typename T> T external_zero(const SeqType& seq) { return 0.0; }
-        template <typename T> T external_paired(const SeqType& seq, size_t i, size_t j);
-        template <typename T> T external_unpaired(const SeqType& seq, size_t i) { return 0.0; }
+        ScoreType score_hairpin(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) const;
+        ScoreType score_multi_loop(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_multi_paired(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_multi_unpaired(const SeqType& seq, size_t i) const;
+        ScoreType score_external_zero(const SeqType& seq) const { return 0.0; }
+        ScoreType score_external_paired(const SeqType& seq, size_t i, size_t j) const;
+        ScoreType score_external_unpaired(const SeqType& seq, size_t i) const { return 0.0; }
 
-    public:
+    private:
         ParamType<2> stack_;
         ParamType<1> hairpin_;
         ParamType<1> bulge_;

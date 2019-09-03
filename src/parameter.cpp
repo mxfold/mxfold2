@@ -387,7 +387,7 @@ load_default()
 
 auto
 MFE::
-convert_sequence(const std::string& seq) -> SeqType
+convert_sequence(const std::string& seq) const -> SeqType
 {
     const auto L = seq.size();
     SeqType converted_seq(L+2);
@@ -398,10 +398,9 @@ convert_sequence(const std::string& seq) -> SeqType
     return converted_seq;
 }
 
-template <typename R>
-R
+auto
 MFE::
-hairpin(const SeqType& s, size_t i, size_t j)
+score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     const auto l = (j-1)-(i+1)+1;
     auto e = 0;
@@ -429,15 +428,10 @@ hairpin(const SeqType& s, size_t i, size_t j)
     return e / -100.;
 }
 
-template
-float
-MFE::
-hairpin(const SeqType& s, size_t i, size_t j);
 
-template <typename R>
-R
+auto
 MFE::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
+score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 {
     const auto type1 = ::pair[s[i]][s[j]];
     const auto type2 = ::pair[s[l]][s[k]];
@@ -493,15 +487,9 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     return e / -100.;
 }
 
-template
-float
+auto
 MFE::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l);
-
-template <typename R>
-R
-MFE::
-multi_loop(const SeqType& s, size_t i, size_t j) 
+score_multi_loop(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     int e = 0;
     const auto type = ::pair[s[j]][s[i]];
@@ -513,15 +501,10 @@ multi_loop(const SeqType& s, size_t i, size_t j)
 
     return e / -100.;
 }
-template
-float
-MFE::
-multi_loop(const SeqType& s, size_t i, size_t j);
 
-template <typename R>
-R
+auto
 MFE::
-multi_paired(const SeqType& s, size_t i, size_t j)
+score_multi_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     const auto L = s.size()-2;
     int e = 0;
@@ -539,30 +522,18 @@ multi_paired(const SeqType& s, size_t i, size_t j)
     return e / -100.;
 }
 
-template
-float
+auto
 MFE::
-multi_paired(const SeqType& s, size_t i, size_t j);
-
-template <typename R>
-R
-MFE::
-multi_unpaired(const SeqType& s, size_t i)
+score_multi_unpaired(const SeqType& s, size_t i) const -> ScoreType
 {
     const auto e = ml_base_;
 
     return e / -100.;
 }
 
-template
-float
+auto
 MFE::
-multi_unpaired(const SeqType& s, size_t i);
-
-template <typename R>
-R
-MFE::
-external_paired(const SeqType& s, size_t i, size_t j)
+score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     const auto L = s.size()-2;
     auto e = 0.;
@@ -578,11 +549,6 @@ external_paired(const SeqType& s, size_t i, size_t j)
     
     return -e / 100.;
 }
-
-template
-float
-MFE::
-external_paired(const SeqType& s, size_t i, size_t j);
 
 
 PyMFE::
@@ -616,7 +582,7 @@ PyMFE(pybind11::object obj) :
 
 auto
 PyMFE::
-convert_sequence(const std::string& seq) -> SeqType
+convert_sequence(const std::string& seq) const -> SeqType
 {
     const auto L = seq.size();
     SeqType converted_seq(L+2);
@@ -627,10 +593,9 @@ convert_sequence(const std::string& seq) -> SeqType
     return converted_seq;
 }
 
-template <typename R>
-R
+auto
 PyMFE::
-hairpin(const SeqType& s, size_t i, size_t j)
+score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     const auto l = (j-1)-(i+1)+1;
     auto e = 0.;
@@ -660,15 +625,9 @@ hairpin(const SeqType& s, size_t i, size_t j)
     return e;
 }
 
-template
-float
+auto
 PyMFE::
-hairpin(const SeqType& s, size_t i, size_t j);
-
-template <typename R>
-R
-PyMFE::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
+score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 {
     const auto type1 = ::pair[s[i]][s[j]];
     const auto type2 = ::pair[s[l]][s[k]];
@@ -727,15 +686,9 @@ single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l)
     return e;
 }
 
-template
-float
+auto
 PyMFE::
-single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l);
-
-template <typename R>
-R
-PyMFE::
-multi_loop(const SeqType& s, size_t i, size_t j) 
+score_multi_loop(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;
     const auto type = ::pair[s[j]][s[i]];
@@ -747,15 +700,10 @@ multi_loop(const SeqType& s, size_t i, size_t j)
 
     return e;
 }
-template
-float
-PyMFE::
-multi_loop(const SeqType& s, size_t i, size_t j);
 
-template <typename R>
-R
+auto
 PyMFE::
-multi_paired(const SeqType& s, size_t i, size_t j)
+score_multi_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     const auto L = s.size()-2;
     auto e = 0.;
@@ -773,28 +721,16 @@ multi_paired(const SeqType& s, size_t i, size_t j)
     return e;
 }
 
-template
-float
+auto
 PyMFE::
-multi_paired(const SeqType& s, size_t i, size_t j);
-
-template <typename R>
-R
-PyMFE::
-multi_unpaired(const SeqType& s, size_t i)
+score_multi_unpaired(const SeqType& s, size_t i) const -> ScoreType
 {
     return ml_base_[0];
 }
 
-template
-float
+auto
 PyMFE::
-multi_unpaired(const SeqType& s, size_t i);
-
-template <typename R>
-R
-PyMFE::
-external_paired(const SeqType& s, size_t i, size_t j)
+score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     const auto L = s.size()-2;
     auto e = 0.;
@@ -810,8 +746,3 @@ external_paired(const SeqType& s, size_t i, size_t j)
     
     return e;
 }
-
-template
-float
-PyMFE::
-external_paired(const SeqType& s, size_t i, size_t j);
