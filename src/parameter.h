@@ -72,6 +72,7 @@ class PyMFE
 
     private:
         template<int D> using ParamType = pybind11::detail::unchecked_reference<float, D> ;
+        template<int D> using CountType = pybind11::detail::unchecked_mutable_reference<float, D> ;
 
     public:
         PyMFE(pybind11::object obj);
@@ -87,29 +88,61 @@ class PyMFE
         ScoreType score_external_paired(const SeqType& seq, size_t i, size_t j) const;
         ScoreType score_external_unpaired(const SeqType& seq, size_t i) const { return 0.0; }
 
+        void count_hairpin(const SeqType& seq, size_t i, size_t j, ScoreType v);
+        void count_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l, ScoreType v);
+        void count_multi_loop(const SeqType& seq, size_t i, size_t j, ScoreType v);
+        void count_multi_paired(const SeqType& seq, size_t i, size_t j, ScoreType v);
+        void count_multi_unpaired(const SeqType& seq, size_t i, ScoreType v);
+        void count_external_zero(const SeqType& seq, ScoreType v) { }
+        void count_external_paired(const SeqType& seq, size_t i, size_t j, ScoreType v);
+        void count_external_unpaired(const SeqType& seq, size_t i, ScoreType v) { }
+
     private:
-        ParamType<2> stack_;
-        ParamType<1> hairpin_;
-        ParamType<1> bulge_;
-        ParamType<1> internal_;
-        ParamType<3> mismatch_external_;
-        ParamType<3> mismatch_hairpin_;
-        ParamType<3> mismatch_internal_;
-        ParamType<3> mismatch_internal_1n_;
-        ParamType<3> mismatch_internal_23_;
-        ParamType<3> mismatch_multi_;
-        ParamType<4> int11_;
-        ParamType<5> int21_;
-        ParamType<6> int22_;
-        ParamType<2> dangle5_;
-        ParamType<2> dangle3_;
-        ParamType<1> ml_base_;
-        ParamType<1> ml_closing_;
-        ParamType<1> ml_intern_;
-        ParamType<1> ninio_;
-        ParamType<1> max_ninio_;
-        //std::map<SeqType, int> special_loops_;
-        ParamType<1> duplex_init_;
-        ParamType<1> terminalAU_;
-        ParamType<1> lxc_;
+        ParamType<2> score_stack_;
+        ParamType<1> score_hairpin_;
+        ParamType<1> score_bulge_;
+        ParamType<1> score_internal_;
+        ParamType<3> score_mismatch_external_;
+        ParamType<3> score_mismatch_hairpin_;
+        ParamType<3> score_mismatch_internal_;
+        ParamType<3> score_mismatch_internal_1n_;
+        ParamType<3> score_mismatch_internal_23_;
+        ParamType<3> score_mismatch_multi_;
+        ParamType<4> score_int11_;
+        ParamType<5> score_int21_;
+        ParamType<6> score_int22_;
+        ParamType<2> score_dangle5_;
+        ParamType<2> score_dangle3_;
+        ParamType<1> score_ml_base_;
+        ParamType<1> score_ml_closing_;
+        ParamType<1> score_ml_intern_;
+        ParamType<1> score_ninio_;
+        ParamType<1> score_max_ninio_;
+        ParamType<1> score_duplex_init_;
+        ParamType<1> score_terminalAU_;
+        ParamType<1> score_lxc_;
+
+        CountType<2> count_stack_;
+        CountType<1> count_hairpin_;
+        CountType<1> count_bulge_;
+        CountType<1> count_internal_;
+        CountType<3> count_mismatch_external_;
+        CountType<3> count_mismatch_hairpin_;
+        CountType<3> count_mismatch_internal_;
+        CountType<3> count_mismatch_internal_1n_;
+        CountType<3> count_mismatch_internal_23_;
+        CountType<3> count_mismatch_multi_;
+        CountType<4> count_int11_;
+        CountType<5> count_int21_;
+        CountType<6> count_int22_;
+        CountType<2> count_dangle5_;
+        CountType<2> count_dangle3_;
+        CountType<1> count_ml_base_;
+        CountType<1> count_ml_closing_;
+        CountType<1> count_ml_intern_;
+        CountType<1> count_ninio_;
+        CountType<1> count_max_ninio_;
+        CountType<1> count_duplex_init_;
+        CountType<1> count_terminalAU_;
+        CountType<1> count_lxc_;
 };

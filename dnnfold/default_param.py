@@ -1,6 +1,6 @@
 import numpy as np
 
-stack = np.array([
+score_stack = np.array([
   [ 0, 0, 0, 0, 0, 0, 0, 0, ],
   [ 0, -240, -330, -210, -140, -210, -210, -140, ],
   [ 0, -330, -340, -250, -150, -220, -240, -150, ],
@@ -11,7 +11,7 @@ stack = np.array([
   [ 0, -140, -150, 130, 30, -60, -90, 130, ],
 ], dtype=np.float32) / -100.
 
-mismatch_hairpin = np.array([
+score_mismatch_hairpin = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -70,7 +70,7 @@ mismatch_hairpin = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-mismatch_internal = np.array([
+score_mismatch_internal = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -129,7 +129,7 @@ mismatch_internal = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-mismatch_internal_1n = np.array([
+score_mismatch_internal_1n = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -188,7 +188,7 @@ mismatch_internal_1n = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-mismatch_internal_23 = np.array([
+score_mismatch_internal_23 = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -247,7 +247,7 @@ mismatch_internal_23 = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-mismatch_multi = np.array([
+score_mismatch_multi = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -306,7 +306,7 @@ mismatch_multi = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-mismatch_external = np.array([
+score_mismatch_external = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -365,7 +365,7 @@ mismatch_external = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-dangle5 = np.array([
+score_dangle5 = np.array([
   [0, 0, 0, 0, 0,   ],
   [-10, -50, -30, -20, -10,   ],
   [0, -20, -30, 0, 0,   ],
@@ -376,7 +376,7 @@ dangle5 = np.array([
   [0, -20, -10, 0, 0,   ],
 ], dtype=np.float32) / -100.
 
-dangle3 = np.array([
+score_dangle3 = np.array([
   [0, 0, 0, 0, 0,   ],
   [-40, -110, -40, -130, -60,   ],
   [-80, -170, -80, -170, -120,   ],
@@ -387,7 +387,7 @@ dangle3 = np.array([
   [-10, -70, -10, -70, -10,   ],
 ], dtype=np.float32) / -100.
 
-int11 = np.array([
+score_int11 = np.array([
   [
     [
       [0, 0, 0, 0, 0, ],
@@ -854,7 +854,7 @@ int11 = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-int21 = np.array([
+score_int21 = np.array([
   [
     [
       [
@@ -2945,7 +2945,7 @@ int21 = np.array([
   ],
 ], dtype=np.float32) / -100.
 
-int22 = np.array([
+score_int22 = np.array([
   [
     [
       [
@@ -12125,14 +12125,14 @@ int22 = np.array([
   ],
 ], dtype=np.float32) / -100.
 
-hairpin = np.array([2147483647, 2147483647, 2147483647, 540, 560, 570, 540, 600, 550, 640, 650, 660, 670, 680, 690, 690, 700, 710, 710, 720, 720, 730, 730, 740, 740, 750, 750, 750, 760, 760, 770, ], dtype=np.float32) / -100.
-bulge = np.array([2147483647, 380, 280, 320, 360, 400, 440, 460, 470, 480, 490, 500, 510, 520, 530, 540, 540, 550, 550, 560, 570, 570, 580, 580, 580, 590, 590, 600, 600, 600, 610, ], dtype=np.float32) / -100.
-internal = np.array([2147483647, 2147483647, 100, 100, 110, 200, 200, 210, 230, 240, 250, 260, 270, 280, 290, 290, 300, 310, 310, 320, 330, 330, 340, 340, 350, 350, 350, 360, 360, 370, 370, ], dtype=np.float32) / -100.
-ml_base = np.array([0], dtype=np.float32) / -100.
-ml_closing = np.array([930], dtype=np.float32) / -100.
-ml_intern = np.array([-90], dtype=np.float32) / -100.
-ninio = np.array([60], dtype=np.float32) / -100.
-max_ninio = np.array([300], dtype=np.float32) / -100.
-duplex_init = np.array([410], dtype=np.float32) / -100.
-terminalAU = np.array([50], dtype=np.float32) / -100.
-lxc = np.array([107.856], dtype=np.float32)
+score_hairpin = np.array([2147483647, 2147483647, 2147483647, 540, 560, 570, 540, 600, 550, 640, 650, 660, 670, 680, 690, 690, 700, 710, 710, 720, 720, 730, 730, 740, 740, 750, 750, 750, 760, 760, 770, ], dtype=np.float32) / -100.
+score_bulge = np.array([2147483647, 380, 280, 320, 360, 400, 440, 460, 470, 480, 490, 500, 510, 520, 530, 540, 540, 550, 550, 560, 570, 570, 580, 580, 580, 590, 590, 600, 600, 600, 610, ], dtype=np.float32) / -100.
+score_internal = np.array([2147483647, 2147483647, 100, 100, 110, 200, 200, 210, 230, 240, 250, 260, 270, 280, 290, 290, 300, 310, 310, 320, 330, 330, 340, 340, 350, 350, 350, 360, 360, 370, 370, ], dtype=np.float32) / -100.
+score_ml_base = np.array([0], dtype=np.float32) / -100.
+score_ml_closing = np.array([930], dtype=np.float32) / -100.
+score_ml_intern = np.array([-90], dtype=np.float32) / -100.
+score_ninio = np.array([60], dtype=np.float32) / -100.
+score_max_ninio = np.array([300], dtype=np.float32) / -100.
+score_duplex_init = np.array([410], dtype=np.float32) / -100.
+score_terminalAU = np.array([50], dtype=np.float32) / -100.
+score_lxc = np.array([107.856], dtype=np.float32)

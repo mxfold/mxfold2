@@ -551,31 +551,78 @@ score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 }
 
 
+namespace py = pybind11;
+
+template <int D>
+auto
+get_unchecked(py::object obj, const char* name)
+{
+    auto v = obj.attr(name);
+    if (py::hasattr(v, "numpy")) 
+        v = v.attr("numpy")();
+    auto vv = v.cast<py::array_t<float>>();
+    return vv.unchecked<D>();
+}
+
+template <int D>
+auto
+get_mutable_unchecked(py::object obj, const char* name)
+{
+    auto v = obj.attr(name);
+    if (py::hasattr(v, "numpy")) 
+        v = v.attr("numpy")();
+    auto vv = v.cast<py::array_t<float>>();
+    return vv.mutable_unchecked<D>();
+}
+
 PyMFE::
 PyMFE(pybind11::object obj) :
-    stack_(obj.attr("stack").cast<pybind11::array_t<float>>().unchecked<2>()),
-    hairpin_(obj.attr("hairpin").cast<pybind11::array_t<float>>().unchecked<1>()),
-    bulge_(obj.attr("bulge").cast<pybind11::array_t<float>>().unchecked<1>()),
-    internal_(obj.attr("internal").cast<pybind11::array_t<float>>().unchecked<1>()),
-    mismatch_external_(obj.attr("mismatch_external").cast<pybind11::array_t<float>>().unchecked<3>()),
-    mismatch_hairpin_(obj.attr("mismatch_hairpin").cast<pybind11::array_t<float>>().unchecked<3>()),
-    mismatch_internal_(obj.attr("mismatch_internal").cast<pybind11::array_t<float>>().unchecked<3>()),
-    mismatch_internal_1n_(obj.attr("mismatch_internal_1n").cast<pybind11::array_t<float>>().unchecked<3>()),
-    mismatch_internal_23_(obj.attr("mismatch_internal_23").cast<pybind11::array_t<float>>().unchecked<3>()),
-    mismatch_multi_(obj.attr("mismatch_multi").cast<pybind11::array_t<float>>().unchecked<3>()),
-    int11_(obj.attr("int11").cast<pybind11::array_t<float>>().unchecked<4>()),
-    int21_(obj.attr("int21").cast<pybind11::array_t<float>>().unchecked<5>()),
-    int22_(obj.attr("int22").cast<pybind11::array_t<float>>().unchecked<6>()),
-    dangle5_(obj.attr("dangle5").cast<pybind11::array_t<float>>().unchecked<2>()),
-    dangle3_(obj.attr("dangle3").cast<pybind11::array_t<float>>().unchecked<2>()),
-    ml_base_(obj.attr("ml_base").cast<pybind11::array_t<float>>().unchecked<1>()),
-    ml_closing_(obj.attr("ml_closing").cast<pybind11::array_t<float>>().unchecked<1>()),
-    ml_intern_(obj.attr("ml_intern").cast<pybind11::array_t<float>>().unchecked<1>()),
-    ninio_(obj.attr("ninio").cast<pybind11::array_t<float>>().unchecked<1>()),
-    max_ninio_(obj.attr("max_ninio").cast<pybind11::array_t<float>>().unchecked<1>()),
-    duplex_init_(obj.attr("duplex_init").cast<pybind11::array_t<float>>().unchecked<1>()),
-    terminalAU_(obj.attr("terminalAU").cast<pybind11::array_t<float>>().unchecked<1>()),
-    lxc_(obj.attr("lxc").cast<pybind11::array_t<float>>().unchecked<1>())
+    score_stack_(::get_unchecked<2>(obj, "score_stack")),
+    score_hairpin_(::get_unchecked<1>(obj, "score_hairpin")),
+    score_bulge_(::get_unchecked<1>(obj, "score_bulge")),
+    score_internal_(::get_unchecked<1>(obj, "score_internal")),
+    score_mismatch_external_(::get_unchecked<3>(obj, "score_mismatch_external")),
+    score_mismatch_hairpin_(::get_unchecked<3>(obj, "score_mismatch_hairpin")),
+    score_mismatch_internal_(::get_unchecked<3>(obj, "score_mismatch_internal")),
+    score_mismatch_internal_1n_(::get_unchecked<3>(obj, "score_mismatch_internal_1n")),
+    score_mismatch_internal_23_(::get_unchecked<3>(obj, "score_mismatch_internal_23")),
+    score_mismatch_multi_(::get_unchecked<3>(obj, "score_mismatch_multi")),
+    score_int11_(::get_unchecked<4>(obj, "score_int11")),
+    score_int21_(::get_unchecked<5>(obj, "score_int21")),
+    score_int22_(::get_unchecked<6>(obj, "score_int22")),
+    score_dangle5_(::get_unchecked<2>(obj, "score_dangle5")),
+    score_dangle3_(::get_unchecked<2>(obj, "score_dangle3")),
+    score_ml_base_(::get_unchecked<1>(obj, "score_ml_base")),
+    score_ml_closing_(::get_unchecked<1>(obj, "score_ml_closing")),
+    score_ml_intern_(::get_unchecked<1>(obj, "score_ml_intern")),
+    score_ninio_(::get_unchecked<1>(obj, "score_ninio")),
+    score_max_ninio_(::get_unchecked<1>(obj, "score_max_ninio")),
+    score_duplex_init_(::get_unchecked<1>(obj, "score_duplex_init")),
+    score_terminalAU_(::get_unchecked<1>(obj, "score_terminalAU")),
+    score_lxc_(::get_unchecked<1>(obj, "score_lxc")),
+    count_stack_(::get_mutable_unchecked<2>(obj, "count_stack")),
+    count_hairpin_(::get_mutable_unchecked<1>(obj, "count_hairpin")),
+    count_bulge_(::get_mutable_unchecked<1>(obj, "count_bulge")),
+    count_internal_(::get_mutable_unchecked<1>(obj, "count_internal")),
+    count_mismatch_external_(::get_mutable_unchecked<3>(obj, "count_mismatch_external")),
+    count_mismatch_hairpin_(::get_mutable_unchecked<3>(obj, "count_mismatch_hairpin")),
+    count_mismatch_internal_(::get_mutable_unchecked<3>(obj, "count_mismatch_internal")),
+    count_mismatch_internal_1n_(::get_mutable_unchecked<3>(obj, "count_mismatch_internal_1n")),
+    count_mismatch_internal_23_(::get_mutable_unchecked<3>(obj, "count_mismatch_internal_23")),
+    count_mismatch_multi_(::get_mutable_unchecked<3>(obj, "count_mismatch_multi")),
+    count_int11_(::get_mutable_unchecked<4>(obj, "count_int11")),
+    count_int21_(::get_mutable_unchecked<5>(obj, "count_int21")),
+    count_int22_(::get_mutable_unchecked<6>(obj, "count_int22")),
+    count_dangle5_(::get_mutable_unchecked<2>(obj, "count_dangle5")),
+    count_dangle3_(::get_mutable_unchecked<2>(obj, "count_dangle3")),
+    count_ml_base_(::get_mutable_unchecked<1>(obj, "count_ml_base")),
+    count_ml_closing_(::get_mutable_unchecked<1>(obj, "count_ml_closing")),
+    count_ml_intern_(::get_mutable_unchecked<1>(obj, "count_ml_intern")),
+    count_ninio_(::get_mutable_unchecked<1>(obj, "count_ninio")),
+    count_max_ninio_(::get_mutable_unchecked<1>(obj, "count_max_ninio")),
+    count_duplex_init_(::get_mutable_unchecked<1>(obj, "count_duplex_init")),
+    count_terminalAU_(::get_mutable_unchecked<1>(obj, "count_terminalAU")),
+    count_lxc_(::get_mutable_unchecked<1>(obj, "count_lxc"))
 {
 
 }
@@ -601,9 +648,9 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
     auto e = 0.;
 
     if (l <= 30)
-        e += hairpin_[l];
+        e += score_hairpin_[l];
     else
-        e += hairpin_[30] + (int)(lxc_[0] * log(l / 30.) / 100.);
+        e += score_hairpin_[30] + (int)(score_lxc_[0] * log(l / 30.) / 100.);
 
     if (l < 3) return e;
 
@@ -618,9 +665,9 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
 
     const auto type = ::pair[s[i]][s[j]];
     if (l == 3)
-        e += type > 2 ? terminalAU_[0] : 0;
+        e += type > 2 ? score_terminalAU_[0] : 0;
     else
-        e += mismatch_hairpin_(type, s[i+1], s[j-1]);
+        e += score_mismatch_hairpin_(type, s[i+1], s[j-1]);
 
     return e;
 }
@@ -637,49 +684,49 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
     auto e = std::numeric_limits<ScoreType>::lowest();
 
     if (ll==0) // stack
-        return stack_(type1, type2);
+        return score_stack_(type1, type2);
     else if (ls==0) // bulge
     {
-        auto e = ll<=30 ? bulge_[ll] : bulge_[30] + (int)(lxc_[0] * log(ll / 30.) / 100.);
+        auto e = ll<=30 ? score_bulge_[ll] : score_bulge_[30] + (int)(score_lxc_[0] * log(ll / 30.) / 100.);
         if (ll==1) 
-            e += stack_(type1, type2);
+            e += score_stack_(type1, type2);
         else
         {
             if (type1 > 2)
-                e += terminalAU_[0];
+                e += score_terminalAU_[0];
             if (type2 > 2)
-                e += terminalAU_[0];
+                e += score_terminalAU_[0];
         }
         return e;
     }
     else // internal loop
     {
         if (ll==1 && ls==1) // 1x1 loop
-            return int11_(type1, type2, s[i+1], s[j-1]);
+            return score_int11_(type1, type2, s[i+1], s[j-1]);
         else if (l1==2 && l2==1) // 2x1 loop
-            return int21_(type2, type1, s[l+1], s[i+1], s[k-1]);
+            return score_int21_(type2, type1, s[l+1], s[i+1], s[k-1]);
         else if (l1==1 && l2==2) // 1x2 loop
-            return int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
+            return score_int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
         else if (ls==1) // 1xn loop
         {
-            auto e = ll+1 <= 30 ? internal_[ll+1] : internal_[30] + (int)(lxc_[0] * log((ll+1) / 30.) / 100.);
-            e += std::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
-            e += mismatch_internal_1n_(type1, s[i+1], s[j-1]) + mismatch_internal_1n_(type2, s[l+1], s[k-1]);
+            auto e = ll+1 <= 30 ? score_internal_[ll+1] : score_internal_[30] + (int)(score_lxc_[0] * log((ll+1) / 30.) / 100.);
+            e += std::max(score_max_ninio_[0], (int)(ll-ls) * score_ninio_[0]);
+            e += score_mismatch_internal_1n_(type1, s[i+1], s[j-1]) + score_mismatch_internal_1n_(type2, s[l+1], s[k-1]);
             return e;
         }
         else if (ls==2 && ll==2) // 2x2 loop
-            return int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]);
+            return score_int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]);
         else if (ls==2 && ll==3) // 2x3 loop
         {
-            auto e = internal_[ls+ll] + ninio_[0];
-            e += mismatch_internal_23_(type1, s[i+1], s[j-1]) + mismatch_internal_23_(type2, s[l+1], s[k-1]);
+            auto e = score_internal_[ls+ll] + score_ninio_[0];
+            e += score_mismatch_internal_23_(type1, s[i+1], s[j-1]) + score_mismatch_internal_23_(type2, s[l+1], s[k-1]);
             return e;
         }
         else // generic internal loop
         {
-            auto e = ls+ll <= 30 ? internal_[ls+ll] : internal_[30] + (int)(lxc_[0] * log((ls+ll) / 30.) / 100.);
-            e += std::max(max_ninio_[0], (int)(ll-ls) * ninio_[0]);
-            e += mismatch_internal_(type1, s[i+1], s[j-1]) + mismatch_internal_(type2, s[l+1], s[k-1]);
+            auto e = ls+ll <= 30 ? score_internal_[ls+ll] : score_internal_[30] + (int)(score_lxc_[0] * log((ls+ll) / 30.) / 100.);
+            e += std::max(score_max_ninio_[0], (int)(ll-ls) * score_ninio_[0]);
+            e += score_mismatch_internal_(type1, s[i+1], s[j-1]) + score_mismatch_internal_(type2, s[l+1], s[k-1]);
             return e;
         }
     }
@@ -692,11 +739,11 @@ score_multi_loop(const SeqType& s, size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;
     const auto type = ::pair[s[j]][s[i]];
-    e += mismatch_multi_(type, s[j-1], s[i+1]);
+    e += score_mismatch_multi_(type, s[j-1], s[i+1]);
     if (type > 2) 
-        e += terminalAU_[0];
-    e += ml_intern_[0];
-    e += ml_closing_[0];
+        e += score_terminalAU_[0];
+    e += score_ml_intern_[0];
+    e += score_ml_closing_[0];
 
     return e;
 }
@@ -709,14 +756,14 @@ score_multi_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
     auto e = 0.;
     const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_multi_(type, s[i-1], s[j+1]);
+        e += score_mismatch_multi_(type, s[i-1], s[j+1]);
     else if (i-1>=1)
-        e += dangle5_(type, s[i-1]);
+        e += score_dangle5_(type, s[i-1]);
     else if (j+1<=L)
-        e += dangle3_(type, s[j+1]);
+        e += score_dangle3_(type, s[j+1]);
     if (type > 2) 
-        e += terminalAU_[0];
-    e += ml_intern_[0];
+        e += score_terminalAU_[0];
+    e += score_ml_intern_[0];
 
     return e;
 }
@@ -725,7 +772,7 @@ auto
 PyMFE::
 score_multi_unpaired(const SeqType& s, size_t i) const -> ScoreType
 {
-    return ml_base_[0];
+    return score_ml_base_[0];
 }
 
 auto
@@ -736,13 +783,13 @@ score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
     auto e = 0.;
     const auto type = ::pair[s[i]][s[j]];
     if (i-1>=1 && j+1<=L)
-        e += mismatch_external_(type, s[i-1], s[j+1]);
+        e += score_mismatch_external_(type, s[i-1], s[j+1]);
     else if (i-1>=1)
-        e += dangle5_(type, s[i-1]);
+        e += score_dangle5_(type, s[i-1]);
     else if (j+1<=L)
-        e += dangle3_(type, s[j+1]);
+        e += score_dangle3_(type, s[j+1]);
     if (type > 2) 
-        e += terminalAU_[0];
+        e += score_terminalAU_[0];
     
     return e;
 }
