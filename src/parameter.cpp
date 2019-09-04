@@ -650,7 +650,7 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
     if (l <= 30)
         e += score_hairpin_[l];
     else
-        e += score_hairpin_[30] + (int)(score_lxc_[0] * log(l / 30.) / 100.);
+        e += score_hairpin_[30] + (score_lxc_[0] * log(l / 30.) / 100.);
 
     if (l < 3) return e;
 
@@ -672,6 +672,41 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
     return e;
 }
 
+void
+PyMFE::
+count_hairpin(const SeqType& s, size_t i, size_t j, ScoreType v)
+{
+    const auto l = (j-1)-(i+1)+1;
+
+    if (l <= 30)
+        count_hairpin_[l] += v;
+    else
+    {
+        count_hairpin_[30] += v;
+        count_lxc_[0] += v * log(l / 30.) / 100.;
+    }
+
+    if (l < 3) return;
+
+#if 0
+    if (3 <= l && l <= 6) {
+        SeqType sl(&s[i], &s[j]+1);
+        auto it = special_loops_.find(sl);
+        if (it != std::end(special_loops_))
+            return it->second / -100.;
+    }           
+#endif
+
+    const auto type = ::pair[s[i]][s[j]];
+    if (l == 3)
+    {
+        if (type > 2)        
+            count_terminalAU_[0] += v;
+    }
+    else
+        count_mismatch_hairpin_(type, s[i+1], s[j-1]) += v;
+}
+
 auto
 PyMFE::
 score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) const -> ScoreType
@@ -687,7 +722,7 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
         return score_stack_(type1, type2);
     else if (ls==0) // bulge
     {
-        auto e = ll<=30 ? score_bulge_[ll] : score_bulge_[30] + (int)(score_lxc_[0] * log(ll / 30.) / 100.);
+        auto e = ll<=30 ? score_bulge_[ll] : score_bulge_[30] + (score_lxc_[0] * log(ll / 30.) / 100.);
         if (ll==1) 
             e += score_stack_(type1, type2);
         else
@@ -709,8 +744,8 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
             return score_int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
         else if (ls==1) // 1xn loop
         {
-            auto e = ll+1 <= 30 ? score_internal_[ll+1] : score_internal_[30] + (int)(score_lxc_[0] * log((ll+1) / 30.) / 100.);
-            e += std::max(score_max_ninio_[0], (int)(ll-ls) * score_ninio_[0]);
+            auto e = ll+1 <= 30 ? score_internal_[ll+1] : score_internal_[30] + (score_lxc_[0] * log((ll+1) / 30.) / 100.);
+            e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
             e += score_mismatch_internal_1n_(type1, s[i+1], s[j-1]) + score_mismatch_internal_1n_(type2, s[l+1], s[k-1]);
             return e;
         }
@@ -724,13 +759,96 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
         }
         else // generic internal loop
         {
-            auto e = ls+ll <= 30 ? score_internal_[ls+ll] : score_internal_[30] + (int)(score_lxc_[0] * log((ls+ll) / 30.) / 100.);
-            e += std::max(score_max_ninio_[0], (int)(ll-ls) * score_ninio_[0]);
+            auto e = ls+ll <= 30 ? score_internal_[ls+ll] : score_internal_[30] + (score_lxc_[0] * log((ls+ll) / 30.) / 100.);
+            e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
             e += score_mismatch_internal_(type1, s[i+1], s[j-1]) + score_mismatch_internal_(type2, s[l+1], s[k-1]);
             return e;
         }
     }
     return e;
+}
+
+void
+PyMFE::
+count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, ScoreType v)
+{
+    const auto type1 = ::pair[s[i]][s[j]];
+    const auto type2 = ::pair[s[l]][s[k]];
+    const auto l1 = (k-1)-(i+1)+1;
+    const auto l2 = (j-1)-(l+1)+1;
+    const auto [ls, ll] = std::minmax(l1, l2);
+
+    if (ll==0) // stack
+        count_stack_(type1, type2) += v;
+    else if (ls==0) // bulge
+    {
+        if (ll<=30)
+            count_bulge_[ll] += v;
+        else
+        {
+            count_bulge_[30] += v;
+            count_lxc_[0] += v * log(ll / 30.) / 100.;
+        }
+        if (ll==1) 
+            count_stack_(type1, type2) += v;
+        else
+        {
+            if (type1 > 2)
+                count_terminalAU_[0] += v;
+            if (type2 > 2)
+                count_terminalAU_[0] += v;
+        }
+    }
+    else // internal loop
+    {
+        if (ll==1 && ls==1) // 1x1 loop
+            count_int11_(type1, type2, s[i+1], s[j-1]) += v;
+        else if (l1==2 && l2==1) // 2x1 loop
+            count_int21_(type2, type1, s[l+1], s[i+1], s[k-1]) += v;
+        else if (l1==1 && l2==2) // 1x2 loop
+            count_int21_(type1, type2, s[i+1], s[l+1], s[j-1]) += v;
+        else if (ls==1) // 1xn loop
+        {
+            if (ll+1 <= 30)
+                count_internal_[ll+1] += v;
+            else
+            {
+                count_internal_[30] += v;
+                count_lxc_[0] += v * log((ll+1) / 30.) / 100.;
+            }
+            if (score_max_ninio_[0] > (ll-ls) * score_ninio_[0])
+                count_max_ninio_[0] += v;
+            else
+                count_ninio_[0] += v * (ll-ls);
+            count_mismatch_internal_1n_(type1, s[i+1], s[j-1]) += v;
+            count_mismatch_internal_1n_(type2, s[l+1], s[k-1]) += v;
+        }
+        else if (ls==2 && ll==2) // 2x2 loop
+            count_int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]) += v;
+        else if (ls==2 && ll==3) // 2x3 loop
+        {
+            count_internal_[ls+ll] += v;
+            count_ninio_[0] += v;
+            count_mismatch_internal_23_(type1, s[i+1], s[j-1]) += v;
+            count_mismatch_internal_23_(type2, s[l+1], s[k-1]) += v;
+        }
+        else // generic internal loop
+        {
+            if (ls+ll <= 30)
+                count_internal_[ls+ll] += v;
+            else
+            {
+                count_internal_[30] += v;
+                count_lxc_[0] += v * log((ls+ll) / 30.) / 100.;
+            }
+            if (score_max_ninio_[0] > (ll-ls) * score_ninio_[0])
+                count_max_ninio_[0] += v;
+            else
+                count_ninio_[0] += v * (ll-ls);
+            count_mismatch_internal_(type1, s[i+1], s[j-1]) += v;
+            count_mismatch_internal_(type2, s[l+1], s[k-1]) += v;
+        }
+    }
 }
 
 auto
@@ -746,6 +864,18 @@ score_multi_loop(const SeqType& s, size_t i, size_t j) const -> ScoreType
     e += score_ml_closing_[0];
 
     return e;
+}
+
+void
+PyMFE::
+count_multi_loop(const SeqType& s, size_t i, size_t j, ScoreType v)
+{
+    const auto type = ::pair[s[j]][s[i]];
+    count_mismatch_multi_(type, s[j-1], s[i+1]) += v;
+    if (type > 2) 
+        count_terminalAU_[0] += v;
+    count_ml_intern_[0] += v;
+    count_ml_closing_[0] += v;
 }
 
 auto
@@ -768,11 +898,35 @@ score_multi_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
     return e;
 }
 
+void
+PyMFE::
+count_multi_paired(const SeqType& s, size_t i, size_t j, ScoreType v)
+{
+    const auto L = s.size()-2;
+    const auto type = ::pair[s[i]][s[j]];
+    if (i-1>=1 && j+1<=L)
+        count_mismatch_multi_(type, s[i-1], s[j+1]) += v;
+    else if (i-1>=1)
+        count_dangle5_(type, s[i-1]) += v;
+    else if (j+1<=L)
+        count_dangle3_(type, s[j+1]) += v;
+    if (type > 2) 
+        count_terminalAU_[0] += v;
+    count_ml_intern_[0] += v;
+}
+
 auto
 PyMFE::
 score_multi_unpaired(const SeqType& s, size_t i) const -> ScoreType
 {
     return score_ml_base_[0];
+}
+
+void
+PyMFE::
+count_multi_unpaired(const SeqType& s, size_t i, ScoreType v)
+{
+    count_ml_base_[0] += v;
 }
 
 auto
@@ -792,4 +946,20 @@ score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
         e += score_terminalAU_[0];
     
     return e;
+}
+
+void
+PyMFE::
+count_external_paired(const SeqType& s, size_t i, size_t j, ScoreType v)
+{
+    const auto L = s.size()-2;
+    const auto type = ::pair[s[i]][s[j]];
+    if (i-1>=1 && j+1<=L)
+        count_mismatch_external_(type, s[i-1], s[j+1]) += v;
+    else if (i-1>=1)
+        count_dangle5_(type, s[i-1]) += v;
+    else if (j+1<=L)
+        count_dangle3_(type, s[j+1]) += v;
+    if (type > 2) 
+        count_terminalAU_[0] += v;
 }

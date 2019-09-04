@@ -96,24 +96,6 @@ auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_
     return penalty;
 }
 
-template < typename T >
-float compare(const T& a, const T& b)
-{
-    return a - b;
-}
-
-template < typename T >
-T NEG_INF()
-{
-    return std::numeric_limits<T>::lowest();
-}
-
-template < typename T >
-T ZERO()
-{
-    return 0.;
-}
-
 template < typename P, typename S >
 Fold<P, S>::
 Fold(std::unique_ptr<P>&& p)
@@ -127,8 +109,8 @@ bool
 Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k)
 {
-    static const ScoreType NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
-    if (::compare(max_v, new_v) < 0 && ::compare(NEG_INF2, new_v) < 0)
+    static const ScoreType NEG_INF2 = std::numeric_limits<ScoreType>::lowest()/1e10;
+    if (max_v < new_v && NEG_INF2 < new_v)
     {
         max_v = new_v;
         max_t = {tt, k};
@@ -142,8 +124,8 @@ bool
 Fold<P, S>::
 update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q)
 {
-    static const ScoreType NEG_INF2 = ::NEG_INF<ScoreType>()/1e10;
-    if (::compare(max_v, new_v) < 0 && ::compare(NEG_INF2, new_v) < 0)
+    static const ScoreType NEG_INF2 = std::numeric_limits<ScoreType>::lowest()/1e10;
+    if (max_v < new_v && NEG_INF2 < new_v)
     {
         max_v = new_v;
         max_t = {tt, std::make_pair(p, q)};
@@ -159,7 +141,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
 {
     const auto seq2 = param->convert_sequence(seq);
     const auto L = seq.size();
-    const ScoreType NEG_INF = ::NEG_INF<ScoreType>();
+    const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
     Cv_.clear();  Cv_.resize(L+1, NEG_INF);
     Mv_.clear();  Mv_.resize(L+1, NEG_INF);
     M1v_.clear(); M1v_.resize(L+1, NEG_INF);
@@ -370,7 +352,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
     const auto penalty = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Ft_[1], 1, L);
-    auto e = ::ZERO<typename P::ScoreType>();
+    auto e = 0.;
 
     while (!tb_queue.empty())
     {
