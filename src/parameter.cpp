@@ -650,7 +650,7 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
     if (l <= 30)
         e += score_hairpin_[l];
     else
-        e += score_hairpin_[30] + (score_lxc_[0] * log(l / 30.) / 100.);
+        e += score_hairpin_[30] + (score_lxc_[0] * log(l / 30.));
 
     if (l < 3) return e;
 
@@ -722,7 +722,7 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
         return score_stack_(type1, type2);
     else if (ls==0) // bulge
     {
-        auto e = ll<=30 ? score_bulge_[ll] : score_bulge_[30] + (score_lxc_[0] * log(ll / 30.) / 100.);
+        auto e = ll<=30 ? score_bulge_[ll] : score_bulge_[30] + (score_lxc_[0] * log(ll / 30.));
         if (ll==1) 
             e += score_stack_(type1, type2);
         else
@@ -744,7 +744,7 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
             return score_int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
         else if (ls==1) // 1xn loop
         {
-            auto e = ll+1 <= 30 ? score_internal_[ll+1] : score_internal_[30] + (score_lxc_[0] * log((ll+1) / 30.) / 100.);
+            auto e = ll+1 <= 30 ? score_internal_[ll+1] : score_internal_[30] + (score_lxc_[0] * log((ll+1) / 30.));
             e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
             e += score_mismatch_internal_1n_(type1, s[i+1], s[j-1]) + score_mismatch_internal_1n_(type2, s[l+1], s[k-1]);
             return e;
@@ -759,7 +759,7 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
         }
         else // generic internal loop
         {
-            auto e = ls+ll <= 30 ? score_internal_[ls+ll] : score_internal_[30] + (score_lxc_[0] * log((ls+ll) / 30.) / 100.);
+            auto e = ls+ll <= 30 ? score_internal_[ls+ll] : score_internal_[30] + (score_lxc_[0] * log((ls+ll) / 30.));
             e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
             e += score_mismatch_internal_(type1, s[i+1], s[j-1]) + score_mismatch_internal_(type2, s[l+1], s[k-1]);
             return e;

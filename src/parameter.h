@@ -37,7 +37,16 @@ class MFE
         ScoreType score_external_paired(const SeqType& seq, size_t i, size_t j) const;
         ScoreType score_external_unpaired(const SeqType& seq, size_t i) const { return 0.0; }
 
-    private:
+        void count_hairpin(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
+        void count_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l, ScoreType v) {}
+        void count_multi_loop(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
+        void count_multi_paired(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
+        void count_multi_unpaired(const SeqType& seq, size_t i, ScoreType v) {}
+        void count_external_zero(const SeqType& seq, ScoreType v) {}
+        void count_external_paired(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
+        void count_external_unpaired(const SeqType& seq, size_t i, ScoreType v) {}
+
+    public:
         VVI stack_;
         VI hairpin_;
         VI bulge_;

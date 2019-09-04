@@ -364,6 +364,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
         {
             case TBType::C_HAIRPIN_LOOP: {
                 e += param->score_hairpin(seq2, i, j) + penalty[i][j];
+                param->count_hairpin(seq2, i, j, 1.);
 #if 0
                 std::cout << "C_HAIRPIN_LOOP: " << i << ", " << j << ", " 
                     << param->template hairpin<typename P::ScoreType>(seq2, i, j).template item<float>() << std::endl;
@@ -376,6 +377,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 const auto l = j-q;
                 assert(k < l);
                 e += param->score_single_loop(seq2, i, j, k, l) + penalty[i][j];
+                param->count_single_loop(seq2, i, j, k, l, 1.);
 #if 0
                 std::cout << "C_INTERNAL_LOOP: " << i << ", " << j << ", " << k << ", " << l << ", " 
                     << param->template single_loop<typename P::ScoreType>(seq2, i, j, k, l).template item<float>() << std::endl;
@@ -386,6 +388,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             case TBType::C_MULTI_LOOP: {
                 const auto u = std::get<0>(kl);
                 e += param->score_multi_loop(seq2, i, j) + penalty[i][j];
+                param->count_multi_loop(seq2, i, j, 1.);
 #if 0
                 std::cout << "C_MULTI_LOOP: " << i << ", " << j << ", " << k << ", "
                     << param->template multi_loop<typename P::ScoreType>(seq2, i, j).template item<float>() << std::endl;
@@ -397,8 +400,12 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             case TBType::M_PAIRED: {
                 const auto u = std::get<0>(kl);
                 auto ee = param->score_multi_paired(seq2, u, j) + penalty[u][j];
+                param->count_multi_paired(seq2, u, j, 1.);
                 if (u-i > 0)
+                {
                     ee += static_cast<float>(u-i) * param->score_multi_unpaired(seq2, u-1);
+                    param->count_multi_unpaired(seq2, u-1, static_cast<float>(u-i));
+                }
                 e += ee; 
 #if 0
                 std::cout << "M_PAIRED: " << i << ", " << j << ", " << k << ", "
@@ -410,6 +417,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             case TBType::M_BIFURCATION: {
                 const auto u = std::get<0>(kl);
                 e += param->score_multi_paired(seq2, u, j) + penalty[u][j];
+                param->count_multi_paired(seq2, u, j, 1.);
 #if 0
                 std::cout << "M_BIRURCATION: " << i << ", " << j << ", " << k << ", "
                     << param->template multi_paired<typename P::ScoreType>(seq2, k+1, j).template item<float>() << std::endl;
@@ -420,6 +428,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             }
             case TBType::M_UNPAIRED: {
                 e += param->score_multi_unpaired(seq2, j);
+                param->count_multi_unpaired(seq2, j, 1.);
 #if 0
                 std::cout << "M_UNPAIRED: " << i << ", " << j << ", " 
                     << param->template multi_unpaired<typename P::ScoreType>(seq2, j).template item<float>() << std::endl;
@@ -429,6 +438,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             }    
             case TBType::M1_PAIRED: {
                 e += param->score_multi_paired(seq2, i, j) + penalty[i][j];
+                param->count_multi_paired(seq2, i, j, 1.);
 #if 0
                 std::cout << "M1_PAIRED: " << i << ", " << j << ", " 
                     << param->template multi_paired<typename P::ScoreType>(seq2, i, j).template item<float>() << std::endl;
@@ -438,6 +448,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             }
             case TBType::M1_UNPAIRED: {
                 e += param->score_multi_unpaired(seq2, j);
+                param->count_multi_unpaired(seq2, j, 1.);
 #if 0
                 std::cout << "M1_UNPAIRED: " << i << ", " << j << ", " 
                     << param->template multi_unpaired<typename P::ScoreType>(seq2, j).template item<float>() << std::endl;
@@ -447,6 +458,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             }
             case TBType::F_START: {
                 e += param->score_external_zero(seq2);
+                param->count_external_zero(seq2, 1.);
 #if 0
                 std::cout << "F_START: " << i << ", " << j << ", " 
                     << param->template external_zero<typename P::ScoreType>(seq2).template item<float>() << std::endl;
@@ -455,6 +467,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             }
             case TBType::F_UNPAIRED: {
                 e += param->score_external_unpaired(seq2, i);
+                param->count_external_unpaired(seq2, i, 1.);
 #if 0
                 std::cout << "F_UNPAIRED: " << i << ", " << j << ", " 
                     << param->template external_unpaired<typename P::ScoreType>(seq2, i).template item<float>() << std::endl;
@@ -465,6 +478,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
             case TBType::F_BIFURCATION: {
                 const auto k = std::get<0>(kl);
                 e += param->score_external_paired(seq2, i, k) + penalty[i][k];
+                param->count_external_paired(seq2, i, k, 1.);
 #if 0
                 std::cout << "F_BIFURCATION: " << i << ", " << j << ", " << k << ", " 
                     << param->template external_paired<typename P::ScoreType>(seq2, i, k).template item<float>() << std::endl;
