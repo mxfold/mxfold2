@@ -247,7 +247,7 @@ score_mismatch_internal_23 = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-score_mismatch_internal_multi = np.array([
+score_mismatch_multi = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
@@ -306,7 +306,7 @@ score_mismatch_internal_multi = np.array([
   ], 
 ], dtype=np.float32) / -100.
 
-score_mismatch_internal_external = np.array([
+score_mismatch_external = np.array([
   [
     [ 0, 0, 0, 0, 0, ],
     [ 0, 0, 0, 0, 0, ],
