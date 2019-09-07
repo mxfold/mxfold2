@@ -558,8 +558,8 @@ auto
 get_unchecked(py::object obj, const char* name)
 {
     auto v = obj.attr(name);
-    if (py::hasattr(v, "numpy")) 
-        v = v.attr("numpy")();
+    if (py::hasattr(v, "detach")) // assume that v is a torch.tensor with require_grad
+        v = v.attr("detach")().attr("numpy")();
     auto vv = v.cast<py::array_t<float>>();
     return vv.unchecked<D>();
 }
