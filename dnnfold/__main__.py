@@ -1,27 +1,19 @@
-#%%
-import dnnfold
-from .param import Param
-from .dataset import FastaDataset
+from argparse import ArgumentParser
 
-def run(input_fasta):
-    p = Param(dnnfold.default_param)
-    a = FastaDataset(input_fasta)
-    for h, s in a:
-        sc, r = dnnfold.predict(s, p)
-        print(">"+h)
-        print(s)
-        print(r+" ({:.1f})".format(sc))
-        print()
+from .train import Train
+from .predict import Predict
 
-#%%
-import argparse
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='DNNfold',
+def main(args=None):
+    parser = ArgumentParser(
+        description='RNA secondary structure prediction',
         fromfile_prefix_chars='@',
-        add_help=True
-    )
-    parser.add_argument('input_fasta', type=str, help='FASTA-formatted file')
-    parser.add_argument('--param', type=str, help='parameter file')
-    args = parser.parse_args()
-    run(args.input_fasta)
+        add_help=True)
+    subparser = parser.add_subparsers(title='Sub-commands')
+    parser.set_defaults(func = lambda args: parser.print_help())
+    Train.add_args(subparser)
+    Predict.add_args(subparser)
+    args = parser.parse_args(args=args)
+    args.func(args)
+
+if __name__ == '__main__':
+    main()
