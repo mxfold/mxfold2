@@ -66,4 +66,8 @@ setup(
     ext_modules=[CMakeExtension('dnnfold/dnnfold')],
     cmdclass=dict(build_ext=CMakeBuild),
     zip_safe=False,
+    entry_points='''
+        [console_scripts]
+        {pkg}={pkg}.__main__:main
+    '''.format(pkg='dnnfold'),
 )
