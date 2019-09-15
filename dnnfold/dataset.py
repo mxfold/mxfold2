@@ -45,9 +45,10 @@ class BPseqDataset(Dataset):
             p = [0]
             s = ['']
             for l in f:
-                idx, c, pair = l.rstrip('\n').split()
-                s.append(c)
-                p.append(int(pair))
+                if not l.startswith('#'):
+                    idx, c, pair = l.rstrip('\n').split()
+                    s.append(c)
+                    p.append(int(pair))
         seq = ''.join(s)
         pair = ['.'] * len(seq)
         for i, j in enumerate(p):

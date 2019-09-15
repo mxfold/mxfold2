@@ -10,8 +10,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from dnnfold.dataset import BPseqDataset
-from dnnfold.fold import RNAFold
+from .dataset import BPseqDataset
+from .fold import RNAFold
 
 
 class StructuredLoss(nn.Module):
@@ -64,7 +64,7 @@ class Train:
                 self.optimizer.step()
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(len(seqs))
-        #print('\nTrain Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
+        print('Train Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
 
 
     def save_checkpoint(self, outdir, epoch):

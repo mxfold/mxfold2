@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from .dataset import FastaDataset
 from .fold import RNAFold
@@ -16,17 +15,22 @@ class Predict:
         self.test_loader = None
 
 
-    def predict(self):
+    def predict(self, use_bpseq):
         self.model.eval()
         with torch.no_grad():
             for headers, seqs in self.test_loader:
                 # data = data.to(self.device)
                 for header, seq in zip(headers, seqs):
-                    sc, p = self.model.predict(seq)
+                    sc, pred, bp = self.model.predict(seq)
                     # output = output.cpu().numpy()
-                    print('>'+header)
-                    print(seq)
-                    print(p, "({:.1f})".format(sc))
+                    if use_bpseq:
+                        print('# {} ({:.1f})'.format(header, sc))
+                        for i in range(1, len(bp)):
+                            print('{}\t{}\t{}'.format(i, seq[i-1], bp[i]))
+                    else:
+                        print('>'+header)
+                        print(seq)
+                        print(pred, "({:.1f})".format(sc))
 
 
     def run(self, args):
@@ -41,11 +45,11 @@ class Predict:
             self.model = RNAFold()
             self.model.load_state_dict(torch.load(args.model))
         else:
-            import dnnfold.default_param
-            self.model = RNAFold(dnnfold.default_param)
+            from . import default_param
+            self.model = RNAFold(default_param)
 
         # self.model.to(self.device)
-        self.predict()
+        self.predict(args.bpseq)
 
 
     @classmethod
@@ -59,5 +63,7 @@ class Predict:
                             help='random seed (default: 1)')
         subparser.add_argument('--model', type=str, default='',
                             help='file name of trained model') 
+        subparser.add_argument('--bpseq', action='store_true',
+                            help='output the prediction with BPSEQ format')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

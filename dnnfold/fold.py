@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
-import dnnfold.dnnfold
+
+from . import interface
+
 
 class RNAFold(nn.Module):
     def __init__(self, init_param=None):
@@ -84,7 +86,7 @@ class RNAFold(nn.Module):
     def forward(self, seq, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
         self.clear_count()
         with torch.no_grad():
-            v, p = dnnfold.dnnfold.predict(seq, self, constraint=constraint, 
+            v, _, _ = interface.predict(seq, self, constraint=constraint, 
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
         s  = torch.sum(self.count_stack * self.score_stack)
         s += torch.sum(self.count_hairpin * self.score_hairpin)
@@ -116,6 +118,5 @@ class RNAFold(nn.Module):
     def predict(self, seq, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
         self.clear_count()
         with torch.no_grad():
-            v, p = dnnfold.dnnfold.predict(seq, self, constraint=constraint, 
+            return interface.predict(seq, self, constraint=constraint, 
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
-        return v, p

@@ -30,7 +30,7 @@ auto predict(const std::string& seq, py::object pa,
         auto e = f.compute_viterbi(seq);
         auto p = f.traceback_viterbi();
         auto s = make_paren(p);
-        return std::make_pair(e, s);
+        return std::make_tuple(e, s, p);
     }
     else
     {
@@ -47,11 +47,11 @@ auto predict(const std::string& seq, py::object pa,
         auto p = f.traceback_viterbi();
         f.traceback_viterbi(seq, options);
         auto s = make_paren(p);
-        return std::make_pair(e, s);
+        return std::make_tuple(e, s, p);
     }
 }
 
-PYBIND11_MODULE(dnnfold, m)
+PYBIND11_MODULE(interface, m)
 {
     using namespace std::literals::string_literals;
     using namespace pybind11::literals;
