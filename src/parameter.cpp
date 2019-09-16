@@ -577,10 +577,13 @@ get_mutable_unchecked(py::object obj, const char* name)
 
 PyMFE::
 PyMFE(pybind11::object obj) :
+    use_score_hairpin_at_least_(py::hasattr(obj, "score_hairpin_at_least")),
+    use_score_bulge_at_least_(py::hasattr(obj, "score_bulge_at_least")),
+    use_score_internal_at_least_(py::hasattr(obj, "score_internal_at_least")),
     score_stack_(::get_unchecked<2>(obj, "score_stack")),
-    score_hairpin_(::get_unchecked<1>(obj, "score_hairpin")),
-    score_bulge_(::get_unchecked<1>(obj, "score_bulge")),
-    score_internal_(::get_unchecked<1>(obj, "score_internal")),
+    score_hairpin_(::get_unchecked<1>(obj, use_score_hairpin_at_least_ ? "score_hairpin_at_least" : "score_hairpin")),
+    score_bulge_(::get_unchecked<1>(obj, use_score_bulge_at_least_ ? "score_bulge_at_least" : "score_bulge")),
+    score_internal_(::get_unchecked<1>(obj, use_score_internal_at_least_ ? "score_internal_at_least" : "score_internal")),
     score_mismatch_external_(::get_unchecked<3>(obj, "score_mismatch_external")),
     score_mismatch_hairpin_(::get_unchecked<3>(obj, "score_mismatch_hairpin")),
     score_mismatch_internal_(::get_unchecked<3>(obj, "score_mismatch_internal")),
@@ -600,10 +603,13 @@ PyMFE(pybind11::object obj) :
     score_duplex_init_(::get_unchecked<1>(obj, "score_duplex_init")),
     score_terminalAU_(::get_unchecked<1>(obj, "score_terminalAU")),
     score_lxc_(::get_unchecked<1>(obj, "score_lxc")),
+    use_count_hairpin_at_least_(py::hasattr(obj, "count_hairpin_at_least")),
+    use_count_bulge_at_least_(py::hasattr(obj, "count_bulge_at_least")),
+    use_count_internal_at_least_(py::hasattr(obj, "count_internal_at_least")),
     count_stack_(::get_mutable_unchecked<2>(obj, "count_stack")),
-    count_hairpin_(::get_mutable_unchecked<1>(obj, "count_hairpin")),
-    count_bulge_(::get_mutable_unchecked<1>(obj, "count_bulge")),
-    count_internal_(::get_mutable_unchecked<1>(obj, "count_internal")),
+    count_hairpin_(::get_mutable_unchecked<1>(obj, use_count_hairpin_at_least_ ? "count_hairpin_at_least" : "count_hairpin")),
+    count_bulge_(::get_mutable_unchecked<1>(obj, use_count_bulge_at_least_ ? "count_bulge_at_least" : "count_bulge")),
+    count_internal_(::get_mutable_unchecked<1>(obj, use_count_internal_at_least_ ? "count_internal_at_least" : "count_internal")),
     count_mismatch_external_(::get_mutable_unchecked<3>(obj, "count_mismatch_external")),
     count_mismatch_hairpin_(::get_mutable_unchecked<3>(obj, "count_mismatch_hairpin")),
     count_mismatch_internal_(::get_mutable_unchecked<3>(obj, "count_mismatch_internal")),
@@ -622,9 +628,49 @@ PyMFE(pybind11::object obj) :
     count_max_ninio_(::get_mutable_unchecked<1>(obj, "count_max_ninio")),
     count_duplex_init_(::get_mutable_unchecked<1>(obj, "count_duplex_init")),
     count_terminalAU_(::get_mutable_unchecked<1>(obj, "count_terminalAU")),
-    count_lxc_(::get_mutable_unchecked<1>(obj, "count_lxc"))
+    count_lxc_(::get_mutable_unchecked<1>(obj, "count_lxc")),
+    cache_score_hairpin_(score_hairpin_.size(), 0),
+    cache_score_bulge_(score_bulge_.size(), 0),
+    cache_score_internal_(score_internal_.size(), 0)
 {
+    if (py::hasattr(obj, "score_hairpin_at_least"))
+    {
+        for (auto i=0; i<4; ++i)
+            cache_score_hairpin_[i] = score_hairpin_[i];
+        for (auto i=4; i<score_hairpin_.size(); ++i)
+            cache_score_hairpin_[i] = cache_score_hairpin_[i-1] + score_hairpin_[i];
+    } 
+    else
+    {
+        for (auto i=0; i<score_hairpin_.size(); ++i)
+            cache_score_hairpin_[i] = score_hairpin_[i];
+    }
 
+    if (py::hasattr(obj, "score_bulge_at_least"))
+    {
+        for (auto i=0; i<2; ++i)
+            cache_score_bulge_[i] = score_bulge_[i];
+        for (auto i=2; i<score_bulge_.size(); ++i)
+            cache_score_bulge_[i] = cache_score_bulge_[i-1] + score_bulge_[i];
+    } 
+    else
+    {
+        for (auto i=0; i<score_bulge_.size(); ++i)
+            cache_score_bulge_[i] = score_bulge_[i];
+    }
+
+    if (py::hasattr(obj, "score_internal_at_least"))
+    {
+        for (auto i=0; i<3; ++i)
+            cache_score_internal_[i] = score_internal_[i];
+        for (auto i=3; i<score_internal_.size(); ++i)
+            cache_score_internal_[i] = cache_score_internal_[i-1] + score_internal_[i];
+    } 
+    else
+    {
+        for (auto i=0; i<score_internal_.size(); ++i)
+            cache_score_internal_[i] = score_internal_[i];
+    }
 }
 
 auto
@@ -648,9 +694,9 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
     auto e = 0.;
 
     if (l <= 30)
-        e += score_hairpin_[l];
+        e += cache_score_hairpin_[l];
     else
-        e += score_hairpin_[30] + (score_lxc_[0] * log(l / 30.));
+        e += cache_score_hairpin_[30] + (score_lxc_[0] * log(l / 30.));
 
     if (l < 3) return e;
 
@@ -678,12 +724,25 @@ count_hairpin(const SeqType& s, size_t i, size_t j, ScoreType v)
 {
     const auto l = (j-1)-(i+1)+1;
 
-    if (l <= 30)
-        count_hairpin_[l] += v;
+    if (use_count_hairpin_at_least_)
+    {
+        if (l <= 30)
+            for (auto k=l; k>=3; --k) count_hairpin_[k] += v;
+        else
+        {
+            for (auto k=30; k>=3; --k) count_hairpin_[k] += v;
+            count_lxc_[0] += v * log(l / 30.);
+        }
+    }
     else
     {
-        count_hairpin_[30] += v;
-        count_lxc_[0] += v * log(l / 30.) / 100.;
+        if (l <= 30)
+            count_hairpin_[l] += v;
+        else
+        {
+            count_hairpin_[30] += v;
+            count_lxc_[0] += v * log(l / 30.);
+        }
     }
 
     if (l < 3) return;
@@ -722,7 +781,7 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
         return score_stack_(type1, type2);
     else if (ls==0) // bulge
     {
-        auto e = ll<=30 ? score_bulge_[ll] : score_bulge_[30] + (score_lxc_[0] * log(ll / 30.));
+        auto e = ll<=30 ? cache_score_bulge_[ll] : cache_score_bulge_[30] + (score_lxc_[0] * log(ll / 30.));
         if (ll==1) 
             e += score_stack_(type1, type2);
         else
@@ -744,7 +803,7 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
             return score_int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
         else if (ls==1) // 1xn loop
         {
-            auto e = ll+1 <= 30 ? score_internal_[ll+1] : score_internal_[30] + (score_lxc_[0] * log((ll+1) / 30.));
+            auto e = ll+1 <= 30 ? cache_score_internal_[ll+1] : cache_score_internal_[30] + (score_lxc_[0] * log((ll+1) / 30.));
             e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
             e += score_mismatch_internal_1n_(type1, s[i+1], s[j-1]) + score_mismatch_internal_1n_(type2, s[l+1], s[k-1]);
             return e;
@@ -753,13 +812,13 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
             return score_int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]);
         else if (ls==2 && ll==3) // 2x3 loop
         {
-            auto e = score_internal_[ls+ll] + score_ninio_[0];
+            auto e = cache_score_internal_[ls+ll] + score_ninio_[0];
             e += score_mismatch_internal_23_(type1, s[i+1], s[j-1]) + score_mismatch_internal_23_(type2, s[l+1], s[k-1]);
             return e;
         }
         else // generic internal loop
         {
-            auto e = ls+ll <= 30 ? score_internal_[ls+ll] : score_internal_[30] + (score_lxc_[0] * log((ls+ll) / 30.));
+            auto e = ls+ll <= 30 ? cache_score_internal_[ls+ll] : cache_score_internal_[30] + (score_lxc_[0] * log((ls+ll) / 30.));
             e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
             e += score_mismatch_internal_(type1, s[i+1], s[j-1]) + score_mismatch_internal_(type2, s[l+1], s[k-1]);
             return e;
@@ -782,13 +841,27 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
         count_stack_(type1, type2) += v;
     else if (ls==0) // bulge
     {
-        if (ll<=30)
-            count_bulge_[ll] += v;
+        if (use_count_bulge_at_least_)
+        {
+            if (ll<=30)
+                for (auto k=ll; k>=1; --k) count_bulge_[k] += v;
+            else
+            {
+                for (auto k=30; k>=1; --k) count_bulge_[k] += v;
+                count_lxc_[0] += v * log(ll / 30.);
+            }
+        }
         else
         {
-            count_bulge_[30] += v;
-            count_lxc_[0] += v * log(ll / 30.) / 100.;
+            if (ll<=30)
+                count_bulge_[ll] += v;
+            else
+            {
+                count_bulge_[30] += v;
+                count_lxc_[0] += v * log(ll / 30.);
+            }
         }
+
         if (ll==1) 
             count_stack_(type1, type2) += v;
         else
@@ -809,13 +882,27 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
             count_int21_(type1, type2, s[i+1], s[l+1], s[j-1]) += v;
         else if (ls==1) // 1xn loop
         {
-            if (ll+1 <= 30)
-                count_internal_[ll+1] += v;
+            if (use_count_internal_at_least_)
+            {
+                if (ll+1 <= 30)
+                    for (auto k=ll+1; k>=2; --k) count_internal_[k] += v;
+                else
+                {
+                    for (auto k=30; k>=2; --k) count_internal_[k] += v;
+                    count_lxc_[0] += v * log((ll+1) / 30.);
+                }
+            }
             else
             {
-                count_internal_[30] += v;
-                count_lxc_[0] += v * log((ll+1) / 30.) / 100.;
+                if (ll+1 <= 30)
+                    count_internal_[ll+1] += v;
+                else
+                {
+                    count_internal_[30] += v;
+                    count_lxc_[0] += v * log((ll+1) / 30.);
+                }
             }
+            
             if (score_max_ninio_[0] > (ll-ls) * score_ninio_[0])
                 count_max_ninio_[0] += v;
             else
@@ -827,20 +914,37 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
             count_int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]) += v;
         else if (ls==2 && ll==3) // 2x3 loop
         {
-            count_internal_[ls+ll] += v;
+            if (use_count_internal_at_least_)
+                for (auto k=ls+ll; k>=2; --k) count_internal_[k] += v;
+            else
+                count_internal_[ls+ll] += v;
             count_ninio_[0] += v;
             count_mismatch_internal_23_(type1, s[i+1], s[j-1]) += v;
             count_mismatch_internal_23_(type2, s[l+1], s[k-1]) += v;
         }
         else // generic internal loop
         {
-            if (ls+ll <= 30)
-                count_internal_[ls+ll] += v;
+            if (use_count_internal_at_least_)
+            {
+                if (ls+ll <= 30)
+                    for (auto k=ls+ll; k>=2; --k) count_internal_[k] += v;
+                else
+                {
+                    for (auto k=30; k>=2; --k) count_internal_[k] += v;
+                    count_lxc_[0] += v * log((ls+ll) / 30.);
+                }
+            }
             else
             {
-                count_internal_[30] += v;
-                count_lxc_[0] += v * log((ls+ll) / 30.) / 100.;
+                if (ls+ll <= 30)
+                    count_internal_[ls+ll] += v;
+                else
+                {
+                    count_internal_[30] += v;
+                    count_lxc_[0] += v * log((ls+ll) / 30.);
+                }
             }
+            
             if (score_max_ninio_[0] > (ll-ls) * score_ninio_[0])
                 count_max_ninio_[0] += v;
             else

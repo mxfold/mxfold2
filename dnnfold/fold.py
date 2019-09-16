@@ -33,9 +33,9 @@ class RNAFold(nn.Module):
             self.score_lxc = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
         else:
             self.score_stack = nn.Parameter(torch.tensor(init_param.score_stack))
-            self.score_hairpin = nn.Parameter(torch.tensor(init_param.score_hairpin))
-            self.score_bulge = nn.Parameter(torch.tensor(init_param.score_bulge))
-            self.score_internal = nn.Parameter(torch.tensor(init_param.score_internal))
+            self.score_hairpin_at_least = nn.Parameter(torch.tensor(init_param.score_hairpin))
+            self.score_bulge_at_least = nn.Parameter(torch.tensor(init_param.score_bulge))
+            self.score_internal_at_least = nn.Parameter(torch.tensor(init_param.score_internal))
             self.score_mismatch_external = nn.Parameter(torch.tensor(init_param.score_mismatch_external))
             self.score_mismatch_hairpin = nn.Parameter(torch.tensor(init_param.score_mismatch_hairpin))
             self.score_mismatch_internal = nn.Parameter(torch.tensor(init_param.score_mismatch_internal))
@@ -59,9 +59,9 @@ class RNAFold(nn.Module):
 
     def clear_count(self):
         self.count_stack = torch.zeros((8, 8), dtype=torch.float32)
-        self.count_hairpin = torch.zeros((31,), dtype=torch.float32)
-        self.count_bulge = torch.zeros((31,), dtype=torch.float32)
-        self.count_internal = torch.zeros((31,), dtype=torch.float32)
+        self.count_hairpin_at_least = torch.zeros((31,), dtype=torch.float32)
+        self.count_bulge_at_least = torch.zeros((31,), dtype=torch.float32)
+        self.count_internal_at_least = torch.zeros((31,), dtype=torch.float32)
         self.count_mismatch_external = torch.zeros((8, 5, 5), dtype=torch.float32)
         self.count_mismatch_hairpin = torch.zeros((8, 5, 5), dtype=torch.float32)
         self.count_mismatch_internal = torch.zeros((8, 5, 5), dtype=torch.float32)
@@ -89,9 +89,18 @@ class RNAFold(nn.Module):
             v, _, _ = interface.predict(seq, self, constraint=constraint, 
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
         s  = torch.sum(self.count_stack * self.score_stack)
-        s += torch.sum(self.count_hairpin * self.score_hairpin)
-        s += torch.sum(self.count_bulge * self.score_bulge)
-        s += torch.sum(self.count_internal * self.score_internal)
+        if hasattr(self, "score_hairpin_at_least"):
+            s += torch.sum(self.count_hairpin_at_least * self.score_hairpin_at_least)
+        else:
+            s += torch.sum(self.count_hairpin_at_least * self.score_hairpin)
+        if hasattr(self, "score_bulge_at_least"):
+            s += torch.sum(self.count_bulge_at_least * self.score_bulge_at_least)
+        else:
+            s += torch.sum(self.count_bulge_at_least * self.score_bulge)
+        if hasattr(self, "score_internal_at_least"):
+            s += torch.sum(self.count_internal_at_least * self.score_internal_at_least)
+        else:
+            s += torch.sum(self.count_internal_at_least * self.score_internal)
         s += torch.sum(self.count_mismatch_external * self.score_mismatch_external)
         s += torch.sum(self.count_mismatch_hairpin * self.score_mismatch_hairpin)
         s += torch.sum(self.count_mismatch_internal * self.score_mismatch_internal)

@@ -107,6 +107,10 @@ class PyMFE
         void count_external_unpaired(const SeqType& seq, size_t i, ScoreType v) { }
 
     private:
+        bool use_score_hairpin_at_least_;
+        bool use_score_bulge_at_least_;
+        bool use_score_internal_at_least_;
+
         ParamType<2> score_stack_;
         ParamType<1> score_hairpin_;
         ParamType<1> score_bulge_;
@@ -131,6 +135,9 @@ class PyMFE
         ParamType<1> score_terminalAU_;
         ParamType<1> score_lxc_;
 
+        bool use_count_hairpin_at_least_;
+        bool use_count_bulge_at_least_;
+        bool use_count_internal_at_least_;
         CountType<2> count_stack_;
         CountType<1> count_hairpin_;
         CountType<1> count_bulge_;
@@ -154,4 +161,8 @@ class PyMFE
         CountType<1> count_duplex_init_;
         CountType<1> count_terminalAU_;
         CountType<1> count_lxc_;
+
+        std::vector<float> cache_score_hairpin_;
+        std::vector<float> cache_score_bulge_;
+        std::vector<float> cache_score_internal_;
 };
