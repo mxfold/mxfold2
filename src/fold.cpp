@@ -52,13 +52,16 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
         stru = stru.substr(0, L);
     auto bp = parse_paren(stru);
 
-    if (canonical_only) // delete non-canonical base-pairs
-        for (auto i=L; i>=1; i--)
-            if (bp[i] > 0 && !::allow_paired(seq[i-1], seq[bp[i]-1]))
+    for (auto i=L; i>=1; i--)
+        if (bp[i] > 0) 
+        {
+            if ( (canonical_only && !::allow_paired(seq[i-1], seq[bp[i]-1])) || // delete non-canonical base-pairs
+                    (bp[i] - i <= max_bp) ) // delete very short hairpin
             {
                 stru[i-1] = stru[bp[i]-1] = 'x';
                 bp[i] = bp[bp[i]] = 0;
             }
+        }
 
     std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1, false));
     std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1, false));

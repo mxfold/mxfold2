@@ -24,10 +24,16 @@ class StructuredLoss(nn.Module):
         self.l2_weight = l2_weight
 
 
-    def forward(self, seq, pair):
+    def forward(self, seq, pair, fname=None):
         pred = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty)
-        ref = self.model(seq, constraint=pair)
+        ref = self.model(seq, constraint=pair, max_internal_length=len(seq))
         loss = pred - ref
+        if loss.item()> 1e10:
+            print()
+            print(fname)
+            print(loss.item(), pred.item(), ref.item())
+            print(seq)
+            print(pair)
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
@@ -52,12 +58,12 @@ class Train:
         self.model.train()
         loss_total, num = 0, 0
         with tqdm(total=len(self.train_loader.dataset)) as pbar:
-            for seqs, pairs in self.train_loader:
+            for fnames, seqs, pairs in self.train_loader:
                 #seq, pair = data.to(self.device), target.to(self.device)
                 self.optimizer.zero_grad()
                 loss = 0
-                for seq, pair in zip(seqs, pairs):
-                    loss += self.loss_fn(seq, pair)
+                for fname, seq, pair in zip(fnames, seqs, pairs):
+                    loss += self.loss_fn(seq, pair, fname=fname)
                     loss_total += loss.item()
                     num += 1
                 loss.backward()
@@ -86,7 +92,7 @@ class Train:
 
     def run(self, args):
         torch.manual_seed(args.seed)
-        train_dataset = BPseqDataset(args.input)
+        train_dataset = BPseqDataset(args.input, unpaired='x')
         self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
         self.model = RNAFold()
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)

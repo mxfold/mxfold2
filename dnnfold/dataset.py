@@ -28,8 +28,9 @@ class FastaDataset(Dataset):
 
 
 class BPseqDataset(Dataset):
-    def __init__(self, bpseq_list):
+    def __init__(self, bpseq_list, unpaired='.'):
         self.data = []
+        self.unpaired = unpaired
         with open(bpseq_list) as f:
             for l in f:
                 self.data.append(self.read(l.rstrip('\n')))
@@ -50,10 +51,10 @@ class BPseqDataset(Dataset):
                     s.append(c)
                     p.append(int(pair))
         seq = ''.join(s)
-        pair = ['.'] * len(seq)
+        pair = [self.unpaired] * len(seq)
         for i, j in enumerate(p):
-            if (j > 0 and i < j):
+            if j > 0 and i < j:
                 pair[i-1] = '('
                 pair[j-1] = ')'
         pair = ''.join(pair)
-        return (seq, pair)
+        return (filename, seq, pair)

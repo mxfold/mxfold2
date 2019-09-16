@@ -83,10 +83,10 @@ class RNAFold(nn.Module):
         self.count_lxc = torch.zeros((1,), dtype=torch.float32)
 
 
-    def forward(self, seq, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
+    def forward(self, seq, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
         self.clear_count()
         with torch.no_grad():
-            v, _, _ = interface.predict(seq, self, constraint=constraint, 
+            v, _, _ = interface.predict(seq, self, constraint=constraint, max_internal_length=max_internal_length,
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
         s  = torch.sum(self.count_stack * self.score_stack)
         if hasattr(self, "score_hairpin_at_least"):
