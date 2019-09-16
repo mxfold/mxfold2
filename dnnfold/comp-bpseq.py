@@ -1,5 +1,3 @@
-#%%
-from argparse import ArgumentParser
 import math
 
 def read_bpseq(file):
@@ -32,19 +30,20 @@ def compare_bpseq(ref, pred):
     return (tp, tn, fp, fn)
 
 def accuracy(tp, tn, fp, fn):
-    sen = tp / (tp + fn)
-    ppv = tp / (tp + fp)
+    sen = tp / (tp + fn) if fp+fn > 0. else 0.
+    ppv = tp / (tp + fp) if tp+fp > 0. else 0.
     fval = 2 * sen * ppv / (sen + ppv) if sen+ppv > 0. else 0.
     mcc = ((tp*tn)-(fp*fn)) / math.sqrt((tp+fp)*(tp+fn)*(tn+fp)*(tn+fn)) if (tp+fp)*(tp+fn)*(tn+fp)*(tn+fn) > 0. else 0.
     return (sen, ppv, fval, mcc)
 
 
-#%%
-seq, ref = read_bpseq('1.bpseq')
-seq, pred = read_bpseq('1-p.bpseq')
-x = compare_bpseq(ref, pred)
-accuracy(*x)
-
-
-
-#%%
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser(description='calculate SEN, PPV, F, MCC for the predicted RNA secondary structure', add_help=True)
+    parser.add_argument('ref', type=str, help='BPSEQ-formatted file with the refernece structure')
+    parser.add_argument('pred', type=str, help='BPSEQ-formatted file with the predicted structure')
+    args = parser.parse_args()
+    seq, ref = read_bpseq(args.ref)
+    seq, pred = read_bpseq(args.pred)
+    x = compare_bpseq(ref, pred)
+    print(', '.join([str(v) for v in accuracy(*x)]))
