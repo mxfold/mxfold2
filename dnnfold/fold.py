@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 from . import interface
 
@@ -8,10 +9,13 @@ class RNAFold(nn.Module):
     def __init__(self, init_param=None):
         super(RNAFold, self).__init__()
         if init_param is None:
-            self.score_stack = nn.Parameter(torch.zeros((8, 8), dtype=torch.float32))
             self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_internal_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            # self.score_hairpin = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            # self.score_bulge = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            # self.score_internal = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            self.score_stack = nn.Parameter(torch.zeros((8, 8), dtype=torch.float32))
             self.score_mismatch_external = nn.Parameter(torch.zeros((8, 5, 5), dtype=torch.float32))
             self.score_mismatch_hairpin = nn.Parameter(torch.zeros((8, 5, 5), dtype=torch.float32))
             self.score_mismatch_internal = nn.Parameter(torch.zeros((8, 5, 5), dtype=torch.float32))
@@ -32,10 +36,19 @@ class RNAFold(nn.Module):
             self.score_terminalAU = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
             self.score_lxc = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
         else:
+            if hasattr(init_param, "score_hairpin_at_least"):
+                self.score_hairpin_at_least = nn.Parameter(torch.tensor(init_param.score_hairpin_at_least))
+            else:
+                self.score_hairpin = nn.Parameter(torch.tensor(init_param.score_hairpin))
+            if hasattr(init_param, "score_bulge_at_least"):
+                self.score_bulge_at_least = nn.Parameter(torch.tensor(init_param.score_bulge_at_least))
+            else:
+                self.score_bulge = nn.Parameter(torch.tensor(init_param.score_bulge))
+            if hasattr(init_param, "score_internal_at_least"):
+                self.score_internal_at_least = nn.Parameter(torch.tensor(init_param.score_internal_at_least))
+            else:
+                self.score_internal = nn.Parameter(torch.tensor(init_param.score_internal))
             self.score_stack = nn.Parameter(torch.tensor(init_param.score_stack))
-            self.score_hairpin = nn.Parameter(torch.tensor(init_param.score_hairpin))
-            self.score_bulge = nn.Parameter(torch.tensor(init_param.score_bulge))
-            self.score_internal = nn.Parameter(torch.tensor(init_param.score_internal))
             self.score_mismatch_external = nn.Parameter(torch.tensor(init_param.score_mismatch_external))
             self.score_mismatch_hairpin = nn.Parameter(torch.tensor(init_param.score_mismatch_hairpin))
             self.score_mismatch_internal = nn.Parameter(torch.tensor(init_param.score_mismatch_internal))
@@ -103,15 +116,15 @@ class RNAFold(nn.Module):
         if hasattr(self, "score_hairpin_at_least"):
             s += torch.sum(self.count_hairpin_at_least * self.score_hairpin_at_least)
         else:
-            s += torch.sum(self.count_hairpin_at_least * self.score_hairpin)
+            s += torch.sum(self.count_hairpin * self.score_hairpin)
         if hasattr(self, "score_bulge_at_least"):
             s += torch.sum(self.count_bulge_at_least * self.score_bulge_at_least)
         else:
-            s += torch.sum(self.count_bulge_at_least * self.score_bulge)
+            s += torch.sum(self.count_bulge * self.score_bulge)
         if hasattr(self, "score_internal_at_least"):
             s += torch.sum(self.count_internal_at_least * self.score_internal_at_least)
         else:
-            s += torch.sum(self.count_internal_at_least * self.score_internal)
+            s += torch.sum(self.count_internal * self.score_internal)
 
         s += torch.sum(self.count_stack * self.score_stack)
         s += torch.sum(self.count_mismatch_external * self.score_mismatch_external)

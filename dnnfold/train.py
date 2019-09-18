@@ -28,7 +28,7 @@ class StructuredLoss(nn.Module):
         pred = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty)
         ref = self.model(seq, constraint=pair, max_internal_length=len(seq))
         loss = pred - ref
-        if loss.item()> 1e10 or loss.item() < 0:
+        if loss.item()> 1e10 or torch.isnan(loss):
             print()
             print(fname)
             print(loss.item(), pred.item(), ref.item())
@@ -42,8 +42,8 @@ class StructuredLoss(nn.Module):
         if self.l2_weight > 0.0:
             l2_reg = 0.0
             for p in self.model.parameters():
-                l2_reg += torch.sum(p * p)
-            loss += self.l2_weight * torch.sqrt(l2_reg)
+                l2_reg += torch.sum(self.l2_weight * self.l2_weight * p * p)
+            loss += torch.sqrt(l2_reg)
 
         return loss
 
@@ -97,8 +97,8 @@ class Train:
         self.model = RNAFold()
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
         #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.001, momentum=0.9)
-        #self.optimizer = optim.Adam(self.model.parameters())
-        self.optimizer = optim.Adagrad(self.model.parameters())
+        self.optimizer = optim.Adam(self.model.parameters())
+        #self.optimizer = optim.Adagrad(self.model.parameters())
 
         checkpoint_epoch = 0
         if args.resume is not None:
@@ -136,12 +136,12 @@ class Train:
                             help='Checkpoint file for resume')
 
         subparser.add_argument('--l1-weight', type=float, default=0.,
-                            help='the weight for L1 regularization')
+                            help='the weight for L1 regularization (default: 0)')
         subparser.add_argument('--l2-weight', type=float, default=0.,
-                            help='the weight for L2 regularization')
-        subparser.add_argument('--pos-penalty', type=float, default=-1.,
-                            help='the penalty for positive BPs for loss augmentation')
-        subparser.add_argument('--neg-penalty', type=float, default=+1.,
-                            help='the penalty for negative BPs for loss augmentation')
+                            help='the weight for L2 regularization (default: 0)')
+        subparser.add_argument('--pos-penalty', type=float, default=0,
+                            help='the penalty for positive BPs for loss augmentation (default: 0)')
+        subparser.add_argument('--neg-penalty', type=float, default=0,
+                            help='the penalty for negative BPs for loss augmentation (default: 0)')
 
         subparser.set_defaults(func = lambda args: Train().run(args))
