@@ -9,9 +9,9 @@ class RNAFold(nn.Module):
         super(RNAFold, self).__init__()
         if init_param is None:
             self.score_stack = nn.Parameter(torch.zeros((8, 8), dtype=torch.float32))
-            self.score_hairpin = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
-            self.score_bulge = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
-            self.score_internal = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            self.score_internal_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_mismatch_external = nn.Parameter(torch.zeros((8, 5, 5), dtype=torch.float32))
             self.score_mismatch_hairpin = nn.Parameter(torch.zeros((8, 5, 5), dtype=torch.float32))
             self.score_mismatch_internal = nn.Parameter(torch.zeros((8, 5, 5), dtype=torch.float32))
@@ -33,9 +33,9 @@ class RNAFold(nn.Module):
             self.score_lxc = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
         else:
             self.score_stack = nn.Parameter(torch.tensor(init_param.score_stack))
-            self.score_hairpin_at_least = nn.Parameter(torch.tensor(init_param.score_hairpin))
-            self.score_bulge_at_least = nn.Parameter(torch.tensor(init_param.score_bulge))
-            self.score_internal_at_least = nn.Parameter(torch.tensor(init_param.score_internal))
+            self.score_hairpin = nn.Parameter(torch.tensor(init_param.score_hairpin))
+            self.score_bulge = nn.Parameter(torch.tensor(init_param.score_bulge))
+            self.score_internal = nn.Parameter(torch.tensor(init_param.score_internal))
             self.score_mismatch_external = nn.Parameter(torch.tensor(init_param.score_mismatch_external))
             self.score_mismatch_hairpin = nn.Parameter(torch.tensor(init_param.score_mismatch_hairpin))
             self.score_mismatch_internal = nn.Parameter(torch.tensor(init_param.score_mismatch_internal))
@@ -58,10 +58,20 @@ class RNAFold(nn.Module):
 
 
     def clear_count(self):
+        if hasattr(self, "score_hairpin_at_least"):
+            self.count_hairpin_at_least = torch.zeros((31,), dtype=torch.float32)
+        else:
+            self.count_hairpin = torch.zeros((31,), dtype=torch.float32)
+        if hasattr(self, "score_bulge_at_least"):
+            self.count_bulge_at_least = torch.zeros((31,), dtype=torch.float32)
+        else:
+            self.count_bulge = torch.zeros((31,), dtype=torch.float32)
+        if hasattr(self, "score_internal_at_least"):
+            self.count_internal_at_least = torch.zeros((31,), dtype=torch.float32)
+        else:
+            self.count_internal = torch.zeros((31,), dtype=torch.float32)
+
         self.count_stack = torch.zeros((8, 8), dtype=torch.float32)
-        self.count_hairpin_at_least = torch.zeros((31,), dtype=torch.float32)
-        self.count_bulge_at_least = torch.zeros((31,), dtype=torch.float32)
-        self.count_internal_at_least = torch.zeros((31,), dtype=torch.float32)
         self.count_mismatch_external = torch.zeros((8, 5, 5), dtype=torch.float32)
         self.count_mismatch_hairpin = torch.zeros((8, 5, 5), dtype=torch.float32)
         self.count_mismatch_internal = torch.zeros((8, 5, 5), dtype=torch.float32)
@@ -88,7 +98,8 @@ class RNAFold(nn.Module):
         with torch.no_grad():
             v, _, _ = interface.predict(seq, self, constraint=constraint, max_internal_length=max_internal_length,
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
-        s  = torch.sum(self.count_stack * self.score_stack)
+
+        s = 0
         if hasattr(self, "score_hairpin_at_least"):
             s += torch.sum(self.count_hairpin_at_least * self.score_hairpin_at_least)
         else:
@@ -101,6 +112,8 @@ class RNAFold(nn.Module):
             s += torch.sum(self.count_internal_at_least * self.score_internal_at_least)
         else:
             s += torch.sum(self.count_internal_at_least * self.score_internal)
+
+        s += torch.sum(self.count_stack * self.score_stack)
         s += torch.sum(self.count_mismatch_external * self.score_mismatch_external)
         s += torch.sum(self.count_mismatch_hairpin * self.score_mismatch_hairpin)
         s += torch.sum(self.count_mismatch_internal * self.score_mismatch_internal)
@@ -124,8 +137,8 @@ class RNAFold(nn.Module):
         return s
 
 
-    def predict(self, seq, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
+    def predict(self, seq, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
         self.clear_count()
         with torch.no_grad():
-            return interface.predict(seq, self, constraint=constraint, 
+            return interface.predict(seq, self, constraint=constraint, max_internal_length=max_internal_length,
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)

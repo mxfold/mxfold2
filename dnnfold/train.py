@@ -28,7 +28,7 @@ class StructuredLoss(nn.Module):
         pred = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty)
         ref = self.model(seq, constraint=pair, max_internal_length=len(seq))
         loss = pred - ref
-        if loss.item()> 1e10:
+        if loss.item()> 1e10 or loss.item() < 0:
             print()
             print(fname)
             print(loss.item(), pred.item(), ref.item())
@@ -97,7 +97,8 @@ class Train:
         self.model = RNAFold()
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
         #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.001, momentum=0.9)
-        self.optimizer = optim.Adam(self.model.parameters())
+        #self.optimizer = optim.Adam(self.model.parameters())
+        self.optimizer = optim.Adagrad(self.model.parameters())
 
         checkpoint_epoch = 0
         if args.resume is not None:
