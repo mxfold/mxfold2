@@ -6,7 +6,6 @@ add_subdirectory(pybind11)
 pybind11_add_module(interface
     src/interface.cpp 
     src/parameter.cpp src/parameter.h 
-    src/default_params.cpp src/default_params.h
     src/fold.cpp src/fold.h src/trimatrix.h )
 target_compile_features(interface PUBLIC cxx_std_17)
 #target_link_libraries(dnnfold)

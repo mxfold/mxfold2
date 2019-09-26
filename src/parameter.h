@@ -2,78 +2,10 @@
 
 #include <string>
 #include <vector>
-#include <map>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
-class MFE
-{
-    public:
-        using ScoreType = float;
-        using SeqType = std::vector<short>;
-
-    private:
-        using VI = std::vector<int>;
-        using VVI = std::vector<VI>;
-        using VVVI = std::vector<VVI>;
-        using VVVVI = std::vector<VVVI>;
-        using VVVVVI = std::vector<VVVVI>;
-        using VVVVVVI = std::vector<VVVVVI>;
-
-    public:
-        MFE() : lxc_(107.856) {};
-        ~MFE() {};
-        auto convert_sequence(const std::string& seq) const -> SeqType;
-        bool load(const char* filename);
-        bool load(const std::string& filename) { return load(filename.c_str());};
-        bool load_default();
-
-        ScoreType score_hairpin(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) const;
-        ScoreType score_multi_loop(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_multi_paired(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_multi_unpaired(const SeqType& seq, size_t i) const;
-        ScoreType score_external_zero(const SeqType& seq) const { return 0.0; }
-        ScoreType score_external_paired(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_external_unpaired(const SeqType& seq, size_t i) const { return 0.0; }
-
-        void count_hairpin(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
-        void count_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l, ScoreType v) {}
-        void count_multi_loop(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
-        void count_multi_paired(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
-        void count_multi_unpaired(const SeqType& seq, size_t i, ScoreType v) {}
-        void count_external_zero(const SeqType& seq, ScoreType v) {}
-        void count_external_paired(const SeqType& seq, size_t i, size_t j, ScoreType v) {}
-        void count_external_unpaired(const SeqType& seq, size_t i, ScoreType v) {}
-
-    public:
-        VVI stack_;
-        VI hairpin_;
-        VI bulge_;
-        VI internal_;
-        VVVI mismatch_external_;
-        VVVI mismatch_hairpin_;
-        VVVI mismatch_internal_;
-        VVVI mismatch_internal_1n_;
-        VVVI mismatch_internal_23_;
-        VVVI mismatch_multi_;
-        VVVVI int11_;
-        VVVVVI int21_;
-        VVVVVVI int22_;
-        VVI dangle5_;
-        VVI dangle3_;
-        int ml_base_;
-        int ml_closing_;
-        int ml_intern_;
-        int ninio_;
-        int max_ninio_;
-        std::map<SeqType, int> special_loops_;
-        int duplex_init_;
-        int terminalAU_;
-        float lxc_;
-};
-
-class PyMFE
+class TurnerNearestNeighbor
 {
     public:
         using ScoreType = float;
@@ -84,8 +16,8 @@ class PyMFE
         template<int D> using CountType = pybind11::detail::unchecked_mutable_reference<float, D> ;
 
     public:
-        PyMFE(pybind11::object obj);
-        ~PyMFE() {};
+        TurnerNearestNeighbor(pybind11::object obj);
+        ~TurnerNearestNeighbor() {};
         auto convert_sequence(const std::string& seq) const -> SeqType;
 
         ScoreType score_hairpin(const SeqType& seq, size_t i, size_t j) const;

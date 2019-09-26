@@ -22,33 +22,20 @@ auto predict(const std::string& seq, py::object pa,
             int min_hairpin, int max_internal, std::string constraint, 
             std::string reference, float pos_penalty, float neg_penalty)
 {
-    if (pa.is_none())
-    {
-        auto param = std::make_unique<MFE>();
-        param->load_default();
-        Fold<MFE> f(std::move(param));
-        auto e = f.compute_viterbi(seq);
-        auto p = f.traceback_viterbi();
-        auto s = make_paren(p);
-        return std::make_tuple(e, s, p);
-    }
-    else
-    {
-        FoldOptions options;
-        options.min_hairpin_loop_length(min_hairpin)
-            .max_internal_loop_length(max_internal)
-            .constraints(constraint);
-        if (!reference.empty())
-            options.penalty(reference, pos_penalty, neg_penalty);
-        
-        auto param = std::make_unique<PyMFE>(pa);
-        Fold<PyMFE> f(std::move(param));
-        auto e = f.compute_viterbi(seq, options);
-        auto p = f.traceback_viterbi();
-        f.traceback_viterbi(seq, options);
-        auto s = make_paren(p);
-        return std::make_tuple(e, s, p);
-    }
+    FoldOptions options;
+    options.min_hairpin_loop_length(min_hairpin)
+        .max_internal_loop_length(max_internal)
+        .constraints(constraint);
+    if (!reference.empty())
+        options.penalty(reference, pos_penalty, neg_penalty);
+    
+    auto param = std::make_unique<TurnerNearestNeighbor>(pa);
+    Fold<TurnerNearestNeighbor> f(std::move(param));
+    auto e = f.compute_viterbi(seq, options);
+    auto p = f.traceback_viterbi();
+    f.traceback_viterbi(seq, options);
+    auto s = make_paren(p);
+    return std::make_tuple(e, s, p);
 }
 
 PYBIND11_MODULE(interface, m)

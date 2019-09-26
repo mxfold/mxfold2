@@ -45,8 +45,8 @@ class Predict:
             self.model = RNAFold()
             self.model.load_state_dict(torch.load(args.model))
         else:
-            from . import default_param
-            self.model = RNAFold(default_param)
+            from . import param_turner2004
+            self.model = RNAFold(param_turner2004)
 
         # self.model.to(self.device)
         self.predict(args.bpseq)

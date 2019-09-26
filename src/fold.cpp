@@ -499,5 +499,4 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
 // instantiation
 #include "parameter.h"
 
-template class Fold<MFE>;
-template class Fold<PyMFE>;
+template class Fold<TurnerNearestNeighbor>;
