@@ -29,7 +29,7 @@ auto predict(const std::string& seq, py::object pa,
     if (!reference.empty())
         options.penalty(reference, pos_penalty, neg_penalty);
     
-    auto param = std::make_unique<TurnerNearestNeighbor>(pa);
+    auto param = std::make_unique<TurnerNearestNeighbor>(seq, pa);
     Fold<TurnerNearestNeighbor> f(std::move(param));
     auto e = f.compute_viterbi(seq, options);
     auto p = f.traceback_viterbi();

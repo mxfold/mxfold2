@@ -32,6 +32,20 @@ auto convert_sequence(const std::string& seq) -> S
     return converted_seq;
 }
 
+// static
+auto
+TurnerNearestNeighbor::
+convert_sequence(const std::string& seq) -> SeqType
+{
+    const auto L = seq.size();
+    SeqType converted_seq(L+2);
+    ::convert_sequence(std::begin(seq), std::end(seq), &converted_seq[1]);
+    converted_seq[0] = converted_seq[L];
+    converted_seq[L+1] = converted_seq[1];
+
+    return converted_seq;
+}
+
 static int pair[5][5] = {
    // _  A  C  G  U 
     { 0, 0, 0, 0, 0 }, // _
@@ -65,7 +79,8 @@ get_mutable_unchecked(py::object obj, const char* name)
 }
 
 TurnerNearestNeighbor::
-TurnerNearestNeighbor(pybind11::object obj) :
+TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
+    seq2_(convert_sequence(seq)),
     use_score_hairpin_at_least_(py::hasattr(obj, "score_hairpin_at_least")),
     use_score_bulge_at_least_(py::hasattr(obj, "score_bulge_at_least")),
     use_score_internal_at_least_(py::hasattr(obj, "score_internal_at_least")),
@@ -164,20 +179,7 @@ TurnerNearestNeighbor(pybind11::object obj) :
 
 auto
 TurnerNearestNeighbor::
-convert_sequence(const std::string& seq) const -> SeqType
-{
-    const auto L = seq.size();
-    SeqType converted_seq(L+2);
-    ::convert_sequence(std::begin(seq), std::end(seq), &converted_seq[1]);
-    converted_seq[0] = converted_seq[L];
-    converted_seq[L+1] = converted_seq[1];
-
-    return converted_seq;
-}
-
-auto
-TurnerNearestNeighbor::
-score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
+score_hairpin(size_t i, size_t j) const -> ScoreType
 {
     const auto l = (j-1)-(i+1)+1;
     auto e = 0.;
@@ -189,27 +191,18 @@ score_hairpin(const SeqType& s, size_t i, size_t j) const -> ScoreType
 
     if (l < 3) return e;
 
-#if 0
-    if (3 <= l && l <= 6) {
-        SeqType sl(&s[i], &s[j]+1);
-        auto it = special_loops_.find(sl);
-        if (it != std::end(special_loops_))
-            return it->second / -100.;
-    }           
-#endif
-
-    const auto type = ::pair[s[i]][s[j]];
+    const auto type = ::pair[seq2_[i]][seq2_[j]];
     if (l == 3)
         e += type > 2 ? score_terminalAU_[0] : 0;
     else
-        e += score_mismatch_hairpin_(type, s[i+1], s[j-1]);
+        e += score_mismatch_hairpin_(type, seq2_[i+1], seq2_[j-1]);
 
     return e;
 }
 
 void
 TurnerNearestNeighbor::
-count_hairpin(const SeqType& s, size_t i, size_t j, ScoreType v)
+count_hairpin(size_t i, size_t j, ScoreType v)
 {
     const auto l = (j-1)-(i+1)+1;
 
@@ -236,31 +229,22 @@ count_hairpin(const SeqType& s, size_t i, size_t j, ScoreType v)
 
     if (l < 3) return;
 
-#if 0
-    if (3 <= l && l <= 6) {
-        SeqType sl(&s[i], &s[j]+1);
-        auto it = special_loops_.find(sl);
-        if (it != std::end(special_loops_))
-            return it->second / -100.;
-    }           
-#endif
-
-    const auto type = ::pair[s[i]][s[j]];
+    const auto type = ::pair[seq2_[i]][seq2_[j]];
     if (l == 3)
     {
         if (type > 2)        
             count_terminalAU_[0] += v;
     }
     else
-        count_mismatch_hairpin_(type, s[i+1], s[j-1]) += v;
+        count_mismatch_hairpin_(type, seq2_[i+1], seq2_[j-1]) += v;
 }
 
 auto
 TurnerNearestNeighbor::
-score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) const -> ScoreType
+score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 {
-    const auto type1 = ::pair[s[i]][s[j]];
-    const auto type2 = ::pair[s[l]][s[k]];
+    const auto type1 = ::pair[seq2_[i]][seq2_[j]];
+    const auto type2 = ::pair[seq2_[l]][seq2_[k]];
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
@@ -285,31 +269,31 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
     else // internal loop
     {
         if (ll==1 && ls==1) // 1x1 loop
-            return score_int11_(type1, type2, s[i+1], s[j-1]);
+            return score_int11_(type1, type2, seq2_[i+1], seq2_[j-1]);
         else if (l1==2 && l2==1) // 2x1 loop
-            return score_int21_(type2, type1, s[l+1], s[i+1], s[k-1]);
+            return score_int21_(type2, type1, seq2_[l+1], seq2_[i+1], seq2_[k-1]);
         else if (l1==1 && l2==2) // 1x2 loop
-            return score_int21_(type1, type2, s[i+1], s[l+1], s[j-1]);
+            return score_int21_(type1, type2, seq2_[i+1], seq2_[l+1], seq2_[j-1]);
         else if (ls==1) // 1xn loop
         {
             auto e = ll+1 <= 30 ? cache_score_internal_[ll+1] : cache_score_internal_[30] + (score_lxc_[0] * log((ll+1) / 30.));
             e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
-            e += score_mismatch_internal_1n_(type1, s[i+1], s[j-1]) + score_mismatch_internal_1n_(type2, s[l+1], s[k-1]);
+            e += score_mismatch_internal_1n_(type1, seq2_[i+1], seq2_[j-1]) + score_mismatch_internal_1n_(type2, seq2_[l+1], seq2_[k-1]);
             return e;
         }
         else if (ls==2 && ll==2) // 2x2 loop
-            return score_int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]);
+            return score_int22_(type1, type2, seq2_[i+1], seq2_[k-1], seq2_[l+1], seq2_[j-1]);
         else if (ls==2 && ll==3) // 2x3 loop
         {
             auto e = cache_score_internal_[ls+ll] + score_ninio_[0];
-            e += score_mismatch_internal_23_(type1, s[i+1], s[j-1]) + score_mismatch_internal_23_(type2, s[l+1], s[k-1]);
+            e += score_mismatch_internal_23_(type1, seq2_[i+1], seq2_[j-1]) + score_mismatch_internal_23_(type2, seq2_[l+1], seq2_[k-1]);
             return e;
         }
         else // generic internal loop
         {
             auto e = ls+ll <= 30 ? cache_score_internal_[ls+ll] : cache_score_internal_[30] + (score_lxc_[0] * log((ls+ll) / 30.));
             e += std::max(score_max_ninio_[0], (ll-ls) * score_ninio_[0]);
-            e += score_mismatch_internal_(type1, s[i+1], s[j-1]) + score_mismatch_internal_(type2, s[l+1], s[k-1]);
+            e += score_mismatch_internal_(type1, seq2_[i+1], seq2_[j-1]) + score_mismatch_internal_(type2, seq2_[l+1], seq2_[k-1]);
             return e;
         }
     }
@@ -318,10 +302,10 @@ score_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l) cons
 
 void
 TurnerNearestNeighbor::
-count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, ScoreType v)
+count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
 {
-    const auto type1 = ::pair[s[i]][s[j]];
-    const auto type2 = ::pair[s[l]][s[k]];
+    const auto type1 = ::pair[seq2_[i]][seq2_[j]];
+    const auto type2 = ::pair[seq2_[l]][seq2_[k]];
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
@@ -364,11 +348,11 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
     else // internal loop
     {
         if (ll==1 && ls==1) // 1x1 loop
-            count_int11_(type1, type2, s[i+1], s[j-1]) += v;
+            count_int11_(type1, type2, seq2_[i+1], seq2_[j-1]) += v;
         else if (l1==2 && l2==1) // 2x1 loop
-            count_int21_(type2, type1, s[l+1], s[i+1], s[k-1]) += v;
+            count_int21_(type2, type1, seq2_[l+1], seq2_[i+1], seq2_[k-1]) += v;
         else if (l1==1 && l2==2) // 1x2 loop
-            count_int21_(type1, type2, s[i+1], s[l+1], s[j-1]) += v;
+            count_int21_(type1, type2, seq2_[i+1], seq2_[l+1], seq2_[j-1]) += v;
         else if (ls==1) // 1xn loop
         {
             if (use_count_internal_at_least_)
@@ -396,11 +380,11 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
                 count_max_ninio_[0] += v;
             else
                 count_ninio_[0] += v * (ll-ls);
-            count_mismatch_internal_1n_(type1, s[i+1], s[j-1]) += v;
-            count_mismatch_internal_1n_(type2, s[l+1], s[k-1]) += v;
+            count_mismatch_internal_1n_(type1, seq2_[i+1], seq2_[j-1]) += v;
+            count_mismatch_internal_1n_(type2, seq2_[l+1], seq2_[k-1]) += v;
         }
         else if (ls==2 && ll==2) // 2x2 loop
-            count_int22_(type1, type2, s[i+1], s[k-1], s[l+1], s[j-1]) += v;
+            count_int22_(type1, type2, seq2_[i+1], seq2_[k-1], seq2_[l+1], seq2_[j-1]) += v;
         else if (ls==2 && ll==3) // 2x3 loop
         {
             if (use_count_internal_at_least_)
@@ -408,8 +392,8 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
             else
                 count_internal_[ls+ll] += v;
             count_ninio_[0] += v;
-            count_mismatch_internal_23_(type1, s[i+1], s[j-1]) += v;
-            count_mismatch_internal_23_(type2, s[l+1], s[k-1]) += v;
+            count_mismatch_internal_23_(type1, seq2_[i+1], seq2_[j-1]) += v;
+            count_mismatch_internal_23_(type2, seq2_[l+1], seq2_[k-1]) += v;
         }
         else // generic internal loop
         {
@@ -438,19 +422,19 @@ count_single_loop(const SeqType& s, size_t i, size_t j, size_t k, size_t l, Scor
                 count_max_ninio_[0] += v;
             else
                 count_ninio_[0] += v * (ll-ls);
-            count_mismatch_internal_(type1, s[i+1], s[j-1]) += v;
-            count_mismatch_internal_(type2, s[l+1], s[k-1]) += v;
+            count_mismatch_internal_(type1, seq2_[i+1], seq2_[j-1]) += v;
+            count_mismatch_internal_(type2, seq2_[l+1], seq2_[k-1]) += v;
         }
     }
 }
 
 auto
 TurnerNearestNeighbor::
-score_multi_loop(const SeqType& s, size_t i, size_t j) const -> ScoreType
+score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;
-    const auto type = ::pair[s[j]][s[i]];
-    e += score_mismatch_multi_(type, s[j-1], s[i+1]);
+    const auto type = ::pair[seq2_[j]][seq2_[i]];
+    e += score_mismatch_multi_(type, seq2_[j-1], seq2_[i+1]);
     if (type > 2) 
         e += score_terminalAU_[0];
     e += score_ml_intern_[0];
@@ -461,10 +445,10 @@ score_multi_loop(const SeqType& s, size_t i, size_t j) const -> ScoreType
 
 void
 TurnerNearestNeighbor::
-count_multi_loop(const SeqType& s, size_t i, size_t j, ScoreType v)
+count_multi_loop(size_t i, size_t j, ScoreType v)
 {
-    const auto type = ::pair[s[j]][s[i]];
-    count_mismatch_multi_(type, s[j-1], s[i+1]) += v;
+    const auto type = ::pair[seq2_[j]][seq2_[i]];
+    count_mismatch_multi_(type, seq2_[j-1], seq2_[i+1]) += v;
     if (type > 2) 
         count_terminalAU_[0] += v;
     count_ml_intern_[0] += v;
@@ -473,17 +457,17 @@ count_multi_loop(const SeqType& s, size_t i, size_t j, ScoreType v)
 
 auto
 TurnerNearestNeighbor::
-score_multi_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
+score_multi_paired(size_t i, size_t j) const -> ScoreType
 {
-    const auto L = s.size()-2;
+    const auto L = seq2_.size()-2;
     auto e = 0.;
-    const auto type = ::pair[s[i]][s[j]];
+    const auto type = ::pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
-        e += score_mismatch_multi_(type, s[i-1], s[j+1]);
+        e += score_mismatch_multi_(type, seq2_[i-1], seq2_[j+1]);
     else if (i-1>=1)
-        e += score_dangle5_(type, s[i-1]);
+        e += score_dangle5_(type, seq2_[i-1]);
     else if (j+1<=L)
-        e += score_dangle3_(type, s[j+1]);
+        e += score_dangle3_(type, seq2_[j+1]);
     if (type > 2) 
         e += score_terminalAU_[0];
     e += score_ml_intern_[0];
@@ -493,16 +477,16 @@ score_multi_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 
 void
 TurnerNearestNeighbor::
-count_multi_paired(const SeqType& s, size_t i, size_t j, ScoreType v)
+count_multi_paired(size_t i, size_t j, ScoreType v)
 {
-    const auto L = s.size()-2;
-    const auto type = ::pair[s[i]][s[j]];
+    const auto L = seq2_.size()-2;
+    const auto type = ::pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
-        count_mismatch_multi_(type, s[i-1], s[j+1]) += v;
+        count_mismatch_multi_(type, seq2_[i-1], seq2_[j+1]) += v;
     else if (i-1>=1)
-        count_dangle5_(type, s[i-1]) += v;
+        count_dangle5_(type, seq2_[i-1]) += v;
     else if (j+1<=L)
-        count_dangle3_(type, s[j+1]) += v;
+        count_dangle3_(type, seq2_[j+1]) += v;
     if (type > 2) 
         count_terminalAU_[0] += v;
     count_ml_intern_[0] += v;
@@ -510,31 +494,31 @@ count_multi_paired(const SeqType& s, size_t i, size_t j, ScoreType v)
 
 auto
 TurnerNearestNeighbor::
-score_multi_unpaired(const SeqType& s, size_t i) const -> ScoreType
+score_multi_unpaired(size_t i) const -> ScoreType
 {
     return score_ml_base_[0];
 }
 
 void
 TurnerNearestNeighbor::
-count_multi_unpaired(const SeqType& s, size_t i, ScoreType v)
+count_multi_unpaired(size_t i, ScoreType v)
 {
     count_ml_base_[0] += v;
 }
 
 auto
 TurnerNearestNeighbor::
-score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
+score_external_paired(size_t i, size_t j) const -> ScoreType
 {
-    const auto L = s.size()-2;
+    const auto L = seq2_.size()-2;
     auto e = 0.;
-    const auto type = ::pair[s[i]][s[j]];
+    const auto type = ::pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
-        e += score_mismatch_external_(type, s[i-1], s[j+1]);
+        e += score_mismatch_external_(type, seq2_[i-1], seq2_[j+1]);
     else if (i-1>=1)
-        e += score_dangle5_(type, s[i-1]);
+        e += score_dangle5_(type, seq2_[i-1]);
     else if (j+1<=L)
-        e += score_dangle3_(type, s[j+1]);
+        e += score_dangle3_(type, seq2_[j+1]);
     if (type > 2) 
         e += score_terminalAU_[0];
     
@@ -543,16 +527,16 @@ score_external_paired(const SeqType& s, size_t i, size_t j) const -> ScoreType
 
 void
 TurnerNearestNeighbor::
-count_external_paired(const SeqType& s, size_t i, size_t j, ScoreType v)
+count_external_paired(size_t i, size_t j, ScoreType v)
 {
-    const auto L = s.size()-2;
-    const auto type = ::pair[s[i]][s[j]];
+    const auto L = seq2_.size()-2;
+    const auto type = ::pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
-        count_mismatch_external_(type, s[i-1], s[j+1]) += v;
+        count_mismatch_external_(type, seq2_[i-1], seq2_[j+1]) += v;
     else if (i-1>=1)
-        count_dangle5_(type, s[i-1]) += v;
+        count_dangle5_(type, seq2_[i-1]) += v;
     else if (j+1<=L)
-        count_dangle3_(type, s[j+1]) += v;
+        count_dangle3_(type, seq2_[j+1]) += v;
     if (type > 2) 
         count_terminalAU_[0] += v;
 }

@@ -9,6 +9,8 @@ class TurnerNearestNeighbor
 {
     public:
         using ScoreType = float;
+
+    private:
         using SeqType = std::vector<short>;
 
     private:
@@ -16,29 +18,33 @@ class TurnerNearestNeighbor
         template<int D> using CountType = pybind11::detail::unchecked_mutable_reference<float, D> ;
 
     public:
-        TurnerNearestNeighbor(pybind11::object obj);
+        TurnerNearestNeighbor(const std::string& seq, pybind11::object obj);
         ~TurnerNearestNeighbor() {};
-        auto convert_sequence(const std::string& seq) const -> SeqType;
 
-        ScoreType score_hairpin(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l) const;
-        ScoreType score_multi_loop(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_multi_paired(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_multi_unpaired(const SeqType& seq, size_t i) const;
-        ScoreType score_external_zero(const SeqType& seq) const { return 0.0; }
-        ScoreType score_external_paired(const SeqType& seq, size_t i, size_t j) const;
-        ScoreType score_external_unpaired(const SeqType& seq, size_t i) const { return 0.0; }
+        ScoreType score_hairpin(size_t i, size_t j) const;
+        ScoreType score_single_loop(size_t i, size_t j, size_t k, size_t l) const;
+        ScoreType score_multi_loop(size_t i, size_t j) const;
+        ScoreType score_multi_paired(size_t i, size_t j) const;
+        ScoreType score_multi_unpaired(size_t i) const;
+        ScoreType score_external_zero() const { return 0.0; }
+        ScoreType score_external_paired(size_t i, size_t j) const;
+        ScoreType score_external_unpaired(size_t i) const { return 0.0; }
 
-        void count_hairpin(const SeqType& seq, size_t i, size_t j, ScoreType v);
-        void count_single_loop(const SeqType& seq, size_t i, size_t j, size_t k, size_t l, ScoreType v);
-        void count_multi_loop(const SeqType& seq, size_t i, size_t j, ScoreType v);
-        void count_multi_paired(const SeqType& seq, size_t i, size_t j, ScoreType v);
-        void count_multi_unpaired(const SeqType& seq, size_t i, ScoreType v);
-        void count_external_zero(const SeqType& seq, ScoreType v) { }
-        void count_external_paired(const SeqType& seq, size_t i, size_t j, ScoreType v);
-        void count_external_unpaired(const SeqType& seq, size_t i, ScoreType v) { }
+        void count_hairpin(size_t i, size_t j, ScoreType v);
+        void count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v);
+        void count_multi_loop(size_t i, size_t j, ScoreType v);
+        void count_multi_paired(size_t i, size_t j, ScoreType v);
+        void count_multi_unpaired(size_t i, ScoreType v);
+        void count_external_zero(ScoreType v) { }
+        void count_external_paired(size_t i, size_t j, ScoreType v);
+        void count_external_unpaired(size_t i, ScoreType v) { }
 
     private:
+        static auto convert_sequence(const std::string& seq) -> SeqType;
+
+    private:
+        SeqType seq2_;
+
         bool use_score_hairpin_at_least_;
         bool use_score_bulge_at_least_;
         bool use_score_internal_at_least_;

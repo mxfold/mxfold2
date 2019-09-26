@@ -96,14 +96,14 @@ class Fold
         auto compute_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
         auto traceback_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> typename P::ScoreType;
-        const P& param_model() const { return *param; }
+        const P& param_model() const { return *param_; }
 
     private:
         bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k=0);
         bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q);
 
     private:
-        std::unique_ptr<P> param;
+        std::unique_ptr<P> param_;
         TriMatrix<ScoreType> Cv_, Mv_, M1v_; 
         std::vector<ScoreType> Fv_;
         TriMatrix<Fold::TB> Ct_, Mt_, M1t_;
