@@ -6,56 +6,6 @@
 
 namespace py = pybind11;
 
-template <typename Itr1, typename Itr2>
-static
-void convert_sequence(Itr1 b1, Itr1 e1, Itr2 b2)
-{
-    for (auto it = b1; it != e1; ++it)
-    {
-        switch (tolower(*it)) {
-            default:  *b2++ = 0; break;
-            case 'a': *b2++ = 1; break;
-            case 'c': *b2++ = 2; break;
-            case 'g': *b2++ = 3; break;
-            case 'u':
-            case 't': *b2++ = 4; break;
-        }
-    }
-}
-
-template <typename S>
-static
-auto convert_sequence(const std::string& seq) -> S
-{
-    S converted_seq(seq.size());
-    convert_sequence(std::begin(seq), std::end(seq), std::begin(converted_seq));
-    return converted_seq;
-}
-
-// static
-auto
-TurnerNearestNeighbor::
-convert_sequence(const std::string& seq) -> SeqType
-{
-    const auto L = seq.size();
-    SeqType converted_seq(L+2);
-    ::convert_sequence(std::begin(seq), std::end(seq), &converted_seq[1]);
-    converted_seq[0] = converted_seq[L];
-    converted_seq[L+1] = converted_seq[1];
-
-    return converted_seq;
-}
-
-static int pair[5][5] = {
-   // _  A  C  G  U 
-    { 0, 0, 0, 0, 0 }, // _
-    { 0, 0, 0, 0, 5 }, // A
-    { 0, 0, 0, 1, 0 }, // C
-    { 0, 0, 2, 0, 3 }, // G
-    { 0, 6, 0, 4, 0 }, // U
-};
-
-
 template <int D>
 auto
 get_unchecked(py::object obj, const char* name)
@@ -77,6 +27,43 @@ get_mutable_unchecked(py::object obj, const char* name)
     auto vv = v.cast<py::array_t<float>>();
     return vv.mutable_unchecked<D>();
 }
+
+// static
+auto
+TurnerNearestNeighbor::
+convert_sequence(const std::string& seq) -> SeqType
+{
+    const auto L = seq.size();
+    SeqType converted_seq(L+2);
+    std::transform(std::begin(seq), std::end(seq), &converted_seq[1],
+                [](auto x) {
+                    switch (tolower(x)) {
+                        default:  return 0; break;
+                        case 'a': return 1; break;
+                        case 'c': return 2; break;
+                        case 'g': return 3; break;
+                        case 'u':
+                        case 't': return 4; break;
+                    }
+                });
+
+    converted_seq[0] = converted_seq[L];
+    converted_seq[L+1] = converted_seq[1];
+
+    return converted_seq;
+}
+
+// static 
+int
+TurnerNearestNeighbor::
+complement_pair[5][5] = {
+   // _  A  C  G  U 
+    { 0, 0, 0, 0, 0 }, // _
+    { 0, 0, 0, 0, 5 }, // A
+    { 0, 0, 0, 1, 0 }, // C
+    { 0, 0, 2, 0, 3 }, // G
+    { 0, 6, 0, 4, 0 }, // U
+};
 
 TurnerNearestNeighbor::
 TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
@@ -191,7 +178,7 @@ score_hairpin(size_t i, size_t j) const -> ScoreType
 
     if (l < 3) return e;
 
-    const auto type = ::pair[seq2_[i]][seq2_[j]];
+    const auto type = complement_pair[seq2_[i]][seq2_[j]];
     if (l == 3)
         e += type > 2 ? score_terminalAU_[0] : 0;
     else
@@ -229,7 +216,7 @@ count_hairpin(size_t i, size_t j, ScoreType v)
 
     if (l < 3) return;
 
-    const auto type = ::pair[seq2_[i]][seq2_[j]];
+    const auto type = complement_pair[seq2_[i]][seq2_[j]];
     if (l == 3)
     {
         if (type > 2)        
@@ -243,8 +230,8 @@ auto
 TurnerNearestNeighbor::
 score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 {
-    const auto type1 = ::pair[seq2_[i]][seq2_[j]];
-    const auto type2 = ::pair[seq2_[l]][seq2_[k]];
+    const auto type1 = complement_pair[seq2_[i]][seq2_[j]];
+    const auto type2 = complement_pair[seq2_[l]][seq2_[k]];
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
@@ -304,8 +291,8 @@ void
 TurnerNearestNeighbor::
 count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
 {
-    const auto type1 = ::pair[seq2_[i]][seq2_[j]];
-    const auto type2 = ::pair[seq2_[l]][seq2_[k]];
+    const auto type1 = complement_pair[seq2_[i]][seq2_[j]];
+    const auto type2 = complement_pair[seq2_[l]][seq2_[k]];
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
@@ -433,7 +420,7 @@ TurnerNearestNeighbor::
 score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;
-    const auto type = ::pair[seq2_[j]][seq2_[i]];
+    const auto type = complement_pair[seq2_[j]][seq2_[i]];
     e += score_mismatch_multi_(type, seq2_[j-1], seq2_[i+1]);
     if (type > 2) 
         e += score_terminalAU_[0];
@@ -447,7 +434,7 @@ void
 TurnerNearestNeighbor::
 count_multi_loop(size_t i, size_t j, ScoreType v)
 {
-    const auto type = ::pair[seq2_[j]][seq2_[i]];
+    const auto type = complement_pair[seq2_[j]][seq2_[i]];
     count_mismatch_multi_(type, seq2_[j-1], seq2_[i+1]) += v;
     if (type > 2) 
         count_terminalAU_[0] += v;
@@ -461,7 +448,7 @@ score_multi_paired(size_t i, size_t j) const -> ScoreType
 {
     const auto L = seq2_.size()-2;
     auto e = 0.;
-    const auto type = ::pair[seq2_[i]][seq2_[j]];
+    const auto type = complement_pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
         e += score_mismatch_multi_(type, seq2_[i-1], seq2_[j+1]);
     else if (i-1>=1)
@@ -480,7 +467,7 @@ TurnerNearestNeighbor::
 count_multi_paired(size_t i, size_t j, ScoreType v)
 {
     const auto L = seq2_.size()-2;
-    const auto type = ::pair[seq2_[i]][seq2_[j]];
+    const auto type = complement_pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
         count_mismatch_multi_(type, seq2_[i-1], seq2_[j+1]) += v;
     else if (i-1>=1)
@@ -512,7 +499,7 @@ score_external_paired(size_t i, size_t j) const -> ScoreType
 {
     const auto L = seq2_.size()-2;
     auto e = 0.;
-    const auto type = ::pair[seq2_[i]][seq2_[j]];
+    const auto type = complement_pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
         e += score_mismatch_external_(type, seq2_[i-1], seq2_[j+1]);
     else if (i-1>=1)
@@ -530,7 +517,7 @@ TurnerNearestNeighbor::
 count_external_paired(size_t i, size_t j, ScoreType v)
 {
     const auto L = seq2_.size()-2;
-    const auto type = ::pair[seq2_[i]][seq2_[j]];
+    const auto type = complement_pair[seq2_[i]][seq2_[j]];
     if (i-1>=1 && j+1<=L)
         count_mismatch_external_(type, seq2_[i-1], seq2_[j+1]) += v;
     else if (i-1>=1)
@@ -539,4 +526,230 @@ count_external_paired(size_t i, size_t j, ScoreType v)
         count_dangle3_(type, seq2_[j+1]) += v;
     if (type > 2) 
         count_terminalAU_[0] += v;
+}
+
+////////////////////////////////////////////////////////////////////////
+
+PositionalNearestNeighbor::
+PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
+    score_base_pair_(::get_unchecked<2>(obj, "score_base_pair")),
+    count_base_pair_(::get_mutable_unchecked<2>(obj, "count_base_pair")),
+    score_helix_stacking_(::get_unchecked<2>(obj, "score_helix_stacking")),
+    count_helix_stacking_(::get_mutable_unchecked<2>(obj, "count_helix_stacking")),
+    score_helix_closing_(::get_unchecked<2>(obj, "score_helix_closing")),
+    count_helix_closing_(::get_mutable_unchecked<2>(obj, "count_helix_closing")),
+    score_mismatch_external_(::get_unchecked<2>(obj, "score_mismatch_external")),
+    count_mismatch_external_(::get_mutable_unchecked<2>(obj, "count_mismatch_external")),
+    score_mismatch_hairpin_(::get_unchecked<2>(obj, "score_mismatch_hairpin")),
+    count_mismatch_hairpin_(::get_mutable_unchecked<2>(obj, "count_mismatch_hairpin")),
+    score_mismatch_internal_(::get_unchecked<2>(obj, "score_mismatch_internal")),
+    count_mismatch_internal_(::get_mutable_unchecked<2>(obj, "count_mismatch_internal")),
+    score_mismatch_multi_(::get_unchecked<2>(obj, "score_mismatch_multi")),
+    count_mismatch_multi_(::get_mutable_unchecked<2>(obj, "count_mismatch_multi")),
+
+    score_base_hairpin_(::get_unchecked<1>(obj, "score_base_hairpin")),
+    count_base_hairpin_(::get_mutable_unchecked<1>(obj, "count_base_hairpin")),
+    score_base_internal_(::get_unchecked<1>(obj, "score_base_internal")),
+    count_base_internal_(::get_mutable_unchecked<1>(obj, "count_base_internal")),
+    score_base_multi_(::get_unchecked<1>(obj, "score_base_multi")),
+    count_base_multi_(::get_mutable_unchecked<1>(obj, "count_base_multi")),
+    score_base_external_(::get_unchecked<1>(obj, "score_base_external")),
+    count_base_external_(::get_mutable_unchecked<1>(obj, "count_base_external")),
+
+    score_hairpin_length_(::get_unchecked<1>(obj, "score_hairpin_length")),
+    count_hairpin_length_(::get_mutable_unchecked<1>(obj, "count_hairpin_length")),
+    score_bulge_length_(::get_unchecked<1>(obj, "score_bulge_length")),
+    count_bulge_length_(::get_mutable_unchecked<1>(obj, "count_bulge_length")),
+    score_internal_length_(::get_unchecked<1>(obj, "score_internal_length")),
+    count_internal_length_(::get_mutable_unchecked<1>(obj, "count_internal_length")),
+    score_internal_explicit_(::get_unchecked<2>(obj, "score_internal_explicit")),
+    count_internal_explicit_(::get_mutable_unchecked<2>(obj, "count_internal_explicit")),
+    score_internal_symmetry_(::get_unchecked<1>(obj, "score_internal_symmetry")),
+    count_internal_symmetry_(::get_mutable_unchecked<1>(obj, "count_internal_symmetry")),
+    score_internal_asymmetry_(::get_unchecked<1>(obj, "score_internal_asymmetry")),
+    count_internal_asymmetry_(::get_mutable_unchecked<1>(obj, "count_internal_asymmetry"))
+{
+
+}
+
+auto
+PositionalNearestNeighbor::
+score_hairpin(size_t i, size_t j) const -> ScoreType
+{
+    const auto l = (j-1)-(i+1)+1;
+    auto e = 0.;
+
+    e += score_hairpin_length_[std::min<u_int32_t>(l, 30)];
+    e += score_base_pair_(i, j);
+    //if (l < 3) return e;
+    e += score_mismatch_hairpin_(i, j);
+
+    return e;
+}
+
+void
+PositionalNearestNeighbor::
+count_hairpin(size_t i, size_t j, ScoreType v)
+{
+    const auto l = (j-1)-(i+1)+1;
+
+    count_hairpin_length_[std::min<u_int32_t>(l, 30)] += v;
+    count_base_pair_(i, j) += v;
+    //if (l < 3) return;
+    count_mismatch_hairpin_(i, j) += v;
+}
+
+auto
+PositionalNearestNeighbor::
+score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
+{
+    const auto l1 = (k-1)-(i+1)+1;
+    const auto l2 = (j-1)-(l+1)+1;
+    const auto [ls, ll] = std::minmax(l1, l2);
+    auto e = std::numeric_limits<ScoreType>::lowest();
+
+    if (ll==0) // stack
+    {
+        auto e = score_helix_stacking_(i, j);
+        e += score_base_pair_(i, j);
+        return e;
+    }
+    else if (ls==0) // bulge
+    {
+        auto e = score_bulge_length_[std::min<u_int16_t>(ll, 30)];
+        e += score_base_pair_(i, j);
+        e += score_helix_closing_(i, j) + score_helix_closing_(l, k);
+        e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
+        return e;
+    }
+    else // internal loop
+    {
+        auto e = score_internal_length_[std::min<u_int32_t>(ls+ll, 30)];
+        e += score_base_pair_(i, j);
+        e += score_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4));
+        if (ls==ll)
+            e += score_internal_symmetry_[std::min<u_int32_t>(ll, 15)];
+        e += score_internal_asymmetry_[std::min<u_int32_t>(ll-ls, 28)];
+        e += score_helix_closing_(i, j) + score_helix_closing_(l, k);
+        e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
+        return e;
+    }
+
+    return e;
+}
+
+void
+PositionalNearestNeighbor::
+count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
+{
+    const auto l1 = (k-1)-(i+1)+1;
+    const auto l2 = (j-1)-(l+1)+1;
+    const auto [ls, ll] = std::minmax(l1, l2);
+
+    if (ll==0) // stack
+    {
+        count_helix_stacking_(i, j) += v;
+        count_base_pair_(i, j) += v;
+    }
+    else if (ls==0) // bulge
+    {
+        count_bulge_length_[std::min<u_int32_t>(ll, 30)] += v;
+        count_base_pair_(i, j) += v;
+        count_helix_closing_(i, j) += v;
+        count_helix_closing_(l, k) += v;
+        count_mismatch_internal_(i, j) += v;
+        count_mismatch_internal_(l, k) += v;
+    }
+    else // internal loop
+    {
+        count_internal_length_[std::min<u_int32_t>(ls+ll, 30)] += v;
+        count_base_pair_(i, j) += v;
+        count_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4)) += v;
+        if (ls==ll)
+            count_internal_symmetry_[std::min<u_int32_t>(ll, 15)] += v;
+        count_internal_asymmetry_[std::min<u_int32_t>(ll-ls, 28)] += v;
+        count_helix_closing_(i, j) += v;
+        count_helix_closing_(l, k) += v;
+        count_mismatch_internal_(i, j) += v;
+        count_mismatch_internal_(l, k) += v;
+    }
+}
+
+auto
+PositionalNearestNeighbor::
+score_multi_loop(size_t i, size_t j) const -> ScoreType
+{
+    auto e = 0.;
+    e += score_base_pair_(i, j);
+    e += score_mismatch_multi_(j, i);
+    e += score_helix_closing_(j, i);
+    // e+= score_ml_closing_;
+
+    return e;
+}
+
+void
+PositionalNearestNeighbor::
+count_multi_loop(size_t i, size_t j, ScoreType v)
+{
+    count_base_pair_(i, j) += v;
+    count_mismatch_multi_(j, i) += v;
+    count_helix_closing_(j, i) += v;
+    // count_ml_closing_ += v;
+}
+
+auto
+PositionalNearestNeighbor::
+score_multi_paired(size_t i, size_t j) const -> ScoreType
+{
+    auto e = 0.;
+    e += score_base_pair_(i, j);
+    e += score_mismatch_multi_(i, j);
+    e += score_helix_closing_(i, j);
+
+    return e;
+}
+
+void
+PositionalNearestNeighbor::
+count_multi_paired(size_t i, size_t j, ScoreType v)
+{
+    count_base_pair_(i, j) += v;
+    count_mismatch_multi_(i, j) += v;
+    count_helix_closing_(i, j) += v;
+}
+
+auto
+PositionalNearestNeighbor::
+score_multi_unpaired(size_t i) const -> ScoreType
+{
+    return score_base_multi_(i);
+}
+
+void
+PositionalNearestNeighbor::
+count_multi_unpaired(size_t i, ScoreType v)
+{
+    count_base_multi_(i) += v;
+}
+
+auto
+PositionalNearestNeighbor::
+score_external_paired(size_t i, size_t j) const -> ScoreType
+{
+    auto e = 0.;
+    e += score_base_pair_(i, j);
+    e += score_mismatch_external_(i, j);
+    e += score_helix_closing_(i, j);
+    
+    return e;
+}
+
+void
+PositionalNearestNeighbor::
+count_external_paired(size_t i, size_t j, ScoreType v)
+{
+    count_base_pair_(i, j) += v;
+    count_mismatch_external_(i, j) += v;
+    count_helix_closing_(i, j) += v;
 }
