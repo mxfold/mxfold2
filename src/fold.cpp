@@ -266,41 +266,40 @@ traceback_viterbi() -> std::vector<u_int32_t>
         switch (tb_type)
         {
             case TBType::C_HAIRPIN_LOOP: {
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
+                pair[i] = j;
+                pair[j] = i;
                 break;
             }
             case TBType::C_INTERNAL_LOOP: {
                 const auto [p, q] = std::get<1>(kl);
                 const auto k = i+p;
                 const auto l = j-q;
-                assert(k < l);
-                assert(pair[k] == 0);
-                assert(pair[l] == 0);
-                pair[k] = l;
-                pair[l] = k;
                 tb_queue.emplace(Ct_[k][l], k, l);
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
+                pair[i] = j;
+                pair[j] = i;
                 break;
             }
             case TBType::C_MULTI_LOOP: {
                 const auto u = std::get<0>(kl);
                 tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
                 tb_queue.emplace(M1t_[u][j-1], u, j-1);
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
+                pair[i] = j;
+                pair[j] = i;
                 break;
             }
             case TBType::M_PAIRED: {
                 const auto k = std::get<0>(kl);
-                assert(pair[k] == 0);
-                assert(pair[j] == 0);
-                pair[k] = j;
-                pair[j] = k;
                 tb_queue.emplace(Ct_[k][j], k, j);
                 break;
             }
             case TBType::M_BIFURCATION: {
                 const auto u = std::get<0>(kl);
-                assert(pair[u] == 0);
-                assert(pair[j] == 0);
-                pair[u] = j;
-                pair[j] = u;
                 tb_queue.emplace(Mt_[i][u-1], i, u-1);
                 tb_queue.emplace(Ct_[u][j], u, j);
                 break;
@@ -310,10 +309,6 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }    
             case TBType::M1_PAIRED: {
-                assert(pair[i] == 0);
-                assert(pair[j] == 0);
-                pair[i] = j;
-                pair[j] = i;
                 tb_queue.emplace(Ct_[i][j], i, j);
                 break;
             }
@@ -330,10 +325,6 @@ traceback_viterbi() -> std::vector<u_int32_t>
             }
             case TBType::F_BIFURCATION: {
                 const auto k = std::get<0>(kl);
-                assert(pair[i] == 0);
-                assert(pair[k] == 0);
-                pair[i] = k;
-                pair[k] = i;
                 tb_queue.emplace(Ct_[i][k], i, k);
                 tb_queue.emplace(Ft_[k+1], k+1, j);
                 break;
