@@ -683,7 +683,8 @@ score_multi_loop(size_t i, size_t j) const -> ScoreType
     e += score_base_pair_(i, j);
     e += score_mismatch_multi_(j, i);
     e += score_helix_closing_(j, i);
-    // e+= score_ml_closing_;
+    // e += score_ml_closing_;
+    // e += score_ml_intern_;
 
     return e;
 }
@@ -696,6 +697,7 @@ count_multi_loop(size_t i, size_t j, ScoreType v)
     count_mismatch_multi_(j, i) += v;
     count_helix_closing_(j, i) += v;
     // count_ml_closing_ += v;
+    // count_ml_intern_ += v;
 }
 
 auto
@@ -703,7 +705,7 @@ PositionalNearestNeighbor::
 score_multi_paired(size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;
-    e += score_base_pair_(i, j);
+    // e += score_ml_intern_;
     e += score_mismatch_multi_(i, j);
     e += score_helix_closing_(i, j);
 
@@ -714,7 +716,7 @@ void
 PositionalNearestNeighbor::
 count_multi_paired(size_t i, size_t j, ScoreType v)
 {
-    count_base_pair_(i, j) += v;
+    // count_ml_intern_ += v;
     count_mismatch_multi_(i, j) += v;
     count_helix_closing_(i, j) += v;
 }
@@ -738,7 +740,6 @@ PositionalNearestNeighbor::
 score_external_paired(size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;
-    e += score_base_pair_(i, j);
     e += score_mismatch_external_(i, j);
     e += score_helix_closing_(i, j);
     
@@ -749,7 +750,6 @@ void
 PositionalNearestNeighbor::
 count_external_paired(size_t i, size_t j, ScoreType v)
 {
-    count_base_pair_(i, j) += v;
     count_mismatch_external_(i, j) += v;
     count_helix_closing_(i, j) += v;
 }

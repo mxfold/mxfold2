@@ -7,6 +7,7 @@
 
 namespace py = pybind11;
 
+static
 auto make_paren(const std::vector<u_int32_t>& p)
 {
     std::string s(p.size()-1, '.');
@@ -18,6 +19,7 @@ auto make_paren(const std::vector<u_int32_t>& p)
     return s;
 }
 
+template < class ParamClass >
 auto predict(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, std::string constraint, 
             std::string reference, float pos_penalty, float neg_penalty)
@@ -29,8 +31,8 @@ auto predict(const std::string& seq, py::object pa,
     if (!reference.empty())
         options.penalty(reference, pos_penalty, neg_penalty);
     
-    auto param = std::make_unique<TurnerNearestNeighbor>(seq, pa);
-    Fold<TurnerNearestNeighbor> f(std::move(param));
+    auto param = std::make_unique<ParamClass>(seq, pa);
+    Fold<ParamClass> f(std::move(param));
     auto e = f.compute_viterbi(seq, options);
     auto p = f.traceback_viterbi();
     f.traceback_viterbi(seq, options);
@@ -42,8 +44,9 @@ PYBIND11_MODULE(interface, m)
 {
     using namespace std::literals::string_literals;
     using namespace pybind11::literals;
+    auto f = &predict<TurnerNearestNeighbor>;
     m.doc() = "module for RNA secondary predicton with DNN";
-    m.def("predict", &predict, "predict RNA secondary structure", 
+    m.def("predict", &predict<TurnerNearestNeighbor>, "predict RNA secondary structure", 
         "seq"_a, "param"_a=py::none(), 
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
