@@ -45,9 +45,20 @@ PYBIND11_MODULE(interface, m)
     using namespace std::literals::string_literals;
     using namespace pybind11::literals;
     auto f = &predict<TurnerNearestNeighbor>;
+    auto g = &predict<PositionalNearestNeighbor>;
     m.doc() = "module for RNA secondary predicton with DNN";
-    m.def("predict", &predict<TurnerNearestNeighbor>, "predict RNA secondary structure", 
-        "seq"_a, "param"_a=py::none(), 
+    m.def("predict", f, 
+        "predict RNA secondary structure with Turner Model", 
+        "seq"_a, "param"_a, 
+        "min_hairpin_length"_a=3, 
+        "max_internal_length"_a=30, 
+        "constraint"_a=""s, 
+        "reference"_a=""s, 
+        "pos_penalty"_a=0.0, 
+        "neg_penalty"_a=0.0);
+    m.def("predict_positional", g, 
+        "predict RNA secondary structure with positional nearest neighbor model", 
+        "seq"_a, "param"_a, 
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "constraint"_a=""s, 
