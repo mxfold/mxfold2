@@ -445,3 +445,4 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
 #include "parameter.h"
 
 template class Fold<TurnerNearestNeighbor>;
+template class Fold<PositionalNearestNeighbor>;

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .dataset import FastaDataset
-from .fold import RNAFold
+from .fold import RNAFold, PositionalFold, CNNFold
 
 
 class Predict:
@@ -45,8 +45,9 @@ class Predict:
             self.model = RNAFold()
             self.model.load_state_dict(torch.load(args.model))
         else:
-            from . import param_turner2004
-            self.model = RNAFold(param_turner2004)
+            #from . import param_turner2004
+            #self.model = RNAFold(param_turner2004)
+            self.model = CNNFold()
 
         # self.model.to(self.device)
         self.predict(args.bpseq)

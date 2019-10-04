@@ -761,3 +761,17 @@ count_external_paired(size_t i, size_t j, ScoreType v)
     count_mismatch_external_(i, j) += v;
     count_helix_closing_(i, j) += v;
 }
+
+auto
+PositionalNearestNeighbor::
+score_external_unpaired(size_t i) const -> ScoreType
+{
+    return score_base_external_(i);
+}
+
+void
+PositionalNearestNeighbor::
+count_external_unpaired(size_t i, ScoreType v)
+{
+    count_base_external_(i) += v;
+}
