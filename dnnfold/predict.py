@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 
 import torch
 import torch.nn as nn
@@ -7,7 +8,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .dataset import FastaDataset
-from .fold import RNAFold, PositionalFold, CNNFold
+from .fold import RNAFold, CNNFold
 
 
 class Predict:
@@ -39,15 +40,23 @@ class Predict:
 
         # use_cuda = not args.no_cuda and torch.cuda.is_available()
         # self.device = torch.device("cuda" if use_cuda else "cpu") # pylint: disable=no-member
-        # torch.manual_seed(args.seed)
+        if args.seed >= 0:
+            torch.manual_seed(args.seed)
+            random.seed(args.seed)
 
-        if args.model is not '':
-            self.model = RNAFold()
-            self.model.load_state_dict(torch.load(args.model))
+        if args.model == 'Turner':
+            if args.param is not '':
+                self.model = RNAFold()
+                self.model.load_state_dict(torch.load(args.param))
+            else:
+                from . import param_turner2004
+                self.model = RNAFold(param_turner2004)
+        elif args.model == 'CNN':
+            self.model = CNNFold(args)
+            if args.param is not '':
+                self.model.load_state_dict(torch.load(args.param))
         else:
-            #from . import param_turner2004
-            #self.model = RNAFold(param_turner2004)
-            self.model = CNNFold()
+            raise('never reach here')
 
         # self.model.to(self.device)
         self.predict(args.bpseq)
@@ -60,11 +69,15 @@ class Predict:
         subparser.add_argument('input', type=str,
                             help='FASTA-formatted file')
 
-        subparser.add_argument('--seed', type=int, default=1, metavar='S',
-                            help='random seed (default: 1)')
-        subparser.add_argument('--model', type=str, default='',
-                            help='file name of trained model') 
+        subparser.add_argument('--seed', type=int, default=0, metavar='S',
+                            help='random seed (default: 0)')
+        subparser.add_argument('--model', choices=('Turner', 'CNN'), default='Turner', 
+                            help="Folding model ('Turner', 'CNN')")
+        subparser.add_argument('--param', type=str, default='',
+                            help='file name of trained parameters') 
         subparser.add_argument('--bpseq', action='store_true',
                             help='output the prediction with BPSEQ format')
+
+        CNNFold.add_args(subparser)
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

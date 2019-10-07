@@ -156,8 +156,9 @@ class CNNEncodeLayer(nn.Module):
 
 
 class FCPairedLayer(nn.Module):
-    def __init__(self, n_in, layers=()):
+    def __init__(self, n_in, layers=(), dropout_rate=0.5):
         super(FCPairedLayer, self).__init__()
+        self.dropout = nn.Dropout(p=dropout_rate)
         linears = []
         n = n_in*2
         for m in layers:
@@ -177,6 +178,7 @@ class FCPairedLayer(nn.Module):
             v = torch.reshape(v, (B*(N-k), C*2)) # (B*(N-k), C*2)
             for fc in self.fc[:-1]:
                 v = F.relu(fc(v))
+                v = self.dropout(v)
             v = self.fc[-1](v) # (B*(N-k), 1)
             v = torch.reshape(v, (B, N-k)) # (B, N-k)
             y += torch.diag_embed(v, offset=k) # (B, N, N)
@@ -184,8 +186,9 @@ class FCPairedLayer(nn.Module):
 
 
 class FCUnpairedLayer(nn.Module):
-    def __init__(self, n_in, layers=()):
+    def __init__(self, n_in, layers=(), dropout_rate=0.5):
         super(FCUnpairedLayer, self).__init__()
+        self.dropout = nn.Dropout(p=dropout_rate)
         n = n_in
         linears = []
         for m in layers:
@@ -200,14 +203,16 @@ class FCUnpairedLayer(nn.Module):
         x = torch.reshape(x, (B*N, C)) # (B*N, C)
         for fc in self.fc[:-1]:
             x = F.relu(fc(x))
+            x = self.dropout(x)
         x = self.fc[-1](x) # (B*N, 1)
         x = torch.reshape(x, (B, N)) # (B, N)
         return x
 
 
 class FCLengthLayer(nn.Module):
-    def __init__(self, n_in, layers=()):
+    def __init__(self, n_in, layers=(), dropout_rate=0.5):
         super(FCLengthLayer, self).__init__()
+        self.dropout = nn.Dropout(p=dropout_rate)
         self.n_in = n_in
         n = n_in if isinstance(n_in, int) else np.prod(n_in)
         linears = []
@@ -227,6 +232,7 @@ class FCLengthLayer(nn.Module):
     def forward(self, x):
         for l in self.linears[:-1]:
             x = F.relu(l(x))
+            x = self.dropout(x)
         return self.linears[-1](x)
 
     def make_param(self):
@@ -235,14 +241,18 @@ class FCLengthLayer(nn.Module):
 
 
 class CNNFold(nn.Module):
-    def __init__(self, num_filters=256, motif_len=7):
+    def __init__(self, args=None, num_filters=256, motif_len=7, num_hidden_units=128, dropout_rate=0.5):
         super(CNNFold, self).__init__()
-        self.num_filters = num_filters
-        self.motif_len = motif_len
+        if args is not None:
+            num_filters = args.num_filters
+            motif_len = args.motif_len
+            num_hidden_units = args.num_hidden_units
+            dropout_rate = args.dropout_rate
+
         self.conv = CNNEncodeLayer(num_filters, motif_len)
-        self.fc_base_pair = FCPairedLayer(num_filters, layers=(128,))
-        self.fc_mismatch = FCPairedLayer(num_filters, layers=(128,))
-        self.fc_unpair = FCUnpairedLayer(num_filters, layers=(128,))
+        self.fc_base_pair = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate)
+        self.fc_mismatch = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate)
+        self.fc_unpair = FCUnpairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate)
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
             'score_bulge_length': FCLengthLayer(31),
@@ -251,8 +261,25 @@ class CNNFold(nn.Module):
             'score_internal_symmetry': FCLengthLayer(16),
             'score_internal_asymmetry': FCLengthLayer(29)
         })
-
         self.fold = PositionalFold()
+
+        self.config = {
+            '--num-filters': num_filters,
+            '--motif-len': motif_len,
+            '--dropout-rate': dropout_rate,
+            '--num-hidden-units': num_hidden_units
+        }
+
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('--num-filters', type=int, default=256,
+                        help='the number of CNN filters')
+        parser.add_argument('--motif-len', type=int, default=7,
+                        help='the length of each filter of CNN')
+        parser.add_argument('--num-hidden-units', type=int, default=128,
+                        help='the number of the hidden units of full connected layers')
+        parser.add_argument('--dropout-rate', type=float, default=0.5,
+                        help='dropout rate of the hidden units')
 
 
     def make_param(self, seq):

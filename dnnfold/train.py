@@ -1,6 +1,7 @@
 #%%
 import os
 from argparse import ArgumentParser
+import random
 
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
-from .fold import RNAFold
+from .fold import RNAFold, CNNFold
 
 
 class StructuredLoss(nn.Module):
@@ -91,11 +92,22 @@ class Train:
 
 
     def run(self, args):
-        torch.manual_seed(args.seed)
         train_dataset = BPseqDataset(args.input, unpaired='x')
         self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-        self.model = RNAFold()
+
+        if args.seed >= 0:
+            torch.manual_seed(args.seed)
+            random.seed(args.seed)
+
+        if args.model == 'Turner':
+            self.model = RNAFold()
+        elif args.model == 'CNN':
+            self.model = CNNFold(args)
+        else:
+            raise('never reach here')
+
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
+
         #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.001, momentum=0.9)
         self.optimizer = optim.Adam(self.model.parameters())
         #self.optimizer = optim.Adagrad(self.model.parameters())
@@ -110,10 +122,19 @@ class Train:
             if args.log_dir is not None:
                 self.save_checkpoint(args.log_dir, epoch)
 
-        if args.model is not None:
-            torch.save(self.model.state_dict(), args.model)
-#        if args.model_config is not None:
-#            self.model.save_config(args.model_config)
+        if args.param is not None:
+            torch.save(self.model.state_dict(), args.param)
+        if args.save_config is not None:
+            config = { '--model': args.model, '--param': args.param }
+            if hasattr(self.model, "config"):
+                config.update(self.model.config)
+            with open(args.save_config, 'w') as f:
+                for k, v in config.items():
+                    if type(v) is bool: # pylint: disable=unidiomatic-typecheck
+                        if v:
+                            f.write('{}\n'.format(k))
+                    else:
+                        f.write('{}\n{}\n'.format(k, v))                
 
 
     @classmethod
@@ -126,14 +147,18 @@ class Train:
                             help='Test data of BPSEQ-formatted file')
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
                             help='number of epochs to train (default: 10)')
-        subparser.add_argument('--seed', type=int, default=1, metavar='S',
-                            help='random seed (default: 1)')
-        subparser.add_argument('--model', type=str, default='model.pth',
-                            help='output file name of trained model')
+        subparser.add_argument('--seed', type=int, default=0, metavar='S',
+                            help='random seed (default: 0)')
+        subparser.add_argument('--param', type=str, default='param.pth',
+                            help='output file name of trained parameters')
+        subparser.add_argument('--model', choices=('Turner', 'CNN'), default='Turner', 
+                            help="Folding model ('Turner', 'CNN')")
         subparser.add_argument('--log-dir', type=str, default=None,
                             help='Directory for storing logs')
         subparser.add_argument('--resume', type=str, default=None,
                             help='Checkpoint file for resume')
+        subparser.add_argument('--save-config', type=str, default=None,
+                            help='save model configurations')
 
         subparser.add_argument('--l1-weight', type=float, default=0.,
                             help='the weight for L1 regularization (default: 0)')
@@ -143,5 +168,7 @@ class Train:
                             help='the penalty for positive BPs for loss augmentation (default: 0)')
         subparser.add_argument('--neg-penalty', type=float, default=0,
                             help='the penalty for negative BPs for loss augmentation (default: 0)')
+
+        CNNFold.add_args(subparser)
 
         subparser.set_defaults(func = lambda args: Train().run(args))
