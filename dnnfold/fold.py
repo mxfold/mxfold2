@@ -85,14 +85,15 @@ class PositionalFold(nn.Module):
 
 
     def forward(self, seq, param, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
+        cpu_param = { k: v.to("cpu") for k, v in param.items()}
         with torch.no_grad():
-            v, _, _ = interface.predict_positional(seq, self.clear_count(param),
+            v, _, _ = interface.predict_positional(seq, self.clear_count(cpu_param),
                         constraint=constraint, max_internal_length=max_internal_length,
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
         s = 0
         for n, p in param.items():
             if n.startswith("score_"):
-                s += torch.sum(p * param["count_"+n[6:]])
+                s += torch.sum(p * cpu_param["count_"+n[6:]].to(p.device))
         s += v - s.item()
         return s
 
@@ -100,8 +101,9 @@ class PositionalFold(nn.Module):
     def predict(self, seq, param=None, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
         if param is None:
             param = self.nussinov(seq)
+        cpu_param = { k: v.to("cpu") for k, v in param.items()}
         with torch.no_grad():
-            return interface.predict_positional(seq, self.clear_count(param),
+            return interface.predict_positional(seq, self.clear_count(cpu_param),
                         constraint=constraint, max_internal_length=max_internal_length,
                         reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
 
@@ -140,18 +142,19 @@ class PositionalFold(nn.Module):
 
 
 class CNNEncodeLayer(nn.Module):
-    def __init__(self, num_filters, motif_len=7):
+    def __init__(self, num_filters=128, motif_len=7, device=torch.device("cpu")):
         super(CNNEncodeLayer, self).__init__()
         self.num_filters = num_filters
         self.motif_len = motif_len
+        self.device = device
         self.encoder = SeqEncoder()
-        self.conv = nn.Conv1d(4, num_filters, motif_len)
+        self.conv = nn.Conv1d(4, num_filters, motif_len).to(device)
 
     def forward(self, seq):
         seq = '0'+seq
         L = len(seq)
         x = self.encoder([seq], self.motif_len) # (B=1, 4, N+(motif_len//2)*2)
-        x = F.relu(self.conv(x)) # (B, num_filters, N)
+        x = F.relu(self.conv(x.to(self.device))) # (B, num_filters, N)
         return x
 
 
@@ -169,7 +172,7 @@ class FCPairedLayer(nn.Module):
 
     def forward(self, x):
         B, C, N = x.shape
-        y = torch.zeros((B, N, N), dtype=torch.float32)
+        y = torch.zeros((B, N, N), dtype=torch.float32, device=x.device)
         for k in range(1, N):
             x_l = x[:, :, :-k] # (B, C, N-k)
             x_r = x[:, :, k:] # (B, C, N-k)
@@ -236,30 +239,33 @@ class FCLengthLayer(nn.Module):
         return self.linears[-1](x)
 
     def make_param(self):
-        x = self.forward(self.x)
+        x = self.forward(self.x.to(self.linears[-1].weight.device))
         return x.reshape((self.n_in,) if isinstance(self.n_in, int) else self.n_in)
 
 
 class CNNFold(nn.Module):
-    def __init__(self, args=None, num_filters=256, motif_len=7, num_hidden_units=128, dropout_rate=0.5):
+    def __init__(self, args=None, device=torch.device("cpu"), 
+            num_filters=256, motif_len=7, num_hidden_units=128, dropout_rate=0.5):
         super(CNNFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters
             motif_len = args.motif_len
             num_hidden_units = args.num_hidden_units
             dropout_rate = args.dropout_rate
+            if args.gpu >= 0:
+                device = torch.device("cuda", args.gpu)
 
-        self.conv = CNNEncodeLayer(num_filters, motif_len)
-        self.fc_base_pair = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate)
-        self.fc_mismatch = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate)
-        self.fc_unpair = FCUnpairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate)
+        self.conv = CNNEncodeLayer(num_filters, motif_len, device=device)
+        self.fc_base_pair = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate).to(device)
+        self.fc_mismatch = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate).to(device)
+        self.fc_unpair = FCUnpairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate).to(device)
         self.fc_length = nn.ModuleDict({
-            'score_hairpin_length': FCLengthLayer(31),
-            'score_bulge_length': FCLengthLayer(31),
-            'score_internal_length': FCLengthLayer(31),
-            'score_internal_explicit': FCLengthLayer((5, 5)),
-            'score_internal_symmetry': FCLengthLayer(16),
-            'score_internal_asymmetry': FCLengthLayer(29)
+            'score_hairpin_length': FCLengthLayer(31).to(device),
+            'score_bulge_length': FCLengthLayer(31).to(device),
+            'score_internal_length': FCLengthLayer(31).to(device),
+            'score_internal_explicit': FCLengthLayer((5, 5)).to(device),
+            'score_internal_symmetry': FCLengthLayer(16).to(device),
+            'score_internal_asymmetry': FCLengthLayer(29).to(device)
         })
         self.fold = PositionalFold()
 
@@ -286,13 +292,15 @@ class CNNFold(nn.Module):
         L = len(seq)+1
         x = self.conv(seq)
         score_base_pair = self.fc_base_pair(x)[0]
+        score_helix_stacking = torch.zeros_like(score_base_pair)
+        score_helix_closing = score_helix_stacking
         score_mismatch = self.fc_mismatch(x)[0]
         score_unpair = self.fc_unpair(x)[0]
 
         param = { 
             'score_base_pair': score_base_pair,
-            'score_helix_stacking': torch.zeros((L, L), dtype=torch.float32),
-            'score_helix_closing': torch.zeros((L, L), dtype=torch.float32),
+            'score_helix_stacking': score_helix_stacking,
+            'score_helix_closing': score_helix_closing,
             'score_mismatch_external': score_mismatch,
             'score_mismatch_hairpin': score_mismatch,
             'score_mismatch_internal': score_mismatch,

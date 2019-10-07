@@ -71,6 +71,8 @@ class Predict:
 
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
+        subparser.add_argument('--gpu', type=int, default=-1, 
+                            help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--model', choices=('Turner', 'CNN'), default='Turner', 
                             help="Folding model ('Turner', 'CNN')")
         subparser.add_argument('--param', type=str, default='',

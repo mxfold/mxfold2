@@ -147,6 +147,8 @@ class Train:
                             help='Test data of BPSEQ-formatted file')
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
                             help='number of epochs to train (default: 10)')
+        subparser.add_argument('--gpu', type=int, default=-1, 
+                            help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
