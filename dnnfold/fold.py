@@ -50,24 +50,35 @@ class RNAFold(nn.Module):
                 setattr(self, name, torch.zeros_like(param))
 
 
-    def forward(self, seq, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
-        self.clear_count()
-        with torch.no_grad():
-            v, _, _ = interface.predict(seq, self, constraint=constraint, max_internal_length=max_internal_length,
-                        reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
         s = 0
-        for name, param in self.named_parameters():
-            if name.startswith("score_"):
-                s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
-        s += v - s.item()
+        for i in range(len(seq)):
+            self.clear_count()
+            with torch.no_grad():
+                v, _, _ = interface.predict(seq[i], self, 
+                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            constraint=constraint[i] if constraint is not None else '', 
+                            reference=reference[i] if reference is not None else '', 
+                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+            for name, param in self.named_parameters():
+                if name.startswith("score_"):
+                    s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
+            s += v - s.item()
         return s
 
 
-    def predict(self, seq, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
-        self.clear_count()
-        with torch.no_grad():
-            return interface.predict(seq, self, constraint=constraint, max_internal_length=max_internal_length,
-                        reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+        ret = []
+        for i in range(len(seq)):
+            self.clear_count()
+            with torch.no_grad():
+                r = interface.predict(seq[i], self, 
+                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            constraint=constraint[i] if constraint is not None else '', 
+                            reference=reference[i] if reference is not None else '', 
+                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                ret.append(r)
+        return ret
 
 
 class PositionalFold(nn.Module):
@@ -76,69 +87,75 @@ class PositionalFold(nn.Module):
 
 
     def clear_count(self, param):
-        param_c = {}
+        param_count = {}
         for n, p in param.items():
             if n.startswith("score_"):
-                param_c["count_"+n[6:]] = torch.zeros_like(p)
-        param.update(param_c)
+                param_count["count_"+n[6:]] = torch.zeros_like(p)
+        param.update(param_count)
         return param
 
 
-    def forward(self, seq, param, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
-        cpu_param = { k: v.to("cpu") for k, v in param.items()}
-        with torch.no_grad():
-            v, _, _ = interface.predict_positional(seq, self.clear_count(cpu_param),
-                        constraint=constraint, max_internal_length=max_internal_length,
-                        reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+    def forward(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
         s = 0
-        for n, p in param.items():
-            if n.startswith("score_"):
-                s += torch.sum(p * cpu_param["count_"+n[6:]].to(p.device))
-        s += v - s.item()
+        for i in range(len(seq)):
+            param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
+            with torch.no_grad():
+                v, _, _ = interface.predict_positional(seq[i], self.clear_count(param_on_cpu),
+                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            constraint=constraint[i] if constraint is not None else '', 
+                            reference=reference[i] if reference is not None else '', 
+                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+            for n, p in param[i].items():
+                if n.startswith("score_"):
+                    s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
+            s += v - s.item()
         return s
 
 
-    def predict(self, seq, param=None, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
-        if param is None:
-            param = self.nussinov(seq)
-        cpu_param = { k: v.to("cpu") for k, v in param.items()}
-        with torch.no_grad():
-            return interface.predict_positional(seq, self.clear_count(cpu_param),
-                        constraint=constraint, max_internal_length=max_internal_length,
-                        reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+    def predict(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+        ret = []
+        for i in range(len(seq)):
+            param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
+            with torch.no_grad():
+                r = interface.predict_positional(seq[i], self.clear_count(param_on_cpu),
+                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            constraint=constraint[i] if constraint is not None else '', 
+                            reference=reference[i] if reference is not None else '', 
+                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                ret.append(r)
+        return ret
 
-
-    def nussinov(self, seq):
-        seq = ' '+seq.lower()
-        L = len(seq)
+    # def nussinov(self, seq):
+    #     seq = ' '+seq.lower()
+    #     L = len(seq)
         
-        param = { 
-            'score_base_pair': torch.zeros((L, L), dtype=torch.float32),
-            'score_helix_stacking': torch.zeros((L, L), dtype=torch.float32),
-            'score_helix_closing': torch.zeros((L, L), dtype=torch.float32),
-            'score_mismatch_external': torch.zeros((L, L), dtype=torch.float32),
-            'score_mismatch_hairpin': torch.zeros((L, L), dtype=torch.float32),
-            'score_mismatch_internal': torch.zeros((L, L), dtype=torch.float32),
-            'score_mismatch_multi': torch.zeros((L, L), dtype=torch.float32),
-            'score_base_hairpin': torch.zeros((L,), dtype=torch.float32),
-            'score_base_internal': torch.zeros((L,), dtype=torch.float32),
-            'score_base_multi': torch.zeros((L,), dtype=torch.float32),
-            'score_base_external': torch.zeros((L,), dtype=torch.float32),
-            'score_hairpin_length': torch.zeros((31,), dtype=torch.float32),
-            'score_bulge_length': torch.zeros((31,), dtype=torch.float32),
-            'score_internal_length': torch.zeros((31,), dtype=torch.float32),
-            'score_internal_explicit': torch.zeros((5, 5), dtype=torch.float32),
-            'score_internal_symmetry': torch.zeros((16,), dtype=torch.float32),
-            'score_internal_asymmetry': torch.zeros((29,), dtype=torch.float32) }
+    #     param = { 
+    #         'score_base_pair': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_helix_stacking': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_helix_closing': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_mismatch_external': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_mismatch_hairpin': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_mismatch_internal': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_mismatch_multi': torch.zeros((L, L), dtype=torch.float32),
+    #         'score_base_hairpin': torch.zeros((L,), dtype=torch.float32),
+    #         'score_base_internal': torch.zeros((L,), dtype=torch.float32),
+    #         'score_base_multi': torch.zeros((L,), dtype=torch.float32),
+    #         'score_base_external': torch.zeros((L,), dtype=torch.float32),
+    #         'score_hairpin_length': torch.zeros((31,), dtype=torch.float32),
+    #         'score_bulge_length': torch.zeros((31,), dtype=torch.float32),
+    #         'score_internal_length': torch.zeros((31,), dtype=torch.float32),
+    #         'score_internal_explicit': torch.zeros((5, 5), dtype=torch.float32),
+    #         'score_internal_symmetry': torch.zeros((16,), dtype=torch.float32),
+    #         'score_internal_asymmetry': torch.zeros((29,), dtype=torch.float32) }
 
-        complement_pairs = {
-            ('a', 'u'), ('a', 't'), ('c', 'g'), ('g', 'u'), ('g', 't'),
-            ('u', 'a'), ('t', 'a'), ('g', 'c'), ('u', 'g'), ('t', 'g') }
-        for i in range(1, L):
-            for j in range(i, L):
-                if (seq[i], seq[j]) in complement_pairs:
-                    param['score_base_pair'][i, j] = 1
-        return param
+    #     complement_pairs = {
+    #         ('a', 'u'), ('a', 't'), ('c', 'g'), ('g', 'u'), ('g', 't'),
+    #         ('u', 'a'), ('t', 'a'), ('g', 'c'), ('u', 'g'), ('t', 'g') }
+    #     for i in range(1, L):
+    #         for j in range(i, L):
+    #             if (seq[i], seq[j]) in complement_pairs:
+    #                 param['score_base_pair'][i, j] = 1
+    #     return param
 
 
 class CNNEncodeLayer(nn.Module):
@@ -150,10 +167,9 @@ class CNNEncodeLayer(nn.Module):
         self.encoder = SeqEncoder()
         self.conv = nn.Conv1d(4, num_filters, motif_len).to(device)
 
-    def forward(self, seq):
-        seq = '0'+seq
-        L = len(seq)
-        x = self.encoder([seq], self.motif_len) # (B=1, 4, N+(motif_len//2)*2)
+    def forward(self, seqs):
+        seqs = [ '0'+seq for seq in seqs ]
+        x = self.encoder(seqs, self.motif_len) # (B=1, 4, N+(motif_len//2)*2)
         x = F.relu(self.conv(x.to(self.device))) # (B, num_filters, N)
         return x
 
@@ -289,43 +305,42 @@ class CNNFold(nn.Module):
 
 
     def make_param(self, seq):
-        L = len(seq)+1
         x = self.conv(seq)
-        score_base_pair = self.fc_base_pair(x)[0]
+        score_base_pair = self.fc_base_pair(x)
         score_helix_stacking = torch.zeros_like(score_base_pair)
         score_helix_closing = score_helix_stacking
-        score_mismatch = self.fc_mismatch(x)[0]
-        score_unpair = self.fc_unpair(x)[0]
+        score_mismatch = self.fc_mismatch(x)
+        score_unpair = self.fc_unpair(x)
 
-        param = { 
-            'score_base_pair': score_base_pair,
-            'score_helix_stacking': score_helix_stacking,
-            'score_helix_closing': score_helix_closing,
-            'score_mismatch_external': score_mismatch,
-            'score_mismatch_hairpin': score_mismatch,
-            'score_mismatch_internal': score_mismatch,
-            'score_mismatch_multi': score_mismatch,
-            'score_base_hairpin': score_unpair,
-            'score_base_internal': score_unpair,
-            'score_base_multi': score_unpair,
-            'score_base_external': score_unpair,
+        param = [ { 
+            'score_base_pair': score_base_pair[i],
+            'score_helix_stacking': score_helix_stacking[i],
+            'score_helix_closing': score_helix_closing[i],
+            'score_mismatch_external': score_mismatch[i],
+            'score_mismatch_hairpin': score_mismatch[i],
+            'score_mismatch_internal': score_mismatch[i],
+            'score_mismatch_multi': score_mismatch[i],
+            'score_base_hairpin': score_unpair[i],
+            'score_base_internal': score_unpair[i],
+            'score_base_multi': score_unpair[i],
+            'score_base_external': score_unpair[i],
             'score_hairpin_length': self.fc_length['score_hairpin_length'].make_param(),
             'score_bulge_length': self.fc_length['score_bulge_length'].make_param(),
             'score_internal_length': self.fc_length['score_internal_length'].make_param(),
             'score_internal_explicit': self.fc_length['score_internal_explicit'].make_param(),
             'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
             'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param()
-        }
+        } for i in range(len(x)) ]
         return param
 
 
-    def forward(self, seq, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
+    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
         return self.fold(seq, self.make_param(seq), 
                     max_internal_length=max_internal_length, constraint=constraint,
                     reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
 
 
-    def predict(self, seq, max_internal_length=30, constraint='', reference='', pos_penalty=0.0, neg_penalty=0.0):
+    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
         with torch.no_grad():
             return self.fold.predict(seq, self.make_param(seq), 
                         max_internal_length=max_internal_length, constraint=constraint,

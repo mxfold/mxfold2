@@ -27,7 +27,7 @@ class StructuredLoss(nn.Module):
 
     def forward(self, seq, pair, fname=None):
         pred = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty)
-        ref = self.model(seq, constraint=pair, max_internal_length=len(seq))
+        ref = self.model(seq, constraint=pair, max_internal_length=None)
         loss = pred - ref
         if loss.item()> 1e10 or torch.isnan(loss):
             print()
@@ -60,13 +60,11 @@ class Train:
         loss_total, num = 0, 0
         with tqdm(total=len(self.train_loader.dataset)) as pbar:
             for fnames, seqs, pairs in self.train_loader:
-                #seq, pair = data.to(self.device), target.to(self.device)
                 self.optimizer.zero_grad()
                 loss = 0
-                for fname, seq, pair in zip(fnames, seqs, pairs):
-                    loss += self.loss_fn(seq, pair, fname=fname)
-                    loss_total += loss.item()
-                    num += 1
+                loss += self.loss_fn(seqs, pairs, fname=fnames)
+                loss_total += loss.item()
+                num += len(seqs)
                 loss.backward()
                 self.optimizer.step()
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))

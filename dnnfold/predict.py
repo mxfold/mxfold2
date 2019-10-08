@@ -20,10 +20,8 @@ class Predict:
         self.model.eval()
         with torch.no_grad():
             for headers, seqs in self.test_loader:
-                # data = data.to(self.device)
-                for header, seq in zip(headers, seqs):
-                    sc, pred, bp = self.model.predict(seq)
-                    # output = output.cpu().numpy()
+                rets = self.model.predict(seqs)
+                for header, seq, (sc, pred, bp) in zip(headers, seqs, rets):
                     if use_bpseq:
                         print('# {} ({:.1f})'.format(header, sc))
                         for i in range(1, len(bp)):
