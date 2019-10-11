@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
-from .fold import RNAFold, CNNFold
+from .fold import RNAFold, NeuralFold
 
 
 class StructuredLoss(nn.Module):
@@ -99,10 +99,12 @@ class Train:
 
         if args.model == 'Turner':
             self.model = RNAFold()
-        elif args.model == 'CNN':
-            self.model = CNNFold(args)
+        elif args.model == 'NN':
+            self.model = NeuralFold(args)
+            if args.gpu >= 0:
+                self.model.to(torch.device("cuda", args.gpu))
         else:
-            raise('never reach here')
+            raise('not implemented')
 
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
 
@@ -131,8 +133,11 @@ class Train:
                     if type(v) is bool: # pylint: disable=unidiomatic-typecheck
                         if v:
                             f.write('{}\n'.format(k))
+                    elif isinstance(v, list) or isinstance(v, tuple):
+                        for vv in v:
+                            f.write('{}\n{}\n'.format(k, vv))
                     else:
-                        f.write('{}\n{}\n'.format(k, v))                
+                        f.write('{}\n{}\n'.format(k, v))
 
 
     @classmethod
@@ -151,8 +156,8 @@ class Train:
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
-        subparser.add_argument('--model', choices=('Turner', 'CNN'), default='Turner', 
-                            help="Folding model ('Turner', 'CNN')")
+        subparser.add_argument('--model', choices=('Turner', 'NN'), default='Turner', 
+                            help="Folding model ('Turner', 'NN')")
         subparser.add_argument('--log-dir', type=str, default=None,
                             help='Directory for storing logs')
         subparser.add_argument('--resume', type=str, default=None,
@@ -169,6 +174,6 @@ class Train:
         subparser.add_argument('--neg-penalty', type=float, default=0,
                             help='the penalty for negative BPs for loss augmentation (default: 0)')
 
-        CNNFold.add_args(subparser)
+        NeuralFold.add_args(subparser)
 
         subparser.set_defaults(func = lambda args: Train().run(args))

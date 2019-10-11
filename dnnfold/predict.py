@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .dataset import FastaDataset
-from .fold import RNAFold, CNNFold
+from .fold import RNAFold, NeuralFold
 
 
 class Predict:
@@ -49,10 +49,12 @@ class Predict:
             else:
                 from . import param_turner2004
                 self.model = RNAFold(param_turner2004)
-        elif args.model == 'CNN':
-            self.model = CNNFold(args)
+        elif args.model == 'NN':
+            self.model = NeuralFold(args)
             if args.param is not '':
                 self.model.load_state_dict(torch.load(args.param))
+            if args.gpu >= 0:
+                self.model.to(torch.device("cuda", args.gpu))
         else:
             raise('never reach here')
 
@@ -71,13 +73,13 @@ class Predict:
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
-        subparser.add_argument('--model', choices=('Turner', 'CNN'), default='Turner', 
-                            help="Folding model ('Turner', 'CNN')")
+        subparser.add_argument('--model', choices=('Turner', 'NN'), default='Turner', 
+                            help="Folding model ('Turner', 'NN')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--bpseq', action='store_true',
                             help='output the prediction with BPSEQ format')
 
-        CNNFold.add_args(subparser)
+        NeuralFold.add_args(subparser)
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

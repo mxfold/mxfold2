@@ -51,7 +51,7 @@ class RNAFold(nn.Module):
 
 
     def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
-        s = 0
+        ss = []
         for i in range(len(seq)):
             self.clear_count()
             with torch.no_grad():
@@ -60,11 +60,13 @@ class RNAFold(nn.Module):
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
                             pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+            s = 0
             for name, param in self.named_parameters():
                 if name.startswith("score_"):
                     s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
             s += v - s.item()
-        return s
+            ss.append(s)
+        return torch.sum(torch.stack(ss))
 
 
     def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
@@ -96,7 +98,7 @@ class PositionalFold(nn.Module):
 
 
     def forward(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
-        s = 0
+        ss = []
         for i in range(len(seq)):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
             with torch.no_grad():
@@ -105,11 +107,13 @@ class PositionalFold(nn.Module):
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
                             pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+            s = 0
             for n, p in param[i].items():
                 if n.startswith("score_"):
                     s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
             s += v - s.item()
-        return s
+            ss.append(s)
+        return torch.sum(torch.stack(ss))
 
 
     def predict(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
@@ -158,19 +162,25 @@ class PositionalFold(nn.Module):
     #     return param
 
 
-class CNNEncodeLayer(nn.Module):
-    def __init__(self, num_filters=128, motif_len=7, device=torch.device("cpu")):
-        super(CNNEncodeLayer, self).__init__()
-        self.num_filters = num_filters
-        self.motif_len = motif_len
-        self.device = device
-        self.encoder = SeqEncoder()
-        self.conv = nn.Conv1d(4, num_filters, motif_len).to(device)
+class CNNLayer(nn.Module):
+    def __init__(self, num_filters=(128,), motif_len=(7,), pool_size=(1,), dilation=1):
+        super(CNNLayer, self).__init__()
+        conv = []
+        pool = []
+        n_in = 4
+        for n_out, ksize, p in zip(num_filters, motif_len, pool_size):
+            conv.append(nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)))
+            if p > 1:
+                pool.append(nn.MaxPool1d(p, stride=1, padding=p//2))
+            else:
+                pool.append(nn.Identity())
+            n_in = n_out
+        self.conv = nn.ModuleList(conv)
+        self.pool = nn.ModuleList(pool)
 
-    def forward(self, seqs):
-        seqs = [ '0'+seq for seq in seqs ]
-        x = self.encoder(seqs, self.motif_len) # (B=1, 4, N+(motif_len//2)*2)
-        x = F.relu(self.conv(x.to(self.device))) # (B, num_filters, N)
+    def forward(self, x): # (B=1, 4, N)
+        for conv, pool in zip(self.conv, self.pool):
+            x = F.relu(pool(conv(x))) # (B, num_filters, N)
         return x
 
 
@@ -187,13 +197,12 @@ class FCPairedLayer(nn.Module):
         self.fc = nn.ModuleList(linears)
 
     def forward(self, x):
-        B, C, N = x.shape
+        B, N, C = x.shape
         y = torch.zeros((B, N, N), dtype=torch.float32, device=x.device)
         for k in range(1, N):
-            x_l = x[:, :, :-k] # (B, C, N-k)
-            x_r = x[:, :, k:] # (B, C, N-k)
-            v = torch.cat((x_l, x_r), 1) # (B, C*2, N-k)
-            v = torch.transpose(v, 1, 2) # (B, N-k, C*2)
+            x_l = x[:, :-k, :] # (B, N-k, C)
+            x_r = x[:, k:, :] # (B, N-k, C)
+            v = torch.cat((x_l, x_r), 2) # (B, N-k, C*2)
             v = torch.reshape(v, (B*(N-k), C*2)) # (B*(N-k), C*2)
             for fc in self.fc[:-1]:
                 v = F.relu(fc(v))
@@ -217,8 +226,7 @@ class FCUnpairedLayer(nn.Module):
         self.fc = nn.ModuleList(linears)
 
     def forward(self, x):
-        B, C, N = x.shape
-        x = torch.transpose(x, 1, 2) # (B, N, C)
+        B, N, C = x.shape
         x = torch.reshape(x, (B*N, C)) # (B*N, C)
         for fc in self.fc[:-1]:
             x = F.relu(fc(x))
@@ -259,58 +267,86 @@ class FCLengthLayer(nn.Module):
         return x.reshape((self.n_in,) if isinstance(self.n_in, int) else self.n_in)
 
 
-class CNNFold(nn.Module):
-    def __init__(self, args=None, device=torch.device("cpu"), 
-            num_filters=256, motif_len=7, num_hidden_units=128, dropout_rate=0.5):
-        super(CNNFold, self).__init__()
+class NeuralFold(nn.Module):
+    def __init__(self, args=None, 
+            num_filters=(256,), motif_len=(7,), dilation=1, pool_size=(1,), num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
+        super(NeuralFold, self).__init__()
         if args is not None:
-            num_filters = args.num_filters
-            motif_len = args.motif_len
-            num_hidden_units = args.num_hidden_units
-            dropout_rate = args.dropout_rate
-            if args.gpu >= 0:
-                device = torch.device("cuda", args.gpu)
+            num_filters = args.num_filters if args.num_filters is not None else num_filters
+            motif_len = args.motif_len if args.motif_len is not None else motif_len
+            dilation = args.dilation if args.dilation is not None else dilation
+            pool_size = args.pool_size if args.pool_size is not None else pool_size
+            num_lstm_units = args.num_lstm_units if args.num_lstm_units is not None else num_lstm_units
+            num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
+            dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
+            # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
+            #     if getattr(args, a) is not None:
+            #         setattr(self, a, getattr(args, a))
 
-        self.conv = CNNEncodeLayer(num_filters, motif_len, device=device)
-        self.fc_base_pair = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate).to(device)
-        self.fc_mismatch = FCPairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate).to(device)
-        self.fc_unpair = FCUnpairedLayer(num_filters, layers=(num_hidden_units,), dropout_rate=dropout_rate).to(device)
+        self.conv = self.lstm = None
+        self.encode = SeqEncoder()
+        n_in = 4
+        if len(num_filters) > 0:
+            self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation)
+            n_in = num_filters[-1]
+        if num_lstm_units > 0:
+            self.lstm = nn.LSTM(n_in, num_lstm_units, batch_first=True, bidirectional=True)
+            n_in = num_lstm_units*2
+        self.fc_base_pair = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_length = nn.ModuleDict({
-            'score_hairpin_length': FCLengthLayer(31).to(device),
-            'score_bulge_length': FCLengthLayer(31).to(device),
-            'score_internal_length': FCLengthLayer(31).to(device),
-            'score_internal_explicit': FCLengthLayer((5, 5)).to(device),
-            'score_internal_symmetry': FCLengthLayer(16).to(device),
-            'score_internal_asymmetry': FCLengthLayer(29).to(device)
+            'score_hairpin_length': FCLengthLayer(31),
+            'score_bulge_length': FCLengthLayer(31),
+            'score_internal_length': FCLengthLayer(31),
+            'score_internal_explicit': FCLengthLayer((5, 5)),
+            'score_internal_symmetry': FCLengthLayer(16),
+            'score_internal_asymmetry': FCLengthLayer(29)
         })
         self.fold = PositionalFold()
 
         self.config = {
             '--num-filters': num_filters,
             '--motif-len': motif_len,
+            '--pool-size': pool_size,
+            '--dilation': dilation,
+            '--num-lstm-units': num_lstm_units,
             '--dropout-rate': dropout_rate,
             '--num-hidden-units': num_hidden_units
         }
 
     @classmethod
     def add_args(cls, parser):
-        parser.add_argument('--num-filters', type=int, default=256,
+        parser.add_argument('--num-filters', type=int, action='append',
                         help='the number of CNN filters')
-        parser.add_argument('--motif-len', type=int, default=7,
+        parser.add_argument('--motif-len', type=int, action='append',
                         help='the length of each filter of CNN')
-        parser.add_argument('--num-hidden-units', type=int, default=128,
+        parser.add_argument('--pool-size', type=int, action='append',
+                        help='the width of the max-pooling layer of CNN')
+        parser.add_argument('--dilation', type=int, default=1, 
+                        help='Use the dilated convolution')
+        parser.add_argument('--num-lstm-units', type=int, default=0,
+                        help='the number of the LSTM hidden units')
+        parser.add_argument('--num-hidden-units', type=int, action='append',
                         help='the number of the hidden units of full connected layers')
         parser.add_argument('--dropout-rate', type=float, default=0.5,
                         help='dropout rate of the hidden units')
 
 
     def make_param(self, seq):
-        x = self.conv(seq)
-        score_base_pair = self.fc_base_pair(x)
+        device = next(self.parameters()).device
+        x = self.encode(['0' + s for s in seq]).to(device) # (B, 4, N)
+        if self.conv is not None:
+            x = self.conv(x) # (B, C, N)
+        B, C, N = x.shape
+        x = torch.transpose(x, 1, 2) # (B, N, C)
+        if self.lstm is not None:
+            x, _ = self.lstm(x) # (B, N, H*2)
+        score_base_pair = self.fc_base_pair(x) # (B, N, N)
         score_helix_stacking = torch.zeros_like(score_base_pair)
         score_helix_closing = score_helix_stacking
-        score_mismatch = self.fc_mismatch(x)
-        score_unpair = self.fc_unpair(x)
+        score_mismatch = self.fc_mismatch(x) # (B, N, N)
+        score_unpair = self.fc_unpair(x) # (B, N)
 
         param = [ { 
             'score_base_pair': score_base_pair[i],
