@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+import time
 
 import torch
 import torch.nn as nn
@@ -20,10 +21,12 @@ class Predict:
         self.model.eval()
         with torch.no_grad():
             for headers, seqs in self.test_loader:
+                start = time.time()
                 rets = self.model.predict(seqs)
+                elapsed_time = time.time() - start
                 for header, seq, (sc, pred, bp) in zip(headers, seqs, rets):
                     if use_bpseq:
-                        print('# {} ({:.1f})'.format(header, sc))
+                        print('# {} (s={:.1f}, {:.5f}s)'.format(header, sc, elapsed_time))
                         for i in range(1, len(bp)):
                             print('{}\t{}\t{}'.format(i, seq[i-1], bp[i]))
                     else:

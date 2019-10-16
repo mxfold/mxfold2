@@ -1,16 +1,23 @@
+import re
 import math
 
 def read_bpseq(file):
     with open(file) as f:
         p = [0]
         s = ['']
+        name = sc = t = None
         for l in f:
-            if not l.startswith('#'):
+            if l.startswith('#'):
+                m = re.search(r'^# (.*) \(s=([\d.]+), ([\d.]+)s\)', l)
+                if m:
+                    name, sc, t = m[1], float(m[2]), float(m[3])
+
+            else:
                 idx, c, pair = l.rstrip('\n').split()
                 s.append(c)
                 p.append(int(pair))
     seq = ''.join(s)
-    return (seq, p)
+    return (seq, p, name, sc, t)
 
 def compare_bpseq(ref, pred):
     assert(len(ref) == len(pred))
@@ -30,7 +37,7 @@ def compare_bpseq(ref, pred):
     return (tp, tn, fp, fn)
 
 def accuracy(tp, tn, fp, fn):
-    sen = tp / (tp + fn) if fp+fn > 0. else 0.
+    sen = tp / (tp + fn) if tp+fn > 0. else 0.
     ppv = tp / (tp + fp) if tp+fp > 0. else 0.
     fval = 2 * sen * ppv / (sen + ppv) if sen+ppv > 0. else 0.
     mcc = ((tp*tn)-(fp*fn)) / math.sqrt((tp+fp)*(tp+fn)*(tn+fp)*(tn+fn)) if (tp+fp)*(tp+fn)*(tn+fp)*(tn+fn) > 0. else 0.
@@ -43,7 +50,8 @@ if __name__ == '__main__':
     parser.add_argument('ref', type=str, help='BPSEQ-formatted file with the refernece structure')
     parser.add_argument('pred', type=str, help='BPSEQ-formatted file with the predicted structure')
     args = parser.parse_args()
-    seq, ref = read_bpseq(args.ref)
-    seq, pred = read_bpseq(args.pred)
+    seq, ref, _, _, _ = read_bpseq(args.ref)
+    seq, pred, name, sc, t = read_bpseq(args.pred)
     x = compare_bpseq(ref, pred)
-    print(', '.join([str(v) for v in accuracy(*x)]))
+    x = [name, len(seq), t, sc] + list(x) + list(accuracy(*x))
+    print(', '.join([str(v) for v in x]))
