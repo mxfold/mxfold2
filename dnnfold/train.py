@@ -1,7 +1,6 @@
-#%%
 import os
-from argparse import ArgumentParser
 import random
+from argparse import ArgumentParser
 
 import numpy as np
 import torch
@@ -9,10 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
-from .fold import RNAFold, NeuralFold
+from .fold import NeuralFold, RNAFold
 
 
 class StructuredLoss(nn.Module):
@@ -57,18 +57,29 @@ class Train:
 
     def train(self, epoch):
         self.model.train()
+        n_dataset = len(self.train_loader.dataset)
         loss_total, num = 0, 0
-        with tqdm(total=len(self.train_loader.dataset)) as pbar:
+        running_loss, n_running_loss = 0, 0
+        with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs in self.train_loader:
+                n_batch = len(seqs)
                 self.optimizer.zero_grad()
-                loss = 0
-                loss += self.loss_fn(seqs, pairs, fname=fnames)
+                loss = self.loss_fn(seqs, pairs, fname=fnames)
                 loss_total += loss.item()
-                num += len(seqs)
+                num += n_batch
                 loss.backward()
                 self.optimizer.step()
+
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
-                pbar.update(len(seqs))
+                pbar.update(n_batch)
+
+                running_loss += loss.item()
+                n_running_loss += n_batch
+                if n_running_loss >= 100 or num >= n_dataset:
+                    running_loss /= n_running_loss
+                    if self.writer is not None:
+                        self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
+                    running_loss, n_running_loss = 0, 0
         print('Train Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
 
 
@@ -90,6 +101,11 @@ class Train:
 
 
     def run(self, args):
+        self.disable_progress_bar = args.disable_progress_bar
+        self.writer = None
+        if args.log_dir is not None:
+            self.writer = SummaryWriter(log_dir=args.log_dir)
+
         train_dataset = BPseqDataset(args.input, unpaired='x')
         self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
@@ -164,6 +180,8 @@ class Train:
                             help='Checkpoint file for resume')
         subparser.add_argument('--save-config', type=str, default=None,
                             help='save model configurations')
+        subparser.add_argument('--disable-progress-bar', action='store_true',
+                            help='disable the progress bar in training')
 
         subparser.add_argument('--l1-weight', type=float, default=0.,
                             help='the weight for L1 regularization (default: 0)')
