@@ -89,14 +89,21 @@ static
 auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_penalty, float neg_penalty)
 {
     TriMatrix penalty(L+1, 0.0);
+    float penalty_const = 0;
     if (use_penalty)
     {
         auto bp = parse_paren(ref);
         for (auto i=L; i>=1; i--)
             for (auto j=i+1; j<=L; j++)
-                penalty[i][j] = bp[i] == j ? pos_penalty : neg_penalty;
+                if (bp[i] == j)
+                {
+                    penalty[i][j] = -pos_penalty;
+                    penalty_const += pos_penalty;
+                }
+                else
+                    penalty[i][j] = neg_penalty;
     }
-    return penalty;
+    return std::make_pair(penalty, penalty_const);
 }
 
 template < typename P, typename S >
@@ -154,7 +161,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
     Ft_.clear();  Ft_.resize(L+2);
 
     const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, opts.min_hairpin);
-    const auto penalty = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
+    const auto [penalty, penalty_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
 
     std::vector<std::vector<u_int32_t>> split_point_c_l(L+1);
     std::vector<std::vector<u_int32_t>> split_point_c_r(L+1);
@@ -244,7 +251,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
             update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param_->score_external_paired(i, k), Ft_[i], TBType::F_BIFURCATION, k);
     }
 
-    return Fv_[1];
+    return Fv_[1] + penalty_const;
 }
 
 template < typename P, typename S >
@@ -341,7 +348,7 @@ Fold<P, S>::
 traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::ScoreType
 {
     const auto L = Ft_.size()-2;
-    const auto penalty = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
+    const auto [penalty, penalty_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Ft_[1], 1, L);
     auto e = 0.;
@@ -438,7 +445,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
         }
     }
 
-    return e;
+    return e + penalty_const;
 }
 
 // instantiation

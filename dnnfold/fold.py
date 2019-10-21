@@ -50,12 +50,14 @@ class RNAFold(nn.Module):
                 setattr(self, name, torch.zeros_like(param))
 
 
-    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0, verbose=False):
         ss = []
+        preds = []
+        pairs = []
         for i in range(len(seq)):
             self.clear_count()
             with torch.no_grad():
-                v, _, _ = interface.predict(seq[i], self, 
+                v, pred, pair = interface.predict(seq[i], self, 
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
@@ -66,7 +68,13 @@ class RNAFold(nn.Module):
                     s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
             s += v - s.item()
             ss.append(s)
-        return torch.sum(torch.stack(ss))
+            if verbose:
+                preds.append(pred)
+                pairs.append(pair)
+        if verbose:
+            return torch.sum(torch.stack(ss)), preds, pairs
+        else:
+            return torch.sum(torch.stack(ss))
 
 
     def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
@@ -97,12 +105,14 @@ class PositionalFold(nn.Module):
         return param
 
 
-    def forward(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+    def forward(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0, verbose=False):
         ss = []
+        preds = []
+        pairs = []
         for i in range(len(seq)):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
             with torch.no_grad():
-                v, _, _ = interface.predict_positional(seq[i], self.clear_count(param_on_cpu),
+                v, pred, pair = interface.predict_positional(seq[i], self.clear_count(param_on_cpu),
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
@@ -113,7 +123,12 @@ class PositionalFold(nn.Module):
                     s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
             s += v - s.item()
             ss.append(s)
-        return torch.sum(torch.stack(ss))
+            preds.append(pred)
+            pairs.append(pair)
+        if verbose:
+            return torch.sum(torch.stack(ss)), preds, pairs
+        else:
+            return torch.sum(torch.stack(ss))
 
 
     def predict(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
@@ -371,10 +386,10 @@ class NeuralFold(nn.Module):
         return param
 
 
-    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0, verbose=False):
         return self.fold(seq, self.make_param(seq), 
                     max_internal_length=max_internal_length, constraint=constraint,
-                    reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                    reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty, verbose=verbose)
 
 
     def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
