@@ -16,7 +16,7 @@ from .fold import NeuralFold, RNAFold
 
 
 class StructuredLoss(nn.Module):
-    def __init__(self, model, pos_penalty, neg_penalty, l1_weight=0., l2_weight=0., verbose=True):
+    def __init__(self, model, pos_penalty, neg_penalty, l1_weight=0., l2_weight=0., verbose=False):
         super(StructuredLoss, self).__init__()
         self.model = model
         self.pos_penalty = pos_penalty
@@ -150,9 +150,11 @@ class Train:
 
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
 
-        #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.1, momentum=0.9)
-        self.optimizer = optim.Adam(self.model.parameters())
-        #self.optimizer = optim.Adagrad(self.model.parameters(), lr=0.001)
+        #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.01, momentum=0.9)
+        #self.optimizer = optim.RMSprop(self.model.parameters())
+        #self.optimizer = optim.Adam(self.model.parameters(), lr=0.01, amsgrad=True)
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=0.5, amsgrad=True)
+        #self.optimizer = optim.Adagrad(self.model.parameters(), lr=0.5, weight_decay=0.001)
 
         checkpoint_epoch = 0
         if args.resume is not None:
