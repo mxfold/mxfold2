@@ -16,19 +16,24 @@ from .fold import NeuralFold, RNAFold
 
 
 class StructuredLoss(nn.Module):
-    def __init__(self, model, pos_penalty, neg_penalty, l1_weight=0., l2_weight=0.):
+    def __init__(self, model, pos_penalty, neg_penalty, l1_weight=0., l2_weight=0., verbose=True):
         super(StructuredLoss, self).__init__()
         self.model = model
         self.pos_penalty = pos_penalty
         self.neg_penalty = neg_penalty
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
+        self.verbose = verbose
 
 
     def forward(self, seq, pair, fname=None):
-        pred = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty)
-        ref = self.model(seq, constraint=pair, max_internal_length=None)
+        pred, pred_s, _ = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty, verbose=True)
+        ref, ref_s, _ = self.model(seq, constraint=pair, max_internal_length=None, verbose=True)
         loss = pred - ref
+        if self.verbose:
+            print(seq)
+            print(pred_s, pred.item())
+            print(ref_s, ref.item())
         if loss.item()> 1e10 or torch.isnan(loss):
             print()
             print(fname)
@@ -43,7 +48,7 @@ class StructuredLoss(nn.Module):
         if self.l2_weight > 0.0:
             l2_reg = 0.0
             for p in self.model.parameters():
-                l2_reg += torch.sum(self.l2_weight * self.l2_weight * p * p)
+                l2_reg += torch.sum((self.l2_weight * p) ** 2)
             loss += torch.sqrt(l2_reg)
 
         return loss
@@ -83,6 +88,24 @@ class Train:
         print('Train Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
 
 
+    def test(self, epoch):
+        self.model.eval()
+        n_dataset = len(self.test_loader.dataset)
+        loss_total, num = 0, 0
+        with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
+            for fnames, seqs, pairs in self.test_loader:
+                n_batch = len(seqs)
+                loss = self.loss_fn(seqs, pairs, fname=fnames)
+                loss_total += loss.item()
+                num += n_batch
+                pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
+                pbar.update(n_batch)
+
+        if self.writer is not None:
+            self.writer.add_scalar("test/loss", epoch * n_dataset, loss_total / num)
+        print('Test Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
+
+
     def save_checkpoint(self, outdir, epoch):
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         torch.save({
@@ -108,6 +131,9 @@ class Train:
 
         train_dataset = BPseqDataset(args.input, unpaired='x')
         self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+        if args.test_input is not None:
+            test_dataset = BPseqDataset(args.test_input, unpaired='x')
+            self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
@@ -124,9 +150,9 @@ class Train:
 
         self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
 
-        #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.001, momentum=0.9)
+        #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.1, momentum=0.9)
         self.optimizer = optim.Adam(self.model.parameters())
-        #self.optimizer = optim.Adagrad(self.model.parameters())
+        #self.optimizer = optim.Adagrad(self.model.parameters(), lr=0.001)
 
         checkpoint_epoch = 0
         if args.resume is not None:
@@ -134,7 +160,8 @@ class Train:
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
             self.train(epoch)
-            # self.test()
+            if self.test_loader is not None:
+                self.test(epoch)
             if args.log_dir is not None:
                 self.save_checkpoint(args.log_dir, epoch)
 
