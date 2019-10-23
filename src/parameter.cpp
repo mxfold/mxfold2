@@ -207,8 +207,10 @@ count_hairpin(size_t i, size_t j, ScoreType v)
             for (auto k=l; k>=3; --k) count_hairpin_[k] += v;
         else
         {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
             for (auto k=30; k>=3; --k) count_hairpin_[k] += v;
             count_lxc_[0] += v * log(l / 30.);
+#endif
         }
     }
     else
@@ -217,8 +219,10 @@ count_hairpin(size_t i, size_t j, ScoreType v)
             count_hairpin_[l] += v;
         else
         {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
             count_hairpin_[30] += v;
             count_lxc_[0] += v * log(l / 30.);
+#endif
         }
     }
 
@@ -315,8 +319,10 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
                 for (auto k=ll; k>=1; --k) count_bulge_[k] += v;
             else
             {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
                 for (auto k=30; k>=1; --k) count_bulge_[k] += v;
                 count_lxc_[0] += v * log(ll / 30.);
+#endif
             }
         }
         else
@@ -325,8 +331,10 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
                 count_bulge_[ll] += v;
             else
             {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
                 count_bulge_[30] += v;
                 count_lxc_[0] += v * log(ll / 30.);
+#endif
             }
         }
 
@@ -356,8 +364,10 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
                     for (auto k=ll+1; k>=2; --k) count_internal_[k] += v;
                 else
                 {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
                     for (auto k=30; k>=2; --k) count_internal_[k] += v;
                     count_lxc_[0] += v * log((ll+1) / 30.);
+#endif                    
                 }
             }
             else
@@ -366,8 +376,10 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
                     count_internal_[ll+1] += v;
                 else
                 {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
                     count_internal_[30] += v;
                     count_lxc_[0] += v * log((ll+1) / 30.);
+#endif
                 }
             }
             
@@ -398,8 +410,10 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
                     for (auto k=ls+ll; k>=2; --k) count_internal_[k] += v;
                 else
                 {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
                     for (auto k=30; k>=2; --k) count_internal_[k] += v;
                     count_lxc_[0] += v * log((ls+ll) / 30.);
+#endif
                 }
             }
             else
@@ -408,8 +422,10 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
                     count_internal_[ls+ll] += v;
                 else
                 {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
                     count_internal_[30] += v;
                     count_lxc_[0] += v * log((ls+ll) / 30.);
+#endif
                 }
             }
             
@@ -601,7 +617,12 @@ count_hairpin(size_t i, size_t j, ScoreType v)
 {
     const auto l = (j-1)-(i+1)+1;
 
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
     count_hairpin_length_[std::min<u_int32_t>(l, 30)] += v;
+#else    
+    if (l <= 30)
+        count_hairpin_length_[l] += v;
+#endif
     count_base_pair_(i, j) += v;
     //if (l < 3) return;
     count_mismatch_hairpin_(i, j) += v;
@@ -661,7 +682,12 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
     }
     else if (ls==0) // bulge
     {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         count_bulge_length_[std::min<u_int32_t>(ll, 30)] += v;
+#else
+        if (ll <= 30)
+            count_bulge_length_[ll] += v;
+#endif
         count_base_pair_(i, j) += v;
         count_helix_closing_(i, j) += v;
         count_helix_closing_(l, k) += v;
@@ -670,7 +696,12 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
     }
     else // internal loop
     {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         count_internal_length_[std::min<u_int32_t>(ls+ll, 30)] += v;
+#else
+        if (ls+ll <= 30)
+            count_internal_length_[ls+ll] += v;
+#endif
         count_base_pair_(i, j) += v;
         count_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4)) += v;
         if (ls==ll)

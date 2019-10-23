@@ -17,7 +17,7 @@ class Predict:
         self.test_loader = None
 
 
-    def predict(self, use_bpseq):
+    def predict(self, use_bpseq=None):
         self.model.eval()
         with torch.no_grad():
             for headers, seqs in self.test_loader:
@@ -25,14 +25,22 @@ class Predict:
                 rets = self.model.predict(seqs)
                 elapsed_time = time.time() - start
                 for header, seq, (sc, pred, bp) in zip(headers, seqs, rets):
-                    if use_bpseq:
+                    if use_bpseq is None:
+                        print('>'+header)
+                        print(seq)
+                        print(pred, "({:.1f})".format(sc))
+                    elif use_bpseq == "stdout":
                         print('# {} (s={:.1f}, {:.5f}s)'.format(header, sc, elapsed_time))
                         for i in range(1, len(bp)):
                             print('{}\t{}\t{}'.format(i, seq[i-1], bp[i]))
                     else:
-                        print('>'+header)
-                        print(seq)
-                        print(pred, "({:.1f})".format(sc))
+                        fn = os.path.basename(header)
+                        fn = os.path.splitext(fn)[0] 
+                        fn = os.path.join(use_bpseq, fn+".bpseq")
+                        with open(fn, "w") as f:
+                            f.write('# {} (s={:.1f}, {:.5f}s)\n'.format(header, sc, elapsed_time))
+                            for i in range(1, len(bp)):
+                                f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
 
 
     def run(self, args):
@@ -62,7 +70,7 @@ class Predict:
             raise('never reach here')
 
         # self.model.to(self.device)
-        self.predict(args.bpseq)
+        self.predict(use_bpseq=args.bpseq)
 
 
     @classmethod
@@ -80,8 +88,8 @@ class Predict:
                             help="Folding model ('Turner', 'NN')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
-        subparser.add_argument('--bpseq', action='store_true',
-                            help='output the prediction with BPSEQ format')
+        subparser.add_argument('--bpseq', type=str, default=None,
+                            help='output the prediction with BPSEQ format to the specified directory')
 
         NeuralFold.add_args(subparser)
 
