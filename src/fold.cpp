@@ -65,8 +65,6 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
 
     std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1, false));
     std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1, false));
-    //TriMatrix<bool> allow_paired(L+1, false, -1);
-    //TriMatrix<bool> allow_unpaired(L+1, false, -1);
     for (auto i=L; i>=1; i--)
     {
         allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
@@ -88,22 +86,37 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
 static
 auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_penalty, float neg_penalty)
 {
-    TriMatrix penalty(L+1, 0.0);
-    float penalty_const = 0;
+    TriMatrix p_paired(L+1, 0.0);
+    std::vector<std::vector<float>> p_unpaired(L+1, std::vector<float>(L+1, 0.0));
+    float p_const = 0;
     if (use_penalty)
     {
         auto bp = parse_paren(ref);
         for (auto i=L; i>=1; i--)
+        {
+            if (ref[i-1]=='.' || ref[i-1]=='x')
+            {
+                p_unpaired[i][i] = -pos_penalty;
+                p_const += pos_penalty;
+            }
+            else
+                p_unpaired[i][i] = neg_penalty;
+
             for (auto j=i+1; j<=L; j++)
+            {
+                p_unpaired[i][j] = p_unpaired[i][j-1] + p_unpaired[j][j];
+
                 if (bp[i] == j)
                 {
-                    penalty[i][j] = -pos_penalty;
-                    penalty_const += pos_penalty;
+                    p_paired[i][j] = -pos_penalty;
+                    p_const += pos_penalty;
                 }
                 else
-                    penalty[i][j] = neg_penalty;
+                    p_paired[i][j] = neg_penalty;
+            }
+        }
     }
-    return std::make_pair(penalty, penalty_const);
+    return std::make_tuple(p_paired, p_unpaired, p_const);
 }
 
 template < typename P, typename S >
@@ -161,7 +174,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
     Ft_.clear();  Ft_.resize(L+2);
 
     const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, opts.min_hairpin);
-    const auto [penalty, penalty_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
+    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
 
     std::vector<std::vector<u_int32_t>> split_point_c_l(L+1);
     std::vector<std::vector<u_int32_t>> split_point_c_r(L+1);
@@ -173,9 +186,12 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
         {
             if (allow_paired[i][j])
             {
-                bool suc = false;
-                if (allow_unpaired[i+1][j-1])
-                    suc |= update_max(Cv_[i][j], param_->score_hairpin(i, j) + penalty[i][j], Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                bool suc1=false, suc2=false, suc3=false;
+                if (allow_unpaired[i+1][j-1]) 
+                {
+                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    suc1 = update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                }
 
                 for (auto k=i+1; k<j && (k-1)-(i+1)+1<opts.max_internal; k++)
                 {
@@ -184,7 +200,10 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
                     {
                         if (!allow_unpaired[l+1][j-1]) break;
                         if (allow_paired[k][l])
-                            suc |= update_max(Cv_[i][j], Cv_[k][l] + param_->score_single_loop(i, j, k, l) + penalty[i][j], Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
+                        {
+                            auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            suc2 = update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
+                        }
                     }
                 }
 
@@ -192,10 +211,11 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
                 for (auto u: split_point_m1_l[j-1])
                 {
                     if (i+1>u-1) break;
-                    suc |= update_max(Cv_[i][j], Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + penalty[i][j], Ct_[i][j], TBType::C_MULTI_LOOP, u);
+                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    suc3 = update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_MULTI_LOOP, u);
                 }
             
-                if (suc)
+                if (suc1 || suc2 || suc3)
                 {
                     split_point_c_l[j].push_back(i);
                     split_point_c_r[i].push_back(j);
@@ -209,9 +229,10 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
                 if (i>u) break;
                 if (allow_unpaired[i][u-1] /*&& allow_paired[u][j]*/) 
                 {
-                    auto t = param_->score_multi_unpaired(u-1) * static_cast<float>(u-i);
-                    auto s = param_->score_multi_paired(u, j);
-                    update_max(Mv_[i][j], Cv_[u][j] + s + t, Mt_[i][j], TBType::M_PAIRED, u);
+                    auto s = param_->score_multi_unpaired(u-1) * static_cast<float>(u-i);
+                    auto t = param_->score_multi_paired(u, j);
+                    auto r = Cv_[u][j] + s + t + loss_unpaired[i][u-1];
+                    update_max(Mv_[i][j], r, Mt_[i][j], TBType::M_PAIRED, u);
                 }
             }
 
@@ -220,21 +241,31 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
             {
                 if (i>=u) break;
                 //if (i<u /*&& allow_paired[u][j]*/)
-                update_max(Mv_[i][j], Mv_[i][u-1]+Cv_[u][j] + param_->score_multi_paired(u, j), Mt_[i][j], TBType::M_BIFURCATION, u);
+                auto s = Mv_[i][u-1]+Cv_[u][j] + param_->score_multi_paired(u, j);
+                update_max(Mv_[i][j], s, Mt_[i][j], TBType::M_BIFURCATION, u);
             }
 
             if (allow_unpaired[j][j])
-                update_max(Mv_[i][j], Mv_[i][j-1] + param_->score_multi_unpaired(j), Mt_[i][j], TBType::M_UNPAIRED);
+            {
+                auto s = Mv_[i][j-1] + param_->score_multi_unpaired(j) + loss_unpaired[j][j];
+                update_max(Mv_[i][j], s, Mt_[i][j], TBType::M_UNPAIRED);
+            }
 
             /////////////////
-            bool suc = false;
+            bool suc1=false, suc2=false;
             if (allow_paired[i][j])
-                suc |= update_max(M1v_[i][j], Cv_[i][j] + param_->score_multi_paired(i, j), M1t_[i][j], TBType::M1_PAIRED);
+            {
+                auto s = Cv_[i][j] + param_->score_multi_paired(i, j);
+                suc1 = update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_PAIRED);
+            }
 
             if (allow_unpaired[j][j])
-                suc |= update_max(M1v_[i][j], M1v_[i][j-1] + param_->score_multi_unpaired(j), M1t_[i][j], TBType::M1_UNPAIRED);
+            {
+                auto s = M1v_[i][j-1] + param_->score_multi_unpaired(j) + loss_unpaired[j][j];
+                suc2 = update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_UNPAIRED);
+            }
 
-            if (suc) split_point_m1_l[j].push_back(i);
+            if (suc1 || suc2) split_point_m1_l[j].push_back(i);
         }
     }
 
@@ -243,15 +274,21 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
     for (auto i=L; i>=1; i--)
     {
         if (allow_unpaired[i][i])
-            update_max(Fv_[i], Fv_[i+1] + param_->score_external_unpaired(i), Ft_[i], TBType::F_UNPAIRED);
+        {
+            auto s = Fv_[i+1] + param_->score_external_unpaired(i) + loss_unpaired[i][i];
+            update_max(Fv_[i], s, Ft_[i], TBType::F_UNPAIRED);
+        }
 
         //for (auto k=i+1; k<=L; k++)
         for (auto k: split_point_c_r[i])
+        {
             //if (allow_paired[i][k])
-            update_max(Fv_[i], Cv_[i][k]+Fv_[k+1] + param_->score_external_paired(i, k), Ft_[i], TBType::F_BIFURCATION, k);
+            auto s = Cv_[i][k]+Fv_[k+1] + param_->score_external_paired(i, k);
+            update_max(Fv_[i], s, Ft_[i], TBType::F_BIFURCATION, k);
+        }
     }
 
-    return Fv_[1] + penalty_const;
+    return Fv_[1] + loss_const;
 }
 
 template < typename P, typename S >
@@ -348,7 +385,7 @@ Fold<P, S>::
 traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::ScoreType
 {
     const auto L = Ft_.size()-2;
-    const auto [penalty, penalty_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
+    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Ft_[1], 1, L);
     auto e = 0.;
@@ -362,7 +399,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
         switch (tb_type)
         {
             case TBType::C_HAIRPIN_LOOP: {
-                e += param_->score_hairpin(i, j) + penalty[i][j];
+                e += param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
                 param_->count_hairpin(i, j, 1.);
                 break;
             }
@@ -371,14 +408,14 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 const auto k = i+p;
                 const auto l = j-q;
                 assert(k < l);
-                e += param_->score_single_loop(i, j, k, l) + penalty[i][j];
+                e += param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
                 param_->count_single_loop(i, j, k, l, 1.);
                 tb_queue.emplace(Ct_[k][l], k, l);
                 break;
             }
             case TBType::C_MULTI_LOOP: {
                 const auto u = std::get<0>(kl);
-                e += param_->score_multi_loop(i, j) + penalty[i][j];
+                e += param_->score_multi_loop(i, j) + loss_paired[i][j];
                 param_->count_multi_loop(i, j, 1.);
                 tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
                 tb_queue.emplace(M1t_[u][j-1], u, j-1);
@@ -390,7 +427,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 param_->count_multi_paired(u, j, 1.);
                 if (u-i > 0)
                 {
-                    ee += static_cast<float>(u-i) * param_->score_multi_unpaired(u-1);
+                    ee += static_cast<float>(u-i) * param_->score_multi_unpaired(u-1) + loss_unpaired[i][u-1];
                     param_->count_multi_unpaired(u-1, static_cast<float>(u-i));
                 }
                 e += ee; 
@@ -406,7 +443,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 break;
             }
             case TBType::M_UNPAIRED: {
-                e += param_->score_multi_unpaired(j);
+                e += param_->score_multi_unpaired(j) + loss_unpaired[j][j];
                 param_->count_multi_unpaired(j, 1.);
                 tb_queue.emplace(Mt_[i][j-1], i, j-1);
                 break;
@@ -418,7 +455,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 break;
             }
             case TBType::M1_UNPAIRED: {
-                e += param_->score_multi_unpaired(j);
+                e += param_->score_multi_unpaired(j) + loss_unpaired[j][j];
                 param_->count_multi_unpaired(j, 1.);
                 tb_queue.emplace(M1t_[i][j-1], i, j-1);
                 break;
@@ -429,7 +466,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 break;
             }
             case TBType::F_UNPAIRED: {
-                e += param_->score_external_unpaired(i);
+                e += param_->score_external_unpaired(i) + loss_unpaired[i][i];
                 param_->count_external_unpaired(i, 1.);
                 tb_queue.emplace(Ft_[i+1], i+1, j);
                 break;
@@ -445,7 +482,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
         }
     }
 
-    return e + penalty_const;
+    return e + loss_const;
 }
 
 // instantiation

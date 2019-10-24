@@ -132,7 +132,7 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
     cache_score_bulge_(score_bulge_.size(), 0),
     cache_score_internal_(score_internal_.size(), 0)
 {
-    if (py::hasattr(obj, "score_hairpin_at_least"))
+    if (use_score_hairpin_at_least_)
     {
         for (auto i=0; i<4; ++i)
             cache_score_hairpin_[i] = score_hairpin_[i];
@@ -145,7 +145,7 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
             cache_score_hairpin_[i] = score_hairpin_[i];
     }
 
-    if (py::hasattr(obj, "score_bulge_at_least"))
+    if (use_score_bulge_at_least_)
     {
         for (auto i=0; i<2; ++i)
             cache_score_bulge_[i] = score_bulge_[i];
@@ -158,7 +158,7 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
             cache_score_bulge_[i] = score_bulge_[i];
     }
 
-    if (py::hasattr(obj, "score_internal_at_least"))
+    if (use_score_internal_at_least_)
     {
         for (auto i=0; i<3; ++i)
             cache_score_internal_[i] = score_internal_[i];
