@@ -16,18 +16,23 @@ from .fold import NeuralFold, RNAFold
 
 
 class StructuredLoss(nn.Module):
-    def __init__(self, model, pos_penalty, neg_penalty, l1_weight=0., l2_weight=0., verbose=False):
+    def __init__(self, model, loss_pos_paired=0, loss_neg_paired=0, loss_pos_unpaired=0, loss_neg_unpaired=0, 
+                l1_weight=0., l2_weight=0., verbose=False):
         super(StructuredLoss, self).__init__()
         self.model = model
-        self.pos_penalty = pos_penalty
-        self.neg_penalty = neg_penalty
+        self.loss_pos_paired = loss_pos_paired
+        self.loss_neg_paired = loss_neg_paired
+        self.loss_pos_unpaired = loss_pos_unpaired
+        self.loss_neg_unpaired = loss_neg_unpaired
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.verbose = verbose
 
 
     def forward(self, seq, pair, fname=None):
-        pred, pred_s, _ = self.model(seq, reference=pair, pos_penalty=self.pos_penalty, neg_penalty=self.neg_penalty, verbose=True)
+        pred, pred_s, _ = self.model(seq, reference=pair, verbose=True,
+                                loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
+                                loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
         ref, ref_s, _ = self.model(seq, constraint=pair, max_internal_length=None, verbose=True)
         loss = pred - ref
         if self.verbose:
@@ -45,11 +50,11 @@ class StructuredLoss(nn.Module):
             for p in self.model.parameters():
                 loss += self.l1_weight * torch.sum(torch.abs(p))
 
-        if self.l2_weight > 0.0:
-            l2_reg = 0.0
-            for p in self.model.parameters():
-                l2_reg += torch.sum((self.l2_weight * p) ** 2)
-            loss += torch.sqrt(l2_reg)
+        # if self.l2_weight > 0.0:
+        #     l2_reg = 0.0
+        #     for p in self.model.parameters():
+        #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
+        #     loss += torch.sqrt(l2_reg)
 
         return loss
 
@@ -148,13 +153,23 @@ class Train:
         else:
             raise('not implemented')
 
-        self.loss_fn = StructuredLoss(self.model, args.pos_penalty, args.neg_penalty, args.l1_weight, args.l2_weight)
+        if args.optimizer == 'Adam':
+            self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr, amsgrad=True, weight_decay=args.l2_weight)
+        elif args.optimizer =='AdamW':
+            self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr, amsgrad=True, weight_decay=args.l2_weight)
+        elif args.optimizer == 'RMSprop':
+            self.optimizer = optim.RMSprop(self.model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
+        elif args.optimizer == 'SGD':
+            self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=args.lr, momentum=0.9, weight_decay=args.l2_weight)
+        elif args.optimizer == 'ASGD':
+            self.optimizer = optim.ASGD(self.model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
+        else:
+            raise('not implemented')
 
-        #self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=0.01, momentum=0.9)
-        #self.optimizer = optim.RMSprop(self.model.parameters())
-        #self.optimizer = optim.Adam(self.model.parameters(), lr=0.01, amsgrad=True)
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=0.5, amsgrad=True)
-        #self.optimizer = optim.Adagrad(self.model.parameters(), lr=0.5, weight_decay=0.001)
+        self.loss_fn = StructuredLoss(self.model, 
+                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
+                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
 
         checkpoint_epoch = 0
         if args.resume is not None:
@@ -212,14 +227,21 @@ class Train:
         subparser.add_argument('--disable-progress-bar', action='store_true',
                             help='disable the progress bar in training')
 
+        subparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD'), default='AdamW')
         subparser.add_argument('--l1-weight', type=float, default=0.,
                             help='the weight for L1 regularization (default: 0)')
         subparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        subparser.add_argument('--pos-penalty', type=float, default=0,
-                            help='the penalty for positive BPs for loss augmentation (default: 0)')
-        subparser.add_argument('--neg-penalty', type=float, default=0,
-                            help='the penalty for negative BPs for loss augmentation (default: 0)')
+        subparser.add_argument('--lr', type=float, default=0.01,
+                            help='the learning rate for optimizer (default: 0.01)')
+        subparser.add_argument('--loss-pos-paired', type=float, default=0,
+                            help='the penalty for positive base-pairs for loss augmentation (default: 0)')
+        subparser.add_argument('--loss-neg-paired', type=float, default=0,
+                            help='the penalty for negative base-pairs for loss augmentation (default: 0)')
+        subparser.add_argument('--loss-pos-unpaired', type=float, default=0,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
+        subparser.add_argument('--loss-neg-unpaired', type=float, default=0,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         NeuralFold.add_args(subparser)
 

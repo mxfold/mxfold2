@@ -13,8 +13,10 @@ struct FoldOptions {
     std::string stru;
     bool use_penalty;
     std::string ref;
-    float pos_penalty;
-    float neg_penalty;
+    float pos_paired;
+    float neg_paired;
+    float pos_unpaired;
+    float neg_unpaired;
 
     FoldOptions() : 
         min_hairpin(3),
@@ -41,12 +43,14 @@ struct FoldOptions {
         return *this;
     }
 
-    FoldOptions& penalty(const std::string& ref, float pos_penalty, float neg_penalty)
+    FoldOptions& penalty(const std::string& ref, float pos_paired=0, float neg_paired=0, float pos_unpaired=0, float neg_unpaired=0)
     {
-        this->use_penalty = true;
+        this->use_penalty = pos_paired!=0 || neg_paired!=0 || pos_unpaired!=0 || neg_unpaired!=0;
         this->ref = ref;
-        this->pos_penalty = pos_penalty;
-        this->neg_penalty = neg_penalty;
+        this->pos_paired = pos_paired;
+        this->neg_paired = neg_paired;
+        this->pos_unpaired = pos_unpaired;
+        this->neg_unpaired = neg_unpaired;
         return *this;
     }
 #if 0
@@ -95,7 +99,7 @@ class Fold
         Fold(std::unique_ptr<P>&& p);
         auto compute_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
-        auto traceback_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> typename P::ScoreType;
+        auto traceback_viterbi(const std::string& seq, FoldOptions opt = FoldOptions()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
         const P& param_model() const { return *param_; }
 
     private:

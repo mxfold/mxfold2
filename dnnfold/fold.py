@@ -50,7 +50,8 @@ class RNAFold(nn.Module):
                 setattr(self, name, torch.zeros_like(param))
 
 
-    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0, verbose=False):
+    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, 
+            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         ss = []
         preds = []
         pairs = []
@@ -61,7 +62,8 @@ class RNAFold(nn.Module):
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
-                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
             s = 0
             for name, param in self.named_parameters():
                 if name.startswith("score_"):
@@ -77,7 +79,8 @@ class RNAFold(nn.Module):
             return torch.sum(torch.stack(ss))
 
 
-    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, 
+            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         ret = []
         for i in range(len(seq)):
             self.clear_count()
@@ -86,7 +89,8 @@ class RNAFold(nn.Module):
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
-                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
                 ret.append(r)
         return ret
 
@@ -105,7 +109,8 @@ class PositionalFold(nn.Module):
         return param
 
 
-    def forward(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0, verbose=False):
+    def forward(self, seq, param, max_internal_length=30, constraint=None, reference=None,
+            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         ss = []
         preds = []
         pairs = []
@@ -116,7 +121,8 @@ class PositionalFold(nn.Module):
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
-                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
             s = 0
             for n, p in param[i].items():
                 if n.startswith("score_"):
@@ -131,7 +137,8 @@ class PositionalFold(nn.Module):
             return torch.sum(torch.stack(ss))
 
 
-    def predict(self, seq, param, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+    def predict(self, seq, param, max_internal_length=30, constraint=None, reference=None,
+            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         ret = []
         for i in range(len(seq)):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
@@ -140,7 +147,8 @@ class PositionalFold(nn.Module):
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
-                            pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
                 ret.append(r)
         return ret
 

@@ -22,20 +22,18 @@ auto make_paren(const std::vector<u_int32_t>& p)
 template < class ParamClass >
 auto predict(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, std::string constraint, 
-            std::string reference, float pos_penalty, float neg_penalty)
+            std::string reference, float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
     FoldOptions options;
     options.min_hairpin_loop_length(min_hairpin)
         .max_internal_loop_length(max_internal)
-        .constraints(constraint);
-    if (!reference.empty())
-        options.penalty(reference, pos_penalty, neg_penalty);
+        .constraints(constraint)
+        .penalty(reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
     
     auto param = std::make_unique<ParamClass>(seq, pa);
     Fold<ParamClass> f(std::move(param));
-    auto e = f.compute_viterbi(seq, options);
-    auto p = f.traceback_viterbi();
-    f.traceback_viterbi(seq, options);
+    f.compute_viterbi(seq, options);
+    auto [e, p] = f.traceback_viterbi(seq, options);
     auto s = make_paren(p);
     return std::make_tuple(e, s, p);
 }
@@ -54,8 +52,10 @@ PYBIND11_MODULE(interface, m)
         "max_internal_length"_a=30, 
         "constraint"_a=""s, 
         "reference"_a=""s, 
-        "pos_penalty"_a=0.0, 
-        "neg_penalty"_a=0.0);
+        "loss_pos_paired"_a=0.0, 
+        "loss_neg_paired"_a=0.0,
+        "loss_pos_unpaired"_a=0.0, 
+        "loss_neg_unpaired"_a=0.0);
     m.def("predict_positional", g, 
         "predict RNA secondary structure with positional nearest neighbor model", 
         "seq"_a, "param"_a, 
@@ -63,6 +63,8 @@ PYBIND11_MODULE(interface, m)
         "max_internal_length"_a=30, 
         "constraint"_a=""s, 
         "reference"_a=""s, 
-        "pos_penalty"_a=0.0, 
-        "neg_penalty"_a=0.0);
+        "loss_pos_paired"_a=0.0, 
+        "loss_neg_paired"_a=0.0,
+        "loss_pos_unpaired"_a=0.0, 
+        "loss_neg_unpaired"_a=0.0);
 }

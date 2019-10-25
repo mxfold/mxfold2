@@ -84,7 +84,7 @@ auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp,
 }
 
 static
-auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_penalty, float neg_penalty)
+auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
     TriMatrix p_paired(L+1, 0.0);
     std::vector<std::vector<float>> p_unpaired(L+1, std::vector<float>(L+1, 0.0));
@@ -96,11 +96,11 @@ auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_
         {
             if (ref[i-1]=='.' || ref[i-1]=='x')
             {
-                p_unpaired[i][i] = -pos_penalty;
-                p_const += pos_penalty;
+                p_unpaired[i][i] = -pos_unpaired;
+                p_const += pos_unpaired;
             }
             else
-                p_unpaired[i][i] = neg_penalty;
+                p_unpaired[i][i] = neg_unpaired;
 
             for (auto j=i+1; j<=L; j++)
             {
@@ -108,11 +108,11 @@ auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_
 
                 if (bp[i] == j)
                 {
-                    p_paired[i][j] = -pos_penalty;
-                    p_const += pos_penalty;
+                    p_paired[i][j] = -pos_paired;
+                    p_const += pos_paired;
                 }
                 else
-                    p_paired[i][j] = neg_penalty;
+                    p_paired[i][j] = neg_paired;
             }
         }
     }
@@ -174,7 +174,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
     Ft_.clear();  Ft_.resize(L+2);
 
     const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, opts.min_hairpin);
-    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
+    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_paired, opts.neg_paired, opts.pos_unpaired, opts.neg_unpaired);
 
     std::vector<std::vector<u_int32_t>> split_point_c_l(L+1);
     std::vector<std::vector<u_int32_t>> split_point_c_r(L+1);
@@ -382,10 +382,11 @@ traceback_viterbi() -> std::vector<u_int32_t>
 template < typename P, typename S >
 auto
 Fold<P, S>::
-traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::ScoreType
+traceback_viterbi(const std::string& seq, FoldOptions opts) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>
 {
     const auto L = Ft_.size()-2;
-    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_penalty, opts.neg_penalty);
+    std::vector<u_int32_t> pair(L+1, 0);
+    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_paired, opts.neg_paired, opts.pos_unpaired, opts.neg_unpaired);
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Ft_[1], 1, L);
     auto e = 0.;
@@ -399,11 +400,17 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
         switch (tb_type)
         {
             case TBType::C_HAIRPIN_LOOP: {
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
                 e += param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
                 param_->count_hairpin(i, j, 1.);
+                pair[i] = j;
+                pair[j] = i;
                 break;
             }
             case TBType::C_INTERNAL_LOOP: {
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
                 const auto [p, q] = std::get<1>(kl);
                 const auto k = i+p;
                 const auto l = j-q;
@@ -411,14 +418,20 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
                 e += param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
                 param_->count_single_loop(i, j, k, l, 1.);
                 tb_queue.emplace(Ct_[k][l], k, l);
+                pair[i] = j;
+                pair[j] = i;
                 break;
             }
             case TBType::C_MULTI_LOOP: {
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
                 const auto u = std::get<0>(kl);
                 e += param_->score_multi_loop(i, j) + loss_paired[i][j];
                 param_->count_multi_loop(i, j, 1.);
                 tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
                 tb_queue.emplace(M1t_[u][j-1], u, j-1);
+                pair[i] = j;
+                pair[j] = i;
                 break;
             }
             case TBType::M_PAIRED: {
@@ -482,7 +495,7 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> typename P::Score
         }
     }
 
-    return e + loss_const;
+    return std::make_pair(e + loss_const, pair);
 }
 
 // instantiation
