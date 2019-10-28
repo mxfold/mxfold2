@@ -229,7 +229,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
                 if (i>u) break;
                 if (allow_unpaired[i][u-1] /*&& allow_paired[u][j]*/) 
                 {
-                    auto s = param_->score_multi_unpaired(u-1) * static_cast<float>(u-i);
+                    auto s = param_->score_multi_unpaired(i, u-1);
                     auto t = param_->score_multi_paired(u, j);
                     auto r = Cv_[u][j] + s + t + loss_unpaired[i][u-1];
                     update_max(Mv_[i][j], r, Mt_[i][j], TBType::M_PAIRED, u);
@@ -247,7 +247,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
 
             if (allow_unpaired[j][j])
             {
-                auto s = Mv_[i][j-1] + param_->score_multi_unpaired(j) + loss_unpaired[j][j];
+                auto s = Mv_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
                 update_max(Mv_[i][j], s, Mt_[i][j], TBType::M_UNPAIRED);
             }
 
@@ -261,7 +261,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
 
             if (allow_unpaired[j][j])
             {
-                auto s = M1v_[i][j-1] + param_->score_multi_unpaired(j) + loss_unpaired[j][j];
+                auto s = M1v_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
                 suc2 = update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_UNPAIRED);
             }
 
@@ -275,7 +275,7 @@ compute_viterbi(const std::string& seq, FoldOptions opts) -> ScoreType
     {
         if (allow_unpaired[i][i])
         {
-            auto s = Fv_[i+1] + param_->score_external_unpaired(i) + loss_unpaired[i][i];
+            auto s = Fv_[i+1] + param_->score_external_unpaired(i, i) + loss_unpaired[i][i];
             update_max(Fv_[i], s, Ft_[i], TBType::F_UNPAIRED);
         }
 
@@ -440,8 +440,8 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> std::pair<typenam
                 param_->count_multi_paired(u, j, 1.);
                 if (u-i > 0)
                 {
-                    ee += static_cast<float>(u-i) * param_->score_multi_unpaired(u-1) + loss_unpaired[i][u-1];
-                    param_->count_multi_unpaired(u-1, static_cast<float>(u-i));
+                    ee += static_cast<float>(u-i) * param_->score_multi_unpaired(i, u-1) + loss_unpaired[i][u-1];
+                    param_->count_multi_unpaired(i, u-1, 1.);
                 }
                 e += ee; 
                 tb_queue.emplace(Ct_[u][j], u, j);
@@ -456,8 +456,8 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> std::pair<typenam
                 break;
             }
             case TBType::M_UNPAIRED: {
-                e += param_->score_multi_unpaired(j) + loss_unpaired[j][j];
-                param_->count_multi_unpaired(j, 1.);
+                e += param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                param_->count_multi_unpaired(j, j, 1.);
                 tb_queue.emplace(Mt_[i][j-1], i, j-1);
                 break;
             }    
@@ -468,8 +468,8 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> std::pair<typenam
                 break;
             }
             case TBType::M1_UNPAIRED: {
-                e += param_->score_multi_unpaired(j) + loss_unpaired[j][j];
-                param_->count_multi_unpaired(j, 1.);
+                e += param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                param_->count_multi_unpaired(j, j, 1.);
                 tb_queue.emplace(M1t_[i][j-1], i, j-1);
                 break;
             }
@@ -479,8 +479,8 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> std::pair<typenam
                 break;
             }
             case TBType::F_UNPAIRED: {
-                e += param_->score_external_unpaired(i) + loss_unpaired[i][i];
-                param_->count_external_unpaired(i, 1.);
+                e += param_->score_external_unpaired(i, i) + loss_unpaired[i][i];
+                param_->count_external_unpaired(i, i, 1.);
                 tb_queue.emplace(Ft_[i+1], i+1, j);
                 break;
             }

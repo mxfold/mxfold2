@@ -505,16 +505,16 @@ count_multi_paired(size_t i, size_t j, ScoreType v)
 
 auto
 TurnerNearestNeighbor::
-score_multi_unpaired(size_t i) const -> ScoreType
+score_multi_unpaired(size_t i, size_t j) const -> ScoreType
 {
-    return score_ml_base_[0];
+    return score_ml_base_[0] * (j-i+1);
 }
 
 void
 TurnerNearestNeighbor::
-count_multi_unpaired(size_t i, ScoreType v)
+count_multi_unpaired(size_t i, size_t j, ScoreType v)
 {
-    count_ml_base_[0] += v;
+    count_ml_base_[0] += (j-i+1);
 }
 
 auto
@@ -571,14 +571,14 @@ PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
     score_mismatch_multi_(::get_unchecked<2>(obj, "score_mismatch_multi")),
     count_mismatch_multi_(::get_mutable_unchecked<2>(obj, "count_mismatch_multi")),
 
-    score_base_hairpin_(::get_unchecked<1>(obj, "score_base_hairpin")),
-    count_base_hairpin_(::get_mutable_unchecked<1>(obj, "count_base_hairpin")),
-    score_base_internal_(::get_unchecked<1>(obj, "score_base_internal")),
-    count_base_internal_(::get_mutable_unchecked<1>(obj, "count_base_internal")),
-    score_base_multi_(::get_unchecked<1>(obj, "score_base_multi")),
-    count_base_multi_(::get_mutable_unchecked<1>(obj, "count_base_multi")),
-    score_base_external_(::get_unchecked<1>(obj, "score_base_external")),
-    count_base_external_(::get_mutable_unchecked<1>(obj, "count_base_external")),
+    score_base_hairpin_(::get_unchecked<2>(obj, "score_base_hairpin")),
+    count_base_hairpin_(::get_mutable_unchecked<2>(obj, "count_base_hairpin")),
+    score_base_internal_(::get_unchecked<2>(obj, "score_base_internal")),
+    count_base_internal_(::get_mutable_unchecked<2>(obj, "count_base_internal")),
+    score_base_multi_(::get_unchecked<2>(obj, "score_base_multi")),
+    count_base_multi_(::get_mutable_unchecked<2>(obj, "count_base_multi")),
+    score_base_external_(::get_unchecked<2>(obj, "score_base_external")),
+    count_base_external_(::get_mutable_unchecked<2>(obj, "count_base_external")),
 
     score_hairpin_length_(::get_unchecked<1>(obj, "score_hairpin_length")),
     count_hairpin_length_(::get_mutable_unchecked<1>(obj, "count_hairpin_length")),
@@ -605,7 +605,7 @@ score_hairpin(size_t i, size_t j) const -> ScoreType
 
     e += score_hairpin_length_[std::min<u_int32_t>(l, 30)];
     e += score_base_pair_(i, j);
-    //if (l < 3) return e;
+    e += score_base_hairpin_(i+1, j-1);
     e += score_mismatch_hairpin_(i, j);
 
     return e;
@@ -624,7 +624,7 @@ count_hairpin(size_t i, size_t j, ScoreType v)
         count_hairpin_length_[l] += v;
 #endif
     count_base_pair_(i, j) += v;
-    //if (l < 3) return;
+    count_base_hairpin_(i+1, j-1) += v;
     count_mismatch_hairpin_(i, j) += v;
 }
 
@@ -647,6 +647,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     {
         auto e = score_bulge_length_[std::min<u_int16_t>(ll, 30)];
         e += score_base_pair_(i, j);
+        e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
         e += score_helix_closing_(i, j) + score_helix_closing_(l, k);
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
         return e;
@@ -655,6 +656,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     {
         auto e = score_internal_length_[std::min<u_int32_t>(ls+ll, 30)];
         e += score_base_pair_(i, j);
+        e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
         e += score_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4));
         if (ls==ll)
             e += score_internal_symmetry_[std::min<u_int32_t>(ll, 15)];
@@ -689,6 +691,8 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
             count_bulge_length_[ll] += v;
 #endif
         count_base_pair_(i, j) += v;
+        count_base_internal_(i+1, k-1) += v;
+        count_base_internal_(l+1, j-1) += v;
         count_helix_closing_(i, j) += v;
         count_helix_closing_(l, k) += v;
         count_mismatch_internal_(i, j) += v;
@@ -703,6 +707,8 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
             count_internal_length_[ls+ll] += v;
 #endif
         count_base_pair_(i, j) += v;
+        count_base_internal_(i+1, k-1) += v;
+        count_base_internal_(l+1, j-1) += v;
         count_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4)) += v;
         if (ls==ll)
             count_internal_symmetry_[std::min<u_int32_t>(ll, 15)] += v;
@@ -762,16 +768,16 @@ count_multi_paired(size_t i, size_t j, ScoreType v)
 
 auto
 PositionalNearestNeighbor::
-score_multi_unpaired(size_t i) const -> ScoreType
+score_multi_unpaired(size_t i, size_t j) const -> ScoreType
 {
-    return score_base_multi_(i);
+    return score_base_multi_(i, j);
 }
 
 void
 PositionalNearestNeighbor::
-count_multi_unpaired(size_t i, ScoreType v)
+count_multi_unpaired(size_t i, size_t j, ScoreType v)
 {
-    count_base_multi_(i) += v;
+    count_base_multi_(i, j) += v;
 }
 
 auto
@@ -795,14 +801,14 @@ count_external_paired(size_t i, size_t j, ScoreType v)
 
 auto
 PositionalNearestNeighbor::
-score_external_unpaired(size_t i) const -> ScoreType
+score_external_unpaired(size_t i, size_t j) const -> ScoreType
 {
-    return score_base_external_(i);
+    return score_base_external_(i, i);
 }
 
 void
 PositionalNearestNeighbor::
-count_external_unpaired(size_t i, ScoreType v)
+count_external_unpaired(size_t i, size_t j, ScoreType v)
 {
-    count_base_external_(i) += v;
+    count_base_external_(i, i) += v;
 }

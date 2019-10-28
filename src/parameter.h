@@ -23,19 +23,19 @@ class TurnerNearestNeighbor
         ScoreType score_single_loop(size_t i, size_t j, size_t k, size_t l) const;
         ScoreType score_multi_loop(size_t i, size_t j) const;
         ScoreType score_multi_paired(size_t i, size_t j) const;
-        ScoreType score_multi_unpaired(size_t i) const;
+        ScoreType score_multi_unpaired(size_t i, size_t j) const;
         ScoreType score_external_zero() const { return 0.0; }
         ScoreType score_external_paired(size_t i, size_t j) const;
-        ScoreType score_external_unpaired(size_t i) const { return 0.0; }
+        ScoreType score_external_unpaired(size_t i, size_t j) const { return 0.0; }
 
         void count_hairpin(size_t i, size_t j, ScoreType v);
         void count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v);
         void count_multi_loop(size_t i, size_t j, ScoreType v);
         void count_multi_paired(size_t i, size_t j, ScoreType v);
-        void count_multi_unpaired(size_t i, ScoreType v);
+        void count_multi_unpaired(size_t i, size_t j, ScoreType v);
         void count_external_zero(ScoreType v) { }
         void count_external_paired(size_t i, size_t j, ScoreType v);
-        void count_external_unpaired(size_t i, ScoreType v) { }
+        void count_external_unpaired(size_t i, size_t j, ScoreType v) { }
 
     private:
         static auto convert_sequence(const std::string& seq) -> SeqType;
@@ -123,19 +123,19 @@ class PositionalNearestNeighbor
         ScoreType score_single_loop(size_t i, size_t j, size_t k, size_t l) const;
         ScoreType score_multi_loop(size_t i, size_t j) const;
         ScoreType score_multi_paired(size_t i, size_t j) const;
-        ScoreType score_multi_unpaired(size_t i) const;
+        ScoreType score_multi_unpaired(size_t i, size_t j) const;
         ScoreType score_external_zero() const { return 0.0; }
         ScoreType score_external_paired(size_t i, size_t j) const;
-        ScoreType score_external_unpaired(size_t i) const;
+        ScoreType score_external_unpaired(size_t i, size_t j) const;
 
         void count_hairpin(size_t i, size_t j, ScoreType v);
         void count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v);
         void count_multi_loop(size_t i, size_t j, ScoreType v);
         void count_multi_paired(size_t i, size_t j, ScoreType v);
-        void count_multi_unpaired(size_t i, ScoreType v);
+        void count_multi_unpaired(size_t i, size_t j, ScoreType v);
         void count_external_zero(ScoreType v) { }
         void count_external_paired(size_t i, size_t j, ScoreType v);
-        void count_external_unpaired(size_t i, ScoreType v);
+        void count_external_unpaired(size_t i, size_t j, ScoreType v);
 
     private:
         ParamType<2> score_base_pair_;
@@ -153,14 +153,14 @@ class PositionalNearestNeighbor
         ParamType<2> score_mismatch_multi_;
         CountType<2> count_mismatch_multi_;
 
-        ParamType<1> score_base_hairpin_;
-        CountType<1> count_base_hairpin_;
-        ParamType<1> score_base_internal_;
-        CountType<1> count_base_internal_;
-        ParamType<1> score_base_multi_;
-        CountType<1> count_base_multi_;
-        ParamType<1> score_base_external_;
-        CountType<1> count_base_external_;
+        ParamType<2> score_base_hairpin_;
+        CountType<2> count_base_hairpin_;
+        ParamType<2> score_base_internal_;
+        CountType<2> count_base_internal_;
+        ParamType<2> score_base_multi_;
+        CountType<2> count_base_multi_;
+        ParamType<2> score_base_external_;
+        CountType<2> count_base_external_;
 
         ParamType<1> score_hairpin_length_;
         CountType<1> count_hairpin_length_;

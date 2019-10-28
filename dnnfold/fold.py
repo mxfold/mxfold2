@@ -339,6 +339,7 @@ class NeuralFold(nn.Module):
             '--num-hidden-units': num_hidden_units
         }
 
+
     @classmethod
     def add_args(cls, parser):
         parser.add_argument('--num-filters', type=int, action='append',
@@ -370,7 +371,12 @@ class NeuralFold(nn.Module):
         score_helix_stacking = torch.zeros_like(score_base_pair)
         score_helix_closing = score_helix_stacking
         score_mismatch = self.fc_mismatch(x) # (B, N, N)
-        score_unpair = self.fc_unpair(x) # (B, N)
+        #score_unpair = self.fc_unpair(x) # (B, N)
+        u = self.fc_unpair(x) # (B, N)
+        u = u.reshape(B, 1, N)
+        u = torch.bmm(torch.ones(B, N, 1), u)
+        score_unpair = torch.bmm(torch.triu(u), torch.triu(torch.ones_like(u)))
+
 
         param = [ { 
             'score_base_pair': score_base_pair[i],
@@ -394,14 +400,20 @@ class NeuralFold(nn.Module):
         return param
 
 
-    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0, verbose=False):
+    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, 
+            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         return self.fold(seq, self.make_param(seq), 
-                    max_internal_length=max_internal_length, constraint=constraint,
-                    reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty, verbose=verbose)
+                    max_internal_length=max_internal_length, constraint=constraint, reference=reference, 
+                    loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                    loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired,
+                    verbose=verbose)
 
 
-    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, pos_penalty=0.0, neg_penalty=0.0):
+    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, 
+            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         with torch.no_grad():
             return self.fold.predict(seq, self.make_param(seq), 
-                        max_internal_length=max_internal_length, constraint=constraint,
-                        reference=reference, pos_penalty=pos_penalty, neg_penalty=neg_penalty)
+                    max_internal_length=max_internal_length, constraint=constraint, reference=reference, 
+                    loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                    loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired,
+                    verbose=verbose)
