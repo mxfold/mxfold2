@@ -374,8 +374,8 @@ class NeuralFold(nn.Module):
         #score_unpair = self.fc_unpair(x) # (B, N)
         u = self.fc_unpair(x) # (B, N)
         u = u.reshape(B, 1, N)
-        u = torch.bmm(torch.ones(B, N, 1), u)
-        score_unpair = torch.bmm(torch.triu(u), torch.triu(torch.ones_like(u)))
+        u = torch.bmm(torch.ones(B, N, 1).to(device), u)
+        score_unpair = torch.bmm(torch.triu(u), torch.triu(torch.ones_like(u).to(device)))
 
 
         param = [ { 
