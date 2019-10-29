@@ -3,7 +3,8 @@
 #include <pybind11/numpy.h>
 #include <string>
 #include "fold.h"
-#include "parameter.h"
+#include "param/turner.h"
+#include "param/positional.h"
 
 namespace py = pybind11;
 

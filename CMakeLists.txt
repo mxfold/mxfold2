@@ -5,7 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 add_subdirectory(pybind11)
 pybind11_add_module(interface
     src/interface.cpp 
-    src/parameter.cpp src/parameter.h 
+    src/param/turner.cpp src/param/turner.h 
+    src/param/positional.cpp src/param/positional.h 
+    src/param/util.h
     src/fold.cpp src/fold.h src/trimatrix.h )
 target_compile_features(interface PUBLIC cxx_std_17)
 #target_link_libraries(dnnfold)

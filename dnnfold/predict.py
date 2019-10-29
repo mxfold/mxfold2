@@ -9,7 +9,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .dataset import FastaDataset
-from .fold import RNAFold, NeuralFold
+from .fold.rnafold import RNAFold
+from .fold.positional import NeuralFold
 
 
 class Predict:

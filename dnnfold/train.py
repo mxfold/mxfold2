@@ -12,7 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
-from .fold import NeuralFold, RNAFold
+from .fold.rnafold import RNAFold
+from .fold.positional import NeuralFold
 
 
 class StructuredLoss(nn.Module):

@@ -5,7 +5,6 @@
 #include <stack>
 #include <cassert>
 #include "fold.h"
-#include "parameter.h"
 
 static
 bool allow_paired(char x, char y)
@@ -499,7 +498,8 @@ traceback_viterbi(const std::string& seq, FoldOptions opts) -> std::pair<typenam
 }
 
 // instantiation
-#include "parameter.h"
+#include "param/turner.h"
+#include "param/positional.h"
 
 template class Fold<TurnerNearestNeighbor>;
 template class Fold<PositionalNearestNeighbor>;

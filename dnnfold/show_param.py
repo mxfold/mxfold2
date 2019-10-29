@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 import torch
-from .fold import RNAFold
+from .fold.rnafold import RNAFold
 
 class ShowParam:
     def __init__(self):
