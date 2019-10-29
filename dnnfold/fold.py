@@ -225,14 +225,21 @@ class FCPairedLayer(nn.Module):
         for k in range(1, N):
             x_l = x[:, :-k, :] # (B, N-k, C)
             x_r = x[:, k:, :] # (B, N-k, C)
-            v = torch.cat((x_l, x_r), 2) # (B, N-k, C*2)
-            v = torch.reshape(v, (B*(N-k), C*2)) # (B*(N-k), C*2)
+
+            # v1: closing pairs, v2: opening pairs
+            v1 = torch.cat((x_l, x_r), dim=2) # (B, N-k, C*2)
+            v2 = torch.cat((x_r, x_l), dim=2) # (B, N-k, C*2)
+            # concat
+            v = torch.cat((v1, v2), dim=0) # (B*2, N-k, C*2)
+            v = torch.reshape(v, (B*2*(N-k), C*2)) # (B*2*(N-k), C*2)
             for fc in self.fc[:-1]:
                 v = F.relu(fc(v))
                 v = self.dropout(v)
-            v = self.fc[-1](v) # (B*(N-k), 1)
-            v = torch.reshape(v, (B, N-k)) # (B, N-k)
-            y += torch.diag_embed(v, offset=k) # (B, N, N)
+            v = self.fc[-1](v) # (B*2*(N-k), 1)
+            v = torch.reshape(v, (B*2, N-k)) # (B*2, N-k)
+            v1, v2 = torch.chunk(v, 2, dim=0) # (B, N-k) * 2
+            y += torch.diag_embed(v1, offset=k) # (B, N, N)
+            y += torch.diag_embed(v2, offset=-k) # (B, N, N)
         return y
 
 
@@ -316,7 +323,7 @@ class NeuralFold(nn.Module):
         if num_lstm_units is not None and num_lstm_units > 0:
             self.lstm = nn.LSTM(n_in, num_lstm_units, batch_first=True, bidirectional=True)
             n_in = num_lstm_units*2
-        self.fc_base_pair = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_length = nn.ModuleDict({
@@ -367,21 +374,15 @@ class NeuralFold(nn.Module):
         x = torch.transpose(x, 1, 2) # (B, N, C)
         if self.lstm is not None:
             x, _ = self.lstm(x) # (B, N, H*2)
-        score_base_pair = self.fc_base_pair(x) # (B, N, N)
-        score_helix_stacking = torch.zeros_like(score_base_pair)
-        score_helix_closing = score_helix_stacking
+        score_helix_stacking = self.fc_helix_stacking(x) # (B, N, N)
         score_mismatch = self.fc_mismatch(x) # (B, N, N)
-        #score_unpair = self.fc_unpair(x) # (B, N)
-        u = self.fc_unpair(x) # (B, N)
-        u = u.reshape(B, 1, N)
-        u = torch.bmm(torch.ones(B, N, 1).to(device), u)
-        score_unpair = torch.bmm(torch.triu(u), torch.triu(torch.ones_like(u).to(device)))
-
+        score_unpair = self.fc_unpair(x) # (B, N)
+        score_unpair = score_unpair.reshape(B, 1, N)
+        score_unpair = torch.bmm(torch.ones(B, N, 1).to(device), score_unpair)
+        score_unpair = torch.bmm(torch.triu(score_unpair), torch.triu(torch.ones_like(score_unpair).to(device)))
 
         param = [ { 
-            'score_base_pair': score_base_pair[i],
             'score_helix_stacking': score_helix_stacking[i],
-            'score_helix_closing': score_helix_closing[i],
             'score_mismatch_external': score_mismatch[i],
             'score_mismatch_hairpin': score_mismatch[i],
             'score_mismatch_internal': score_mismatch[i],
