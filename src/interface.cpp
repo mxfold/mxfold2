@@ -8,18 +8,6 @@
 
 namespace py = pybind11;
 
-static
-auto make_paren(const std::vector<u_int32_t>& p)
-{
-    std::string s(p.size()-1, '.');
-    for (size_t i=1; i!=p.size(); ++i)
-    {
-        if (p[i] != 0)
-            s[i-1] = p[i]>i ? '(' : ')';
-    }
-    return s;
-}
-
 template < class ParamClass >
 auto predict(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, std::string constraint, 
@@ -35,7 +23,7 @@ auto predict(const std::string& seq, py::object pa,
     Zuker<ParamClass> f(std::move(param));
     f.compute_viterbi(seq, options);
     auto [e, p] = f.traceback_viterbi(seq, options);
-    auto s = make_paren(p);
+    auto s = Zuker<ParamClass>::make_paren(p);
     return std::make_tuple(e, s, p);
 }
 

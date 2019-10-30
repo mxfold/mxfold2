@@ -48,6 +48,20 @@ parse_paren(const std::string& paren) -> std::vector<u_int32_t>
 //static
 auto
 Fold::
+make_paren(const std::vector<u_int32_t>& p) -> std::string
+{
+    std::string s(p.size()-1, '.');
+    for (size_t i=1; i!=p.size(); ++i)
+    {
+        if (p[i] != 0)
+            s[i-1] = p[i]>i ? '(' : ')';
+    }
+    return s;
+}
+
+//static
+auto
+Fold::
 make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only /*=true*/) 
     -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>
 {

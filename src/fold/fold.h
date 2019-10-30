@@ -63,22 +63,9 @@ class Fold
         static bool allow_paired(char x, char y);
         static auto parse_paren(const std::string& paren) 
             -> std::vector<u_int32_t>;
+        static auto make_paren(const std::vector<u_int32_t>& p) -> std::string;
         static auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only=true)
             -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
         static auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired) 
             -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>, float>;
-};
-
-
-template < typename P, typename S = typename P::ScoreType >
-class Nussinov : public Fold
-{
-    public:
-        using ScoreType = S;
-    
-    public:
-        Nussinov(std::unique_ptr<P>&& p);
-        auto compute_viterbi(const std::string& seq, Options opt = Options()) -> ScoreType;
-        auto traceback_viterbi() -> std::vector<u_int32_t>;
-        auto traceback_viterbi(const std::string& seq, Options opt = Options()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
 };

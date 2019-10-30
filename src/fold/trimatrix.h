@@ -63,6 +63,8 @@ class TriMatrix
             data_.clear();
         }
 
+        size_t size() const { return data_.size(); }
+
         RangedVector<T>& operator[](size_t idx) { return data_[idx]; }
         const RangedVector<T>& operator[](size_t idx) const { return data_[idx]; }
 
