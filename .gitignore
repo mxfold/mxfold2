@@ -161,3 +161,4 @@ build
 data
 .envrc
 experiments
+.DS_Store

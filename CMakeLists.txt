@@ -8,7 +8,9 @@ pybind11_add_module(interface
     src/param/turner.cpp src/param/turner.h 
     src/param/positional.cpp src/param/positional.h 
     src/param/util.h
-    src/fold.cpp src/fold.h src/trimatrix.h )
+    src/fold/fold.cpp src/fold/fold.h 
+    src/fold/zuker.cpp src/fold/zuker.h 
+    src/fold/trimatrix.h )
 target_compile_features(interface PUBLIC cxx_std_17)
 #target_link_libraries(dnnfold)
 

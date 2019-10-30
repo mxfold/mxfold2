@@ -100,11 +100,10 @@ class PositionalFold(nn.Module):
 
 class NeuralFold(nn.Module):
     def __init__(self, args=None, 
-            num_filters=(256,), motif_len=(7,), dilation=1, pool_size=(1,), num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
+            num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
         super(NeuralFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters if args.num_filters is not None else num_filters
-            num_filters = None if num_filters[0] == 0 else num_filters
             motif_len = args.motif_len if args.motif_len is not None else motif_len
             dilation = args.dilation if args.dilation is not None else dilation
             pool_size = args.pool_size if args.pool_size is not None else pool_size
@@ -118,7 +117,7 @@ class NeuralFold(nn.Module):
         self.conv = self.lstm = None
         self.encode = SeqEncoder()
         n_in = 4
-        if num_filters is not None and len(num_filters) > 0:
+        if len(num_filters) > 0 and num_filters[0] > 0:
             self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation)
             n_in = num_filters[-1]
         if num_lstm_units is not None and num_lstm_units > 0:
