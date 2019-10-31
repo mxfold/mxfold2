@@ -14,6 +14,7 @@ from tqdm import tqdm
 from .dataset import BPseqDataset
 from .fold.rnafold import RNAFold
 from .fold.positional import NeuralFold
+from .fold.nussinov import NussinovFold
 
 
 class StructuredLoss(nn.Module):
@@ -151,6 +152,10 @@ class Train:
             self.model = NeuralFold(args)
             if args.gpu >= 0:
                 self.model.to(torch.device("cuda", args.gpu))
+        elif args.model == 'Nussinov':
+            self.model = NussinovFold(args)
+            if args.gpu >= 0:
+                self.model.to(torch.device("cuda", args.gpu))
         else:
             raise('not implemented')
 
@@ -217,8 +222,8 @@ class Train:
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
-        subparser.add_argument('--model', choices=('Turner', 'NN'), default='Turner', 
-                            help="Folding model ('Turner', 'NN')")
+        subparser.add_argument('--model', choices=('Turner', 'NN', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Nussinov')")
         subparser.add_argument('--log-dir', type=str, default=None,
                             help='Directory for storing logs')
         subparser.add_argument('--resume', type=str, default=None,

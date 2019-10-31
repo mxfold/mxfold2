@@ -56,7 +56,7 @@ class RNAFold(nn.Module):
         for i in range(len(seq)):
             self.clear_count()
             with torch.no_grad():
-                v, pred, pair = interface.predict(seq[i], self, 
+                v, pred, pair = interface.predict_zuker(seq[i], self, 
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
@@ -83,7 +83,7 @@ class RNAFold(nn.Module):
         for i in range(len(seq)):
             self.clear_count()
             with torch.no_grad():
-                r = interface.predict(seq[i], self, 
+                r = interface.predict_zuker(seq[i], self, 
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 

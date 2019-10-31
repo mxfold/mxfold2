@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from .dataset import FastaDataset
 from .fold.rnafold import RNAFold
 from .fold.positional import NeuralFold
+from .fold.nussinov import NussinovFold
 
 
 class Predict:
@@ -67,6 +68,12 @@ class Predict:
                 self.model.load_state_dict(torch.load(args.param))
             if args.gpu >= 0:
                 self.model.to(torch.device("cuda", args.gpu))
+        elif args.model == 'Nussinov':
+            self.model = NussinovFold(args)
+            if args.param is not '':
+                self.model.load_state_dict(torch.load(args.param))
+            if args.gpu >= 0:
+                self.model.to(torch.device("cuda", args.gpu))
         else:
             raise('never reach here')
 
@@ -85,8 +92,8 @@ class Predict:
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
-        subparser.add_argument('--model', choices=('Turner', 'NN'), default='Turner', 
-                            help="Folding model ('Turner', 'NN')")
+        subparser.add_argument('--model', choices=('Turner', 'NN', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Nussinov')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--bpseq', type=str, default=None,
