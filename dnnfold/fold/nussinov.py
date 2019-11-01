@@ -122,7 +122,8 @@ class NussinovFold(nn.Module):
             self.lstm = nn.LSTM(n_in, num_lstm_units, batch_first=True, bidirectional=True)
             n_in = num_lstm_units*2
         self.fc_paired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-        self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        #self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.fc_unpaired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fold = NussinovLayer()
 
         self.config = {
@@ -144,7 +145,7 @@ class NussinovFold(nn.Module):
                         help='the length of each filter of CNN')
         parser.add_argument('--pool-size', type=int, action='append',
                         help='the width of the max-pooling layer of CNN')
-        parser.add_argument('--dilation', type=int, default=1, 
+        parser.add_argument('--dilation', type=int, default=0, 
                         help='Use the dilated convolution')
         parser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units')
@@ -164,7 +165,11 @@ class NussinovFold(nn.Module):
         if self.lstm is not None:
             x, _ = self.lstm(x) # (B, N, H*2)
         score_paired = self.fc_paired(x) # (B, N, N)
-        score_unpaired = self.fc_unpaired(x) # (B, N)
+        #score_unpaired = self.fc_unpaired(x) # (B, N)
+        score_unpaired = self.fc_unpaired(x) # (B, N, N)
+        score_unpaired = torch.triu(score_unpaired, 1) # (B, N, N)
+        score_unpaired = score_unpaired + torch.transpose(score_unpaired, 1, 2) # (B, N, N)
+        score_unpaired = torch.sum(score_unpaired, dim=1) / (N-1) # (B, N)
 
         param = [ { 
             'score_paired': score_paired[i],

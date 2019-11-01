@@ -155,7 +155,7 @@ class NeuralFold(nn.Module):
                         help='the length of each filter of CNN')
         parser.add_argument('--pool-size', type=int, action='append',
                         help='the width of the max-pooling layer of CNN')
-        parser.add_argument('--dilation', type=int, default=1, 
+        parser.add_argument('--dilation', type=int, default=0, 
                         help='Use the dilated convolution')
         parser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units')
@@ -191,12 +191,12 @@ class NeuralFold(nn.Module):
             'score_base_internal': score_unpair[i],
             'score_base_multi': score_unpair[i],
             'score_base_external': score_unpair[i],
-            'score_hairpin_length': self.fc_length['score_hairpin_length'].make_param(),
-            'score_bulge_length': self.fc_length['score_bulge_length'].make_param(),
-            'score_internal_length': self.fc_length['score_internal_length'].make_param(),
-            'score_internal_explicit': self.fc_length['score_internal_explicit'].make_param(),
-            'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
-            'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param()
+            'score_hairpin_length': torch.zeros((31,)), #self.fc_length['score_hairpin_length'].make_param(),
+            'score_bulge_length': torch.zeros((31,)), #self.fc_length['score_bulge_length'].make_param(),
+            'score_internal_length': torch.zeros((31,)), #self.fc_length['score_internal_length'].make_param(),
+            'score_internal_explicit': torch.zeros((5,5)), #self.fc_length['score_internal_explicit'].make_param(),
+            'score_internal_symmetry': torch.zeros((16,)), #self.fc_length['score_internal_symmetry'].make_param(),
+            'score_internal_asymmetry': torch.zeros((29,)), #self.fc_length['score_internal_asymmetry'].make_param()
         } for i in range(len(x)) ]
         return param
 
