@@ -100,19 +100,23 @@ class PositionalFold(nn.Module):
 
 class NeuralFold(nn.Module):
     def __init__(self, args=None, 
-            num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
+            num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
+            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
         super(NeuralFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters if args.num_filters is not None else num_filters
             motif_len = args.motif_len if args.motif_len is not None else motif_len
-            dilation = args.dilation if args.dilation is not None else dilation
+            dilation = args.dilation #if args.dilation is not None else dilation
             pool_size = args.pool_size if args.pool_size is not None else pool_size
-            num_lstm_units = args.num_lstm_units if args.num_lstm_units is not None else num_lstm_units
+            num_lstm_units = args.num_lstm_units #if args.num_lstm_units is not None else num_lstm_units
+            num_lstm_layers = args.num_lstm_layers #if args.num_lstm_layers is not None else num_lstm_layers
             num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
             dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
             # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
             #     if getattr(args, a) is not None:
             #         setattr(self, a, getattr(args, a))
+        if num_lstm_layers == 0 and num_lstm_units > 0:
+            num_lstm_layers = 1
 
         self.conv = self.lstm = None
         self.encode = SeqEncoder()
@@ -120,8 +124,9 @@ class NeuralFold(nn.Module):
         if len(num_filters) > 0 and num_filters[0] > 0:
             self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation)
             n_in = num_filters[-1]
-        if num_lstm_units is not None and num_lstm_units > 0:
-            self.lstm = nn.LSTM(n_in, num_lstm_units, batch_first=True, bidirectional=True)
+        if num_lstm_layers > 0:
+            self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
+                            dropout=dropout_rate if num_lstm_layers>1 else 0)
             n_in = num_lstm_units*2
         self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
@@ -141,6 +146,7 @@ class NeuralFold(nn.Module):
             '--motif-len': motif_len,
             '--pool-size': pool_size,
             '--dilation': dilation,
+            '--num-lstm-layers': num_lstm_layers,
             '--num-lstm-units': num_lstm_units,
             '--dropout-rate': dropout_rate,
             '--num-hidden-units': num_hidden_units
@@ -157,6 +163,8 @@ class NeuralFold(nn.Module):
                         help='the width of the max-pooling layer of CNN')
         parser.add_argument('--dilation', type=int, default=0, 
                         help='Use the dilated convolution')
+        parser.add_argument('--num-lstm-layers', type=int, default=0,
+                        help='the number of the LSTM hidden layers')
         parser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units')
         parser.add_argument('--num-hidden-units', type=int, action='append',
@@ -191,12 +199,12 @@ class NeuralFold(nn.Module):
             'score_base_internal': score_unpair[i],
             'score_base_multi': score_unpair[i],
             'score_base_external': score_unpair[i],
-            'score_hairpin_length': torch.zeros((31,)), #self.fc_length['score_hairpin_length'].make_param(),
-            'score_bulge_length': torch.zeros((31,)), #self.fc_length['score_bulge_length'].make_param(),
-            'score_internal_length': torch.zeros((31,)), #self.fc_length['score_internal_length'].make_param(),
-            'score_internal_explicit': torch.zeros((5,5)), #self.fc_length['score_internal_explicit'].make_param(),
-            'score_internal_symmetry': torch.zeros((16,)), #self.fc_length['score_internal_symmetry'].make_param(),
-            'score_internal_asymmetry': torch.zeros((29,)), #self.fc_length['score_internal_asymmetry'].make_param()
+            'score_hairpin_length': self.fc_length['score_hairpin_length'].make_param(),
+            'score_bulge_length': self.fc_length['score_bulge_length'].make_param(),
+            'score_internal_length': self.fc_length['score_internal_length'].make_param(),
+            'score_internal_explicit': self.fc_length['score_internal_explicit'].make_param(),
+            'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
+            'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param()
         } for i in range(len(x)) ]
         return param
 

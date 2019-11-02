@@ -122,8 +122,8 @@ class NussinovFold(nn.Module):
             self.lstm = nn.LSTM(n_in, num_lstm_units, batch_first=True, bidirectional=True)
             n_in = num_lstm_units*2
         self.fc_paired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-        #self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-        self.fc_unpaired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        #self.fc_unpaired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fold = NussinovLayer()
 
         self.config = {
@@ -165,11 +165,11 @@ class NussinovFold(nn.Module):
         if self.lstm is not None:
             x, _ = self.lstm(x) # (B, N, H*2)
         score_paired = self.fc_paired(x) # (B, N, N)
-        #score_unpaired = self.fc_unpaired(x) # (B, N)
-        score_unpaired = self.fc_unpaired(x) # (B, N, N)
-        score_unpaired = torch.triu(score_unpaired, 1) # (B, N, N)
-        score_unpaired = score_unpaired + torch.transpose(score_unpaired, 1, 2) # (B, N, N)
-        score_unpaired = torch.sum(score_unpaired, dim=1) / (N-1) # (B, N)
+        score_unpaired = self.fc_unpaired(x) # (B, N)
+        # score_unpaired = self.fc_unpaired(x) # (B, N, N)
+        # score_unpaired = torch.triu(score_unpaired, 1) # (B, N, N)
+        # score_unpaired = score_unpaired + torch.transpose(score_unpaired, 1, 2) # (B, N, N)
+        # score_unpaired = torch.sum(score_unpaired, dim=1) / (N-1) # (B, N)
 
         param = [ { 
             'score_paired': score_paired[i],
