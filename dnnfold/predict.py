@@ -83,6 +83,8 @@ class Predict:
             test_dataset = FastaDataset(args.input)
         except RuntimeError:
             test_dataset = BPseqDataset(args.input)
+        if len(test_dataset) == 0:
+            test_dataset = BPseqDataset(args.input)
         self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:

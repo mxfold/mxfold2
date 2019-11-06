@@ -9,7 +9,7 @@ class ShowParam:
     def run(self, args):
         model = RNAFold()
         if args.checkpoint:
-            checkpoint = torch.load(args.model)
+            checkpoint = torch.load(args.model, map_location=torch.device('cpu'))
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
             model.load_state_dict(torch.load(args.model))

@@ -68,7 +68,7 @@ class NussinovFold(nn.Module):
     def __init__(self, args=None, 
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
-            use_bilinear=False):
+            use_bilinear=False, context=1):
         super(NussinovFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters if args.num_filters is not None else num_filters
@@ -80,6 +80,7 @@ class NussinovFold(nn.Module):
             num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
             dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
             use_bilinear = args.bilinear
+            context = args.context_length
             # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
             #     if getattr(args, a) is not None:
             #         setattr(self, a, getattr(args, a))
@@ -99,10 +100,10 @@ class NussinovFold(nn.Module):
             n_in = num_lstm_units*2
         self.dropout = nn.Dropout(p=dropout_rate)
         if use_bilinear:
-            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 1, dropout_rate=dropout_rate)
+            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 1, dropout_rate=dropout_rate, context=context)
         else:
-            self.fc_paired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-        self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+            self.fc_paired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
+        self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
         #self.fc_unpaired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fold = NussinovLayer()
 
@@ -115,7 +116,8 @@ class NussinovFold(nn.Module):
             '--num-lstm-units': num_lstm_units,
             '--dropout-rate': dropout_rate,
             '--num-hidden-units': num_hidden_units,
-            '--bilinear': use_bilinear
+            '--bilinear': use_bilinear,
+            '--context-length': context
         }
 
 
@@ -138,6 +140,8 @@ class NussinovFold(nn.Module):
         parser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units')
         parser.add_argument('--bilinear', default=False, action='store_true')
+        parser.add_argument('--context-length', type=int, default=1,
+                        help='the length of context for FC layers')
 
 
     def make_param(self, seq):
@@ -151,7 +155,7 @@ class NussinovFold(nn.Module):
             x, _ = self.lstm(x)
             x = self.dropout(F.relu(x)) # (B, N, H*2)
         score_paired = self.fc_paired(x).view(B, N, N) # (B, N, N)
-        score_unpaired = self.fc_unpaired(x) # (B, N)
+        score_unpaired = self.fc_unpaired(x).view(B, N) # (B, N)
         # score_unpaired = self.fc_unpaired(x) # (B, N, N)
         # score_unpaired = torch.triu(score_unpaired, 1) # (B, N, N)
         # score_unpaired = score_unpaired + torch.transpose(score_unpaired, 1, 2) # (B, N, N)

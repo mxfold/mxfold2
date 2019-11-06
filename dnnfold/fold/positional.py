@@ -102,7 +102,7 @@ class NeuralFold(nn.Module):
     def __init__(self, args=None, 
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
-            use_bilinear=False):
+            use_bilinear=False, context=1):
         super(NeuralFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters if args.num_filters is not None else num_filters
@@ -114,6 +114,7 @@ class NeuralFold(nn.Module):
             num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
             dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
             use_bilinear = args.bilinear
+            context = args.context_length
             # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
             #     if getattr(args, a) is not None:
             #         setattr(self, a, getattr(args, a))
@@ -133,11 +134,12 @@ class NeuralFold(nn.Module):
             n_in = num_lstm_units*2
         self.dropout = nn.Dropout(p=dropout_rate)
         if self.use_bilinear:
-            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 2, dropout_rate=dropout_rate)
+            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 2, dropout_rate=dropout_rate, context=context)
         else:
-            self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-            self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-        self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+            #self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
+            #self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
+            self.fc_paired = FCPairedLayer(n_in, 2, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
+        self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
             'score_bulge_length': FCLengthLayer(31),
@@ -157,7 +159,8 @@ class NeuralFold(nn.Module):
             '--num-lstm-units': num_lstm_units,
             '--dropout-rate': dropout_rate,
             '--num-hidden-units': num_hidden_units,
-            '--bilinear': use_bilinear
+            '--bilinear': use_bilinear,
+            '--context-length': context
         }
 
 
@@ -180,6 +183,8 @@ class NeuralFold(nn.Module):
         parser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units')
         parser.add_argument('--bilinear', default=False, action='store_true')
+        parser.add_argument('--context-length', type=int, default=1,
+                        help='the length of context for FC layers')
 
 
     def make_param(self, seq):
@@ -192,15 +197,18 @@ class NeuralFold(nn.Module):
         if self.lstm is not None:
             x, _ = self.lstm(x)
             x = self.dropout(F.relu(x)) # (B, N, H*2)
-        if self.use_bilinear:
-            score_paired = self.fc_paired(x) # (B, N, N, 2)
-            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
-            score_mismatch = score_paired[:, :, :, 1] # (B, N, N)
-        else:
-            score_helix_stacking = self.fc_helix_stacking(x) # (B, N, N)
-            score_mismatch = self.fc_mismatch(x) # (B, N, N)
-        score_unpair = self.fc_unpair(x) # (B, N)
-        score_unpair = score_unpair.reshape(B, 1, N)
+        # if self.use_bilinear:
+        #     score_paired = self.fc_paired(x) # (B, N, N, 2)
+        #     score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+        #     score_mismatch = score_paired[:, :, :, 1] # (B, N, N)
+        # else:
+        #     score_helix_stacking = self.fc_helix_stacking(x) # (B, N, N)
+        #     score_mismatch = self.fc_mismatch(x) # (B, N, N)
+        score_paired = self.fc_paired(x) # (B, N, N, 2)
+        score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+        score_mismatch = score_paired[:, :, :, 1] # (B, N, N)
+        score_unpair = self.fc_unpair(x) # (B, N, 1)
+        score_unpair = score_unpair.view(B, 1, N)
         score_unpair = torch.bmm(torch.ones(B, N, 1).to(device), score_unpair)
         score_unpair = torch.bmm(torch.triu(score_unpair), torch.triu(torch.ones_like(score_unpair).to(device)))
 

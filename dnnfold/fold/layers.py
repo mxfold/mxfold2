@@ -27,58 +27,60 @@ class CNNLayer(nn.Module):
 
 
 class FCPairedLayer(nn.Module):
-    def __init__(self, n_in, layers=(), dropout_rate=0.0):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, join='add'):
         super(FCPairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
+        self.context = context
+        self.join = join
         linears = []
-        n = n_in*2
+        if join=='cat':
+            n = n_in*context*2 # concat
+        else:
+            n = n_in*context # add or mul
         for m in layers:
             linears.append(nn.Linear(n, m))
             n = m
-        linears.append(nn.Linear(n, 1))
+        linears.append(nn.Linear(n, n_out))
         self.fc = nn.ModuleList(linears)
 
     def forward(self, x):
         B, N, C = x.shape
-        # y = torch.zeros((B, N, N), dtype=torch.float32, device=x.device)
-        # for k in range(1, N):
-        #     x_l = x[:, :-k, :] # (B, N-k, C)
-        #     x_r = x[:, k:, :] # (B, N-k, C)
-
-        #     # v1: closing pairs, v2: opening pairs
-        #     v1 = torch.cat((x_l, x_r), dim=2) # (B, N-k, C*2)
-        #     v2 = torch.cat((x_r, x_l), dim=2) # (B, N-k, C*2)
-        #     # concat
-        #     v = torch.cat((v1, v2), dim=0) # (B*2, N-k, C*2)
-        #     v = torch.reshape(v, (B*2*(N-k), C*2)) # (B*2*(N-k), C*2)
-        #     for fc in self.fc[:-1]:
-        #         v = F.relu(fc(v))
-        #         v = self.dropout(v)
-        #     v = self.fc[-1](v) # (B*2*(N-k), 1)
-        #     v = torch.reshape(v, (B*2, N-k)) # (B*2, N-k)
-        #     v1, v2 = torch.chunk(v, 2, dim=0) # (B, N-k) * 2
-        #     y += torch.diag_embed(v1, offset=k) # (B, N, N)
-        #     y += torch.diag_embed(v2, offset=-k) # (B, N, N)
 
         x_l = x.view(B, N, 1, C).expand(B, N, N, C)
         x_r = x.view(B, 1, N, C).expand(B, N, N, C)
-        v = torch.cat((x_l, x_r), dim=3) # (B, N, N, C*2)
-        v = v.view(B*N*N, C*2)
+        if self.join=='cat':
+            v = torch.cat((x_l, x_r), dim=3) # (B, N, N, C*2)
+        elif self.join=='add':
+            v = x_l + x_r # (B, N, N, C)
+        elif self.join=='mul':
+            v = x_l * x_r # (B, N, N, C)
+
+        if self.context > 1:
+            z = [v]
+            for d in range(1, self.context // 2 + 1):
+                z_u = torch.zeros_like(v)
+                z_u[:, d:, :-d, :] = v[:, :-d, d:, :] # (i-d, j+d)
+                z.append(z_u)
+                z_d = torch.zeros_like(v)
+                z_d[:, :-d, d:, :] = v[:, d:, :-d, :] # (i+d, j-d)
+                z.append(z_d)
+            v = torch.cat(z, dim=3) # (B, N, N, C*width)
+
+        v = v.view(B*N*N, -1)
         for fc in self.fc[:-1]:
-            v = F.relu(fc(v))
-            v = self.dropout(v)
-        y = self.fc[-1](v) # (B*N*N, 1)
-        y = y.view(B, N, N)
+            v = self.dropout(F.relu(fc(v)))
+        y = self.fc[-1](v) # (B*N*N, n_out)
+        y = y.view(B, N, N, -1)
 
         return y
 
 
 class BilinearPairedLayer(nn.Module):
-    def __init__(self, n_in, n_hidden, n_out, width=3, dropout_rate=0.0):
+    def __init__(self, n_in, n_hidden, n_out, context=1, dropout_rate=0.0):
         super(BilinearPairedLayer, self).__init__()
-        self.width = width
+        self.context = context
         self.linear = nn.Linear(n_in, n_hidden)
-        self.bilinear = nn.Bilinear(n_hidden*width, n_hidden*width, n_out)
+        self.bilinear = nn.Bilinear(n_hidden*context, n_hidden*context, n_out)
         self.dropout = nn.Dropout(p=dropout_rate)
 
     def forward(self, x):
@@ -86,10 +88,10 @@ class BilinearPairedLayer(nn.Module):
         x = x.view(B*N, -1) # (B*N, n_in)
         x = self.dropout(F.relu(self.linear(x)))
         x = x.view(B, N, -1) # (B, N, n_hidden)
-        w = self.width // 2
+        w = self.context // 2
         z = []
         for d in range(-w, w+1):
-            y = torch.diag(torch.ones(N-abs(d)), diagonal=d) # (N, N)
+            y = torch.diag(torch.ones(N-abs(d)), diagonal=d).to(x.device) # (N, N)
             y = y.view(1, N, N).expand(B, N, N) # (B, N, N)
             y = torch.bmm(y, x) # (B, N, n_hidden)
             z.append(y)
@@ -101,26 +103,38 @@ class BilinearPairedLayer(nn.Module):
 
 
 class FCUnpairedLayer(nn.Module):
-    def __init__(self, n_in, layers=(), dropout_rate=0.0):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1):
         super(FCUnpairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
-        n = n_in
+        self.context = context
+        n = n_in * context
         linears = []
         for m in layers:
             linears.append(nn.Linear(n, m))
             n = m
-        linears.append(nn.Linear(n, 1))
+        linears.append(nn.Linear(n, n_out))
         self.fc = nn.ModuleList(linears)
 
     def forward(self, x):
         B, N, C = x.shape
-        x = torch.reshape(x, (B*N, C)) # (B*N, C)
+
+        if self.context > 1:
+            z = [x]
+            for d in range(1, self.context // 2 + 1):
+                z_u = torch.zeros_like(x)
+                z_u[:, d:, :] = x[:, :-d, :] # i-d
+                z.append(z_u)
+                z_d = torch.zeros_like(x)
+                z_d[:, :-d, :] = x[:, d:, :] # i+d
+                z.append(z_d)
+            x = torch.cat(z, dim=2) # (B, N, C*width)
+
+        x = x.view(B*N, -1) # (B*N, C*width)
         for fc in self.fc[:-1]:
             x = F.relu(fc(x))
             x = self.dropout(x)
-        x = self.fc[-1](x) # (B*N, 1)
-        x = torch.reshape(x, (B, N)) # (B, N)
-        return x
+        x = self.fc[-1](x) # (B*N, n_out)
+        return x.view(B, N, -1) # (B, N, n_out)
 
 
 class FCLengthLayer(nn.Module):
