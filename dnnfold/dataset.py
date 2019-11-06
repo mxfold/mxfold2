@@ -1,5 +1,6 @@
 from itertools import groupby
 from torch.utils.data import Dataset
+import torch
 
 class FastaDataset(Dataset):
     def __init__(self, fasta):
@@ -23,7 +24,7 @@ class FastaDataset(Dataset):
             # join all sequence lines to one.
             seq = "".join(s.strip() for s in faiter.__next__())
 
-            yield (headerStr, seq, '', [])
+            yield (headerStr, seq, '', torch.tensor([]))
 
 
 class BPseqDataset(Dataset):
@@ -56,4 +57,4 @@ class BPseqDataset(Dataset):
                 pair[i-1] = '('
                 pair[j-1] = ')'
         pair = ''.join(pair)
-        return (filename, seq, pair, p)
+        return (filename, seq, pair, torch.tensor(p))

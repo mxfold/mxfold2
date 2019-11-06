@@ -20,12 +20,11 @@ class Predict:
         self.test_loader = None
 
 
-    def predict(self, output_bpseq=None, result='xxx'):
+    def predict(self, output_bpseq=None, result=None):
         res_fn = open(result, 'w') if result is not None else None
         self.model.eval()
         with torch.no_grad():
             for headers, seqs, _, refs in self.test_loader:
-                print(refs)
                 start = time.time()
                 rets = self.model.predict(seqs)
                 elapsed_time = time.time() - start
@@ -46,15 +45,15 @@ class Predict:
                             f.write('# {} (s={:.1f}, {:.5f}s)\n'.format(header, sc, elapsed_time))
                             for i in range(1, len(bp)):
                                 f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
-                    if res_fn is not None:
-                        x = self.compare_bpseq(ref, pred)
+                    if res_fn is not None and len(ref) == len(bp):
+                        x = self.compare_bpseq(ref, bp)
                         x = [header, len(seq), elapsed_time, sc] + list(x) + list(self.accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
 
 
     def compare_bpseq(self, ref, pred):
-        print(ref, pred)
         assert(len(ref) == len(pred))
+        L = len(ref) - 1
         tp = fp = fn = 0
         for i, (j1, j2) in enumerate(zip(ref, pred)):
             if j1 > 0 and i < j1: # pos
@@ -67,7 +66,7 @@ class Predict:
                     fn += 1
             elif j2 > 0 and i < j2:
                 fp += 1
-        tn = len(ref) * (len(ref) - 1) // 2 - tp - fp - fn
+        tn = L * (L - 1) // 2 - tp - fp - fn
         return (tp, tn, fp, fn)
 
 
@@ -79,7 +78,6 @@ class Predict:
         return (sen, ppv, fval, mcc)
 
 
-
     def run(self, args):
         try:
             test_dataset = FastaDataset(args.input)
@@ -87,8 +85,6 @@ class Predict:
             test_dataset = BPseqDataset(args.input)
         self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-        # use_cuda = not args.no_cuda and torch.cuda.is_available()
-        # self.device = torch.device("cuda" if use_cuda else "cpu") # pylint: disable=no-member
         if args.seed >= 0:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
@@ -116,7 +112,7 @@ class Predict:
             raise('never reach here')
 
         # self.model.to(self.device)
-        self.predict(output_bpseq=args.bpseq)
+        self.predict(output_bpseq=args.bpseq, result=args.result)
 
 
     @classmethod
@@ -134,6 +130,8 @@ class Predict:
                             help="Folding model ('Turner', 'NN', 'Nussinov')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
+        subparser.add_argument('--result', type=str, default=None,
+                            help='output the prediction accuracy if reference structures are given')
         subparser.add_argument('--bpseq', type=str, default=None,
                             help='output the prediction with BPSEQ format to the specified directory')
 
