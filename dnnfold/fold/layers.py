@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 class CNNLayer(nn.Module):
-    def __init__(self, num_filters=(128,), motif_len=(7,), pool_size=(1,), dilation=1, dropout_rate=0.5):
+    def __init__(self, num_filters=(128,), motif_len=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
         super(CNNLayer, self).__init__()
         conv = []
         pool = []
@@ -27,7 +27,7 @@ class CNNLayer(nn.Module):
 
 
 class FCPairedLayer(nn.Module):
-    def __init__(self, n_in, layers=(), dropout_rate=0.5):
+    def __init__(self, n_in, layers=(), dropout_rate=0.0):
         super(FCPairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         linears = []
@@ -73,8 +73,35 @@ class FCPairedLayer(nn.Module):
         return y
 
 
+class BilinearPairedLayer(nn.Module):
+    def __init__(self, n_in, n_hidden, n_out, width=3, dropout_rate=0.0):
+        super(BilinearPairedLayer, self).__init__()
+        self.width = width
+        self.linear = nn.Linear(n_in, n_hidden)
+        self.bilinear = nn.Bilinear(n_hidden*width, n_hidden*width, n_out)
+        self.dropout = nn.Dropout(p=dropout_rate)
+
+    def forward(self, x):
+        B, N, _ = x.shape
+        x = x.view(B*N, -1) # (B*N, n_in)
+        x = self.dropout(F.relu(self.linear(x)))
+        x = x.view(B, N, -1) # (B, N, n_hidden)
+        w = self.width // 2
+        z = []
+        for d in range(-w, w+1):
+            y = torch.diag(torch.ones(N-abs(d)), diagonal=d) # (N, N)
+            y = y.view(1, N, N).expand(B, N, N) # (B, N, N)
+            y = torch.bmm(y, x) # (B, N, n_hidden)
+            z.append(y)
+        v = torch.cat(z, dim=2) # (B, N, n_hidden*width)
+        H = v.shape[2]
+        v_l = v.view(B, N, 1, H).expand(B, N, N, H).reshape(B*N*N, H)
+        v_r = v.view(B, 1, N, H).expand(B, N, N, H).reshape(B*N*N, H)
+        return self.bilinear(v_l, v_r).view(B, N, N, -1) # (B, n_out)
+
+
 class FCUnpairedLayer(nn.Module):
-    def __init__(self, n_in, layers=(), dropout_rate=0.5):
+    def __init__(self, n_in, layers=(), dropout_rate=0.0):
         super(FCUnpairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         n = n_in
@@ -116,11 +143,13 @@ class FCLengthLayer(nn.Module):
             x = np.fromfunction(lambda i, j, k, l: np.logical_and(k<=i ,l<=j), (*self.n_in, *self.n_in))
             self.x = torch.from_numpy(x.astype(np.float32)).reshape(n, n)
 
-    def forward(self, x):
+
+    def forward(self, x): 
         for l in self.linears[:-1]:
             x = F.relu(l(x))
             x = self.dropout(x)
         return self.linears[-1](x)
+
 
     def make_param(self):
         x = self.forward(self.x.to(self.linears[-1].weight.device))

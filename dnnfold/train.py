@@ -240,14 +240,14 @@ class Train:
                             help='the weight for L2 regularization (default: 0)')
         subparser.add_argument('--lr', type=float, default=0.01,
                             help='the learning rate for optimizer (default: 0.01)')
-        subparser.add_argument('--loss-pos-paired', type=float, default=0,
-                            help='the penalty for positive base-pairs for loss augmentation (default: 0)')
-        subparser.add_argument('--loss-neg-paired', type=float, default=0,
-                            help='the penalty for negative base-pairs for loss augmentation (default: 0)')
-        subparser.add_argument('--loss-pos-unpaired', type=float, default=0,
-                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
-        subparser.add_argument('--loss-neg-unpaired', type=float, default=0,
-                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+        subparser.add_argument('--loss-pos-paired', type=float, default=1,
+                            help='the penalty for positive base-pairs for loss augmentation (default: 1)')
+        subparser.add_argument('--loss-neg-paired', type=float, default=1,
+                            help='the penalty for negative base-pairs for loss augmentation (default: 1)')
+        subparser.add_argument('--loss-pos-unpaired', type=float, default=1,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 1)')
+        subparser.add_argument('--loss-neg-unpaired', type=float, default=1,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 1)')
 
         NeuralFold.add_args(subparser)
 

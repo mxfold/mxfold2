@@ -5,7 +5,7 @@ import numpy as np
 
 from .. import interface
 from .encode import SeqEncoder
-from .layers import CNNLayer, FCPairedLayer, FCUnpairedLayer, FCLengthLayer
+from .layers import CNNLayer, FCPairedLayer, FCUnpairedLayer, FCLengthLayer, BilinearPairedLayer
 
 
 class NussinovLayer(nn.Module):
@@ -63,65 +63,45 @@ class NussinovLayer(nn.Module):
                 ret.append(r)
         return ret
 
-    # def nussinov(self, seq):
-    #     seq = ' '+seq.lower()
-    #     L = len(seq)
-        
-    #     param = { 
-    #         'score_base_pair': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_helix_stacking': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_helix_closing': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_external': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_hairpin': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_internal': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_multi': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_base_hairpin': torch.zeros((L,), dtype=torch.float32),
-    #         'score_base_internal': torch.zeros((L,), dtype=torch.float32),
-    #         'score_base_multi': torch.zeros((L,), dtype=torch.float32),
-    #         'score_base_external': torch.zeros((L,), dtype=torch.float32),
-    #         'score_hairpin_length': torch.zeros((31,), dtype=torch.float32),
-    #         'score_bulge_length': torch.zeros((31,), dtype=torch.float32),
-    #         'score_internal_length': torch.zeros((31,), dtype=torch.float32),
-    #         'score_internal_explicit': torch.zeros((5, 5), dtype=torch.float32),
-    #         'score_internal_symmetry': torch.zeros((16,), dtype=torch.float32),
-    #         'score_internal_asymmetry': torch.zeros((29,), dtype=torch.float32) }
-
-    #     complement_pairs = {
-    #         ('a', 'u'), ('a', 't'), ('c', 'g'), ('g', 'u'), ('g', 't'),
-    #         ('u', 'a'), ('t', 'a'), ('g', 'c'), ('u', 'g'), ('t', 'g') }
-    #     for i in range(1, L):
-    #         for j in range(i, L):
-    #             if (seq[i], seq[j]) in complement_pairs:
-    #                 param['score_base_pair'][i, j] = 1
-    #     return param
-
 
 class NussinovFold(nn.Module):
     def __init__(self, args=None, 
-            num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
+            num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
+            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
+            use_bilinear=False):
         super(NussinovFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters if args.num_filters is not None else num_filters
             motif_len = args.motif_len if args.motif_len is not None else motif_len
             dilation = args.dilation if args.dilation is not None else dilation
             pool_size = args.pool_size if args.pool_size is not None else pool_size
+            num_lstm_layers = args.num_lstm_layers if args.num_lstm_layers is not None else num_lstm_layers
             num_lstm_units = args.num_lstm_units if args.num_lstm_units is not None else num_lstm_units
             num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
             dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
+            use_bilinear = args.bilinear
             # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
             #     if getattr(args, a) is not None:
             #         setattr(self, a, getattr(args, a))
+
+        if num_lstm_layers == 0 and num_lstm_units > 0:
+            num_lstm_layers = 1
 
         self.conv = self.lstm = None
         self.encode = SeqEncoder()
         n_in = 4
         if len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation)
+            self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
             n_in = num_filters[-1]
         if num_lstm_units is not None and num_lstm_units > 0:
-            self.lstm = nn.LSTM(n_in, num_lstm_units, batch_first=True, bidirectional=True)
+            self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
+                        dropout=dropout_rate if num_lstm_layers>1 else 0)
             n_in = num_lstm_units*2
-        self.fc_paired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.dropout = nn.Dropout(p=dropout_rate)
+        if use_bilinear:
+            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 1, dropout_rate=dropout_rate)
+        else:
+            self.fc_paired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_unpaired = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         #self.fc_unpaired = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fold = NussinovLayer()
@@ -131,9 +111,11 @@ class NussinovFold(nn.Module):
             '--motif-len': motif_len,
             '--pool-size': pool_size,
             '--dilation': dilation,
+            '--num-lstm-layers': num_lstm_layers,
             '--num-lstm-units': num_lstm_units,
             '--dropout-rate': dropout_rate,
-            '--num-hidden-units': num_hidden_units
+            '--num-hidden-units': num_hidden_units,
+            '--bilinear': use_bilinear
         }
 
 
@@ -147,24 +129,28 @@ class NussinovFold(nn.Module):
                         help='the width of the max-pooling layer of CNN')
         parser.add_argument('--dilation', type=int, default=0, 
                         help='Use the dilated convolution')
+        parser.add_argument('--num-lstm-layers', type=int, default=0,
+                        help='the number of the LSTM hidden layers')
         parser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units')
         parser.add_argument('--num-hidden-units', type=int, action='append',
                         help='the number of the hidden units of full connected layers')
-        parser.add_argument('--dropout-rate', type=float, default=0.5,
+        parser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units')
+        parser.add_argument('--bilinear', default=False, action='store_true')
 
 
     def make_param(self, seq):
         device = next(self.parameters()).device
         x = self.encode(['0' + s for s in seq]).to(device) # (B, 4, N)
         if self.conv is not None:
-            x = self.conv(x) # (B, C, N)
+            x = self.dropout(F.relu(self.conv(x))) # (B, C, N)
         B, C, N = x.shape
         x = torch.transpose(x, 1, 2) # (B, N, C)
         if self.lstm is not None:
-            x, _ = self.lstm(x) # (B, N, H*2)
-        score_paired = self.fc_paired(x) # (B, N, N)
+            x, _ = self.lstm(x)
+            x = self.dropout(F.relu(x)) # (B, N, H*2)
+        score_paired = self.fc_paired(x).view(B, N, N) # (B, N, N)
         score_unpaired = self.fc_unpaired(x) # (B, N)
         # score_unpaired = self.fc_unpaired(x) # (B, N, N)
         # score_unpaired = torch.triu(score_unpaired, 1) # (B, N, N)

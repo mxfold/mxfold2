@@ -5,7 +5,7 @@ import numpy as np
 
 from .. import interface
 from .encode import SeqEncoder
-from .layers import CNNLayer, FCPairedLayer, FCUnpairedLayer, FCLengthLayer
+from .layers import CNNLayer, FCPairedLayer, FCUnpairedLayer, FCLengthLayer, BilinearPairedLayer
 
 
 class PositionalFold(nn.Module):
@@ -101,7 +101,8 @@ class PositionalFold(nn.Module):
 class NeuralFold(nn.Module):
     def __init__(self, args=None, 
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
-            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.5):
+            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
+            use_bilinear=False):
         super(NeuralFold, self).__init__()
         if args is not None:
             num_filters = args.num_filters if args.num_filters is not None else num_filters
@@ -112,24 +113,30 @@ class NeuralFold(nn.Module):
             num_lstm_layers = args.num_lstm_layers #if args.num_lstm_layers is not None else num_lstm_layers
             num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
             dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
+            use_bilinear = args.bilinear
             # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
             #     if getattr(args, a) is not None:
             #         setattr(self, a, getattr(args, a))
         if num_lstm_layers == 0 and num_lstm_units > 0:
             num_lstm_layers = 1
 
+        self.use_bilinear = use_bilinear
         self.conv = self.lstm = None
         self.encode = SeqEncoder()
         n_in = 4
         if len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation)
+            self.conv = CNNLayer(num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
             n_in = num_filters[-1]
         if num_lstm_layers > 0:
             self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
                             dropout=dropout_rate if num_lstm_layers>1 else 0)
             n_in = num_lstm_units*2
-        self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
-        self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+        self.dropout = nn.Dropout(p=dropout_rate)
+        if self.use_bilinear:
+            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 2, dropout_rate=dropout_rate)
+        else:
+            self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
+            self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate)
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
@@ -149,7 +156,8 @@ class NeuralFold(nn.Module):
             '--num-lstm-layers': num_lstm_layers,
             '--num-lstm-units': num_lstm_units,
             '--dropout-rate': dropout_rate,
-            '--num-hidden-units': num_hidden_units
+            '--num-hidden-units': num_hidden_units,
+            '--bilinear': use_bilinear
         }
 
 
@@ -169,21 +177,28 @@ class NeuralFold(nn.Module):
                         help='the number of the LSTM hidden units')
         parser.add_argument('--num-hidden-units', type=int, action='append',
                         help='the number of the hidden units of full connected layers')
-        parser.add_argument('--dropout-rate', type=float, default=0.5,
+        parser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units')
+        parser.add_argument('--bilinear', default=False, action='store_true')
 
 
     def make_param(self, seq):
         device = next(self.parameters()).device
         x = self.encode(['0' + s for s in seq]).to(device) # (B, 4, N)
         if self.conv is not None:
-            x = self.conv(x) # (B, C, N)
+            x = self.dropout(F.relu(self.conv(x))) # (B, C, N)
         B, C, N = x.shape
         x = torch.transpose(x, 1, 2) # (B, N, C)
         if self.lstm is not None:
-            x, _ = self.lstm(x) # (B, N, H*2)
-        score_helix_stacking = self.fc_helix_stacking(x) # (B, N, N)
-        score_mismatch = self.fc_mismatch(x) # (B, N, N)
+            x, _ = self.lstm(x)
+            x = self.dropout(F.relu(x)) # (B, N, H*2)
+        if self.use_bilinear:
+            score_paired = self.fc_paired(x) # (B, N, N, 2)
+            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+            score_mismatch = score_paired[:, :, :, 1] # (B, N, N)
+        else:
+            score_helix_stacking = self.fc_helix_stacking(x) # (B, N, N)
+            score_mismatch = self.fc_mismatch(x) # (B, N, N)
         score_unpair = self.fc_unpair(x) # (B, N)
         score_unpair = score_unpair.reshape(B, 1, N)
         score_unpair = torch.bmm(torch.ones(B, N, 1).to(device), score_unpair)
