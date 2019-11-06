@@ -2,13 +2,14 @@ import argparse
 import os
 import random
 import time
+import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from .dataset import FastaDataset
+from .dataset import FastaDataset, BPseqDataset
 from .fold.rnafold import RNAFold
 from .fold.positional import NeuralFold
 from .fold.nussinov import NussinovFold
@@ -19,34 +20,71 @@ class Predict:
         self.test_loader = None
 
 
-    def predict(self, use_bpseq=None):
+    def predict(self, output_bpseq=None, result='xxx'):
+        res_fn = open(result, 'w') if result is not None else None
         self.model.eval()
         with torch.no_grad():
-            for headers, seqs in self.test_loader:
+            for headers, seqs, _, refs in self.test_loader:
+                print(refs)
                 start = time.time()
                 rets = self.model.predict(seqs)
                 elapsed_time = time.time() - start
-                for header, seq, (sc, pred, bp) in zip(headers, seqs, rets):
-                    if use_bpseq is None:
+                for header, seq, ref, (sc, pred, bp) in zip(headers, seqs, refs, rets):
+                    if output_bpseq is None:
                         print('>'+header)
                         print(seq)
                         print(pred, "({:.1f})".format(sc))
-                    elif use_bpseq == "stdout":
+                    elif output_bpseq == "stdout":
                         print('# {} (s={:.1f}, {:.5f}s)'.format(header, sc, elapsed_time))
                         for i in range(1, len(bp)):
                             print('{}\t{}\t{}'.format(i, seq[i-1], bp[i]))
                     else:
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
-                        fn = os.path.join(use_bpseq, fn+".bpseq")
+                        fn = os.path.join(output_bpseq, fn+".bpseq")
                         with open(fn, "w") as f:
                             f.write('# {} (s={:.1f}, {:.5f}s)\n'.format(header, sc, elapsed_time))
                             for i in range(1, len(bp)):
                                 f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
+                    if res_fn is not None:
+                        x = self.compare_bpseq(ref, pred)
+                        x = [header, len(seq), elapsed_time, sc] + list(x) + list(self.accuracy(*x))
+                        res_fn.write(', '.join([str(v) for v in x]) + "\n")
+
+
+    def compare_bpseq(self, ref, pred):
+        print(ref, pred)
+        assert(len(ref) == len(pred))
+        tp = fp = fn = 0
+        for i, (j1, j2) in enumerate(zip(ref, pred)):
+            if j1 > 0 and i < j1: # pos
+                if j1 == j2:
+                    tp += 1
+                elif j2 > 0 and i < j2:
+                    fp += 1
+                    fn += 1
+                else:
+                    fn += 1
+            elif j2 > 0 and i < j2:
+                fp += 1
+        tn = len(ref) * (len(ref) - 1) // 2 - tp - fp - fn
+        return (tp, tn, fp, fn)
+
+
+    def accuracy(self, tp, tn, fp, fn):
+        sen = tp / (tp + fn) if tp+fn > 0. else 0.
+        ppv = tp / (tp + fp) if tp+fp > 0. else 0.
+        fval = 2 * sen * ppv / (sen + ppv) if sen+ppv > 0. else 0.
+        mcc = ((tp*tn)-(fp*fn)) / math.sqrt((tp+fp)*(tp+fn)*(tn+fp)*(tn+fn)) if (tp+fp)*(tp+fn)*(tn+fp)*(tn+fn) > 0. else 0.
+        return (sen, ppv, fval, mcc)
+
 
 
     def run(self, args):
-        test_dataset = FastaDataset(args.input)
+        try:
+            test_dataset = FastaDataset(args.input)
+        except RuntimeError:
+            test_dataset = BPseqDataset(args.input)
         self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         # use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -78,7 +116,7 @@ class Predict:
             raise('never reach here')
 
         # self.model.to(self.device)
-        self.predict(use_bpseq=args.bpseq)
+        self.predict(output_bpseq=args.bpseq)
 
 
     @classmethod

@@ -73,7 +73,7 @@ class Train:
         loss_total, num = 0, 0
         running_loss, n_running_loss = 0, 0
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in self.train_loader:
+            for fnames, seqs, pairs, _ in self.train_loader:
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
                 loss = self.loss_fn(seqs, pairs, fname=fnames)
@@ -100,7 +100,7 @@ class Train:
         n_dataset = len(self.test_loader.dataset)
         loss_total, num = 0, 0
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in self.test_loader:
+            for fnames, seqs, pairs, _ in self.test_loader:
                 n_batch = len(seqs)
                 loss = self.loss_fn(seqs, pairs, fname=fnames)
                 loss_total += loss.item()

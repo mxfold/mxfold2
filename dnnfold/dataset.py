@@ -1,11 +1,10 @@
-#%%
 from itertools import groupby
 from torch.utils.data import Dataset
 
 class FastaDataset(Dataset):
     def __init__(self, fasta):
         it = self.fasta_iter(fasta)
-        self.data = [x for x in it]
+        self.data = list(it)
 
     def __len__(self):
         return len(self.data)
@@ -24,7 +23,7 @@ class FastaDataset(Dataset):
             # join all sequence lines to one.
             seq = "".join(s.strip() for s in faiter.__next__())
 
-            yield (headerStr, seq)
+            yield (headerStr, seq, '', [])
 
 
 class BPseqDataset(Dataset):
@@ -57,4 +56,4 @@ class BPseqDataset(Dataset):
                 pair[i-1] = '('
                 pair[j-1] = ')'
         pair = ''.join(pair)
-        return (filename, seq, pair)
+        return (filename, seq, pair, p)
