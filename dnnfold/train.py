@@ -80,6 +80,7 @@ class Train:
                 if self.verbose:
                     print()
                     print("Step: {}, {}".format(self.step, fnames))
+                    self.step += 1
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
                 loss = self.loss_fn(seqs, pairs, fname=fnames)
@@ -88,7 +89,7 @@ class Train:
                 loss.backward()
                 if self.verbose:
                     for n, p in self.model.named_parameters():
-                        print(n, torch.min(p.grad).item(), torch.max(p.grad).item())
+                        print(n, torch.min(p).item(), torch.max(p).item(), torch.min(p.grad).item(), torch.max(p.grad).item())
                 self.optimizer.step()
 
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
