@@ -4,11 +4,10 @@ import torch.nn.functional as F
 import numpy as np
 
 class CNNLayer(nn.Module):
-    def __init__(self, num_filters=(128,), motif_len=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
+    def __init__(self, n_in, num_filters=(128,), motif_len=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
         super(CNNLayer, self).__init__()
         conv = []
         pool = []
-        n_in = 4
         for n_out, ksize, p in zip(num_filters, motif_len, pool_size):
             conv.append(nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)))
             if p > 1:
