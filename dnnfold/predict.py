@@ -94,26 +94,25 @@ class Predict:
         if args.model == 'Turner':
             if args.param is not '':
                 self.model = RNAFold()
-                self.model.load_state_dict(torch.load(args.param))
             else:
                 from . import param_turner2004
                 self.model = RNAFold(param_turner2004)
         elif args.model == 'NN':
             self.model = NeuralFold(args)
-            if args.param is not '':
-                self.model.load_state_dict(torch.load(args.param))
-            if args.gpu >= 0:
-                self.model.to(torch.device("cuda", args.gpu))
         elif args.model == 'Nussinov':
             self.model = NussinovFold(args)
-            if args.param is not '':
-                self.model.load_state_dict(torch.load(args.param))
-            if args.gpu >= 0:
-                self.model.to(torch.device("cuda", args.gpu))
         else:
-            raise('never reach here')
+            raise('unreachable')
 
-        # self.model.to(self.device)
+        if args.param is not '':
+            p = torch.load(args.param)
+            if isinstance(p, dict) and 'model_state_dict' in p:
+                p = p['model_state_dict']
+            self.model.load_state_dict(p)
+
+        if args.gpu >= 0:
+            self.model.to(torch.device("cuda", args.gpu))
+
         self.predict(output_bpseq=args.bpseq, result=args.result)
 
 
