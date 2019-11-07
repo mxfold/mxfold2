@@ -323,14 +323,9 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
             }
             case TBType::M_PAIRED: {
                 const auto u = std::get<0>(kl);
-                auto ee = param_->score_multi_paired(u, j);
+                e += param_->score_multi_paired(u, j) + param_->score_multi_unpaired(i, u-1) + loss_unpaired[i][u-1];
                 param_->count_multi_paired(u, j, 1.);
-                if (u-i > 0)
-                {
-                    ee += static_cast<float>(u-i) * param_->score_multi_unpaired(i, u-1) + loss_unpaired[i][u-1];
-                    param_->count_multi_unpaired(i, u-1, 1.);
-                }
-                e += ee; 
+                param_->count_multi_unpaired(i, u-1, 1.);
                 tb_queue.emplace(Ct_[u][j], u, j);
                 break;
             }
