@@ -38,9 +38,10 @@ class StructuredLoss(nn.Module):
         ref, ref_s, _ = self.model(seq, constraint=pair, max_internal_length=None, verbose=True)
         loss = pred - ref
         if self.verbose:
+            print("Loss = {} = ({} - {})".format(loss.item(), pred.item(), ref.item()))
             print(seq)
-            print(pred_s, pred.item())
-            print(ref_s, ref.item())
+            print(pred_s)
+            print(ref_s)
         if loss.item()> 1e10 or torch.isnan(loss):
             print()
             print(fname)
@@ -62,6 +63,8 @@ class StructuredLoss(nn.Module):
 
 
 class Train:
+    step = 0
+
     def __init__(self):
         self.train_loader = None
         self.test_loader = None
@@ -74,12 +77,18 @@ class Train:
         running_loss, n_running_loss = 0, 0
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs, _ in self.train_loader:
+                if self.verbose:
+                    print()
+                    print("Step: {}, {}".format(self.step, fnames))
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
                 loss = self.loss_fn(seqs, pairs, fname=fnames)
                 loss_total += loss.item()
                 num += n_batch
                 loss.backward()
+                if self.verbose:
+                    for n, p in self.model.named_parameters():
+                        print(n, torch.min(p.grad).item(), torch.max(p.grad).item())
                 self.optimizer.step()
 
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -92,6 +101,8 @@ class Train:
                     if self.writer is not None:
                         self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
                     running_loss, n_running_loss = 0, 0
+        if self.verbose:
+            print()
         print('Train Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
 
 
@@ -132,6 +143,7 @@ class Train:
 
     def run(self, args):
         self.disable_progress_bar = args.disable_progress_bar
+        self.verbose = args.verbose
         self.writer = None
         if args.log_dir is not None:
             self.writer = SummaryWriter(log_dir=args.log_dir)
@@ -171,7 +183,7 @@ class Train:
         else:
             raise('not implemented')
 
-        self.loss_fn = StructuredLoss(self.model, 
+        self.loss_fn = StructuredLoss(self.model, verbose=self.verbose,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
@@ -229,6 +241,7 @@ class Train:
                             help='Checkpoint file for resume')
         subparser.add_argument('--save-config', type=str, default=None,
                             help='save model configurations')
+        subparser.add_argument('--verbose', action='store_true')
         subparser.add_argument('--disable-progress-bar', action='store_true',
                             help='disable the progress bar in training')
 
