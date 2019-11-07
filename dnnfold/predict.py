@@ -1,18 +1,19 @@
 import argparse
+import math
 import os
 import random
 import time
-import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from .dataset import FastaDataset, BPseqDataset
-from .fold.rnafold import RNAFold
-from .fold.positional import NeuralFold
+from .compbpseq import accuracy, compare_bpseq
+from .dataset import BPseqDataset, FastaDataset
 from .fold.nussinov import NussinovFold
+from .fold.positional import NeuralFold
+from .fold.rnafold import RNAFold
 
 
 class Predict:
@@ -46,36 +47,9 @@ class Predict:
                             for i in range(1, len(bp)):
                                 f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
                     if res_fn is not None and len(ref) == len(bp):
-                        x = self.compare_bpseq(ref, bp)
-                        x = [header, len(seq), elapsed_time, sc] + list(x) + list(self.accuracy(*x))
+                        x = compare_bpseq(ref, bp)
+                        x = [header, len(seq), elapsed_time, sc] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
-
-
-    def compare_bpseq(self, ref, pred):
-        assert(len(ref) == len(pred))
-        L = len(ref) - 1
-        tp = fp = fn = 0
-        for i, (j1, j2) in enumerate(zip(ref, pred)):
-            if j1 > 0 and i < j1: # pos
-                if j1 == j2:
-                    tp += 1
-                elif j2 > 0 and i < j2:
-                    fp += 1
-                    fn += 1
-                else:
-                    fn += 1
-            elif j2 > 0 and i < j2:
-                fp += 1
-        tn = L * (L - 1) // 2 - tp - fp - fn
-        return (tp, tn, fp, fn)
-
-
-    def accuracy(self, tp, tn, fp, fn):
-        sen = tp / (tp + fn) if tp+fn > 0. else 0.
-        ppv = tp / (tp + fp) if tp+fp > 0. else 0.
-        fval = 2 * sen * ppv / (sen + ppv) if sen+ppv > 0. else 0.
-        mcc = ((tp*tn)-(fp*fn)) / math.sqrt((tp+fp)*(tp+fn)*(tn+fp)*(tn+fn)) if (tp+fp)*(tp+fn)*(tn+fp)*(tn+fn) > 0. else 0.
-        return (sen, ppv, fval, mcc)
 
 
     def run(self, args):
@@ -97,12 +71,12 @@ class Predict:
             else:
                 from . import param_turner2004
                 self.model = RNAFold(param_turner2004)
-        elif args.model == 'NN':
+        elif args.model == 'NN' or args.model == 'Zuker':
             self.model = NeuralFold(args)
         elif args.model == 'Nussinov':
             self.model = NussinovFold(args)
         else:
-            raise('unreachable')
+            raise('not implemented')
 
         if args.param is not '':
             p = torch.load(args.param)
@@ -127,8 +101,8 @@ class Predict:
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
-        subparser.add_argument('--model', choices=('Turner', 'NN', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'NN', 'Nussinov')")
+        subparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--result', type=str, default=None,

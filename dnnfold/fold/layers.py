@@ -27,7 +27,7 @@ class CNNLayer(nn.Module):
 
 
 class FCPairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, join='add'):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, join='cat'):
         super(FCPairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context

@@ -21,6 +21,7 @@ def read_bpseq(file):
 
 def compare_bpseq(ref, pred):
     assert(len(ref) == len(pred))
+    L = len(ref) - 1
     tp = fp = fn = 0
     for i, (j1, j2) in enumerate(zip(ref, pred)):
         if j1 > 0 and i < j1: # pos
@@ -33,7 +34,7 @@ def compare_bpseq(ref, pred):
                 fn += 1
         elif j2 > 0 and i < j2:
             fp += 1
-    tn = len(ref) * (len(ref) - 1) // 2 - tp - fp - fn
+    tn = L * (L - 1) // 2 - tp - fp - fn
     return (tp, tn, fp, fn)
 
 def accuracy(tp, tn, fp, fn):

@@ -148,16 +148,15 @@ class Train:
 
         if args.model == 'Turner':
             self.model = RNAFold()
-        elif args.model == 'NN':
+        elif args.model == 'NN' or args.model == 'Zuker':
             self.model = NeuralFold(args)
-            if args.gpu >= 0:
-                self.model.to(torch.device("cuda", args.gpu))
         elif args.model == 'Nussinov':
             self.model = NussinovFold(args)
-            if args.gpu >= 0:
-                self.model.to(torch.device("cuda", args.gpu))
         else:
             raise('not implemented')
+
+        if args.gpu >= 0:
+            self.model.to(torch.device("cuda", args.gpu))
 
         if args.optimizer == 'Adam':
             self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr, amsgrad=True, weight_decay=args.l2_weight)
@@ -222,8 +221,8 @@ class Train:
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
-        subparser.add_argument('--model', choices=('Turner', 'NN', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'NN', 'Nussinov')")
+        subparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
         subparser.add_argument('--log-dir', type=str, default=None,
                             help='Directory for storing logs')
         subparser.add_argument('--resume', type=str, default=None,
