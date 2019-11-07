@@ -32,11 +32,15 @@ class FCPairedLayer(nn.Module):
         self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
         self.join = join
-        linears = []
+        if len(layers)>0 and layers[0]==0:
+            layers = ()
+
         if join=='cat':
             n = n_in*context*2 # concat
         else:
             n = n_in*context # add or mul
+        
+        linears = []
         for m in layers:
             linears.append(nn.Linear(n, m))
             n = m
@@ -107,6 +111,9 @@ class FCUnpairedLayer(nn.Module):
         super(FCUnpairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
+        if len(layers)>0 and layers[0]==0:
+            layers = ()
+
         n = n_in * context
         linears = []
         for m in layers:
