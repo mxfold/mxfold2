@@ -27,9 +27,9 @@ class Predict:
         with torch.no_grad():
             for headers, seqs, _, refs in self.test_loader:
                 start = time.time()
-                rets = self.model.predict(seqs)
+                scs, preds, bps = self.model(seqs, verbose=True)
                 elapsed_time = time.time() - start
-                for header, seq, ref, (sc, pred, bp) in zip(headers, seqs, refs, rets):
+                for header, seq, ref, sc, pred, bp in zip(headers, seqs, refs, scs, preds, bps):
                     if output_bpseq is None:
                         print('>'+header)
                         print(seq)

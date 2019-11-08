@@ -36,66 +36,24 @@ class PositionalFold(nn.Module):
                             reference=reference[i] if reference is not None else '', 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-            s = 0
-            for n, p in param[i].items():
-                if n.startswith("score_"):
-                    s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
-            s += v - s.item()
-            ss.append(s)
-            preds.append(pred)
-            pairs.append(pair)
+            if torch.is_grad_enabled():
+                s = 0
+                for n, p in param[i].items():
+                    if n.startswith("score_"):
+                        s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
+                s += v - s.item()
+                ss.append(s)
+            else:
+                ss.append(v)
+            if verbose:
+                preds.append(pred)
+                pairs.append(pair)
+
+        ss = torch.stack(ss) if torch.is_grad_enabled() else ss
         if verbose:
-            return torch.sum(torch.stack(ss)), preds, pairs
+            return ss, preds, pairs
         else:
-            return torch.sum(torch.stack(ss))
-
-
-    def predict(self, seq, param, max_internal_length=30, constraint=None, reference=None,
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
-        ret = []
-        for i in range(len(seq)):
-            param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
-            with torch.no_grad():
-                r = interface.predict_positional(seq[i], self.clear_count(param_on_cpu),
-                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                            constraint=constraint[i] if constraint is not None else '', 
-                            reference=reference[i] if reference is not None else '', 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                ret.append(r)
-        return ret
-
-    # def nussinov(self, seq):
-    #     seq = ' '+seq.lower()
-    #     L = len(seq)
-        
-    #     param = { 
-    #         'score_base_pair': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_helix_stacking': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_helix_closing': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_external': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_hairpin': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_internal': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_mismatch_multi': torch.zeros((L, L), dtype=torch.float32),
-    #         'score_base_hairpin': torch.zeros((L,), dtype=torch.float32),
-    #         'score_base_internal': torch.zeros((L,), dtype=torch.float32),
-    #         'score_base_multi': torch.zeros((L,), dtype=torch.float32),
-    #         'score_base_external': torch.zeros((L,), dtype=torch.float32),
-    #         'score_hairpin_length': torch.zeros((31,), dtype=torch.float32),
-    #         'score_bulge_length': torch.zeros((31,), dtype=torch.float32),
-    #         'score_internal_length': torch.zeros((31,), dtype=torch.float32),
-    #         'score_internal_explicit': torch.zeros((5, 5), dtype=torch.float32),
-    #         'score_internal_symmetry': torch.zeros((16,), dtype=torch.float32),
-    #         'score_internal_asymmetry': torch.zeros((29,), dtype=torch.float32) }
-
-    #     complement_pairs = {
-    #         ('a', 'u'), ('a', 't'), ('c', 'g'), ('g', 'u'), ('g', 't'),
-    #         ('u', 'a'), ('t', 'a'), ('g', 'c'), ('u', 'g'), ('t', 'g') }
-    #     for i in range(1, L):
-    #         for j in range(i, L):
-    #             if (seq[i], seq[j]) in complement_pairs:
-    #                 param['score_base_pair'][i, j] = 1
-    #     return param
+            return ss
 
 
 class NeuralFold(nn.Module):
@@ -255,16 +213,6 @@ class NeuralFold(nn.Module):
     def forward(self, seq, max_internal_length=30, constraint=None, reference=None, 
             loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
         return self.fold(seq, self.make_param(seq), 
-                    max_internal_length=max_internal_length, constraint=constraint, reference=reference, 
-                    loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                    loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired,
-                    verbose=verbose)
-
-
-    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, 
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
-        with torch.no_grad():
-            return self.fold.predict(seq, self.make_param(seq), 
                     max_internal_length=max_internal_length, constraint=constraint, reference=reference, 
                     loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                     loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired,

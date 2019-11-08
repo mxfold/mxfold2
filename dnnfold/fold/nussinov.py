@@ -35,33 +35,24 @@ class NussinovLayer(nn.Module):
                             reference=reference[i] if reference is not None else '', 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-            s = 0
-            for n, p in param[i].items():
-                if n.startswith("score_"):
-                    s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
-            s += v - s.item()
-            ss.append(s)
-            preds.append(pred)
-            pairs.append(pair)
+            if torch.is_grad_enabled():
+                s = 0
+                for n, p in param[i].items():
+                    if n.startswith("score_"):
+                        s += torch.sum(p * param_on_cpu["count_"+n[6:]].to(p.device))
+                s += v - s.item()
+                ss.append(s)
+            else:
+                ss.append(v)
+            if verbose:
+                preds.append(pred)
+                pairs.append(pair)
+
+        ss = torch.stack(ss) if torch.is_grad_enabled() else ss
         if verbose:
-            return torch.sum(torch.stack(ss)), preds, pairs
+            return ss, preds, pairs
         else:
-            return torch.sum(torch.stack(ss))
-
-
-    def predict(self, seq, param, constraint=None, reference=None,
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
-        ret = []
-        for i in range(len(seq)):
-            param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
-            with torch.no_grad():
-                r = interface.predict_nussinov(seq[i], self.clear_count(param_on_cpu),
-                            constraint=constraint[i] if constraint is not None else '', 
-                            reference=reference[i] if reference is not None else '', 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                ret.append(r)
-        return ret
+            return ss
 
 
 class NussinovFold(nn.Module):
@@ -191,16 +182,6 @@ class NussinovFold(nn.Module):
     def forward(self, seq, constraint=None, reference=None, 
             loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False, **kwargs):
         return self.fold(seq, self.make_param(seq), 
-                    constraint=constraint, reference=reference, 
-                    loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                    loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired,
-                    verbose=verbose)
-
-
-    def predict(self, seq, constraint=None, reference=None, 
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False, **kwargs):
-        with torch.no_grad():
-            return self.fold.predict(seq, self.make_param(seq), 
                     constraint=constraint, reference=reference, 
                     loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                     loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired,

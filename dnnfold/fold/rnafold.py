@@ -62,32 +62,21 @@ class RNAFold(nn.Module):
                             reference=reference[i] if reference is not None else '', 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-            s = 0
-            for name, param in self.named_parameters():
-                if name.startswith("score_"):
-                    s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
-            s += v - s.item()
-            ss.append(s)
+            if torch.is_grad_enabled():
+                s = 0
+                for name, param in self.named_parameters():
+                    if name.startswith("score_"):
+                        s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
+                s += v - s.item()
+                ss.append(s)
+            else:
+                ss.append(v)
             if verbose:
                 preds.append(pred)
                 pairs.append(pair)
+
+        ss = torch.stack(ss) if torch.is_grad_enabled() else ss
         if verbose:
-            return torch.sum(torch.stack(ss)), preds, pairs
+            return ss, preds, pairs
         else:
-            return torch.sum(torch.stack(ss))
-
-
-    def predict(self, seq, max_internal_length=30, constraint=None, reference=None, 
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
-        ret = []
-        for i in range(len(seq)):
-            self.clear_count()
-            with torch.no_grad():
-                r = interface.predict_zuker(seq[i], self, 
-                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                            constraint=constraint[i] if constraint is not None else '', 
-                            reference=reference[i] if reference is not None else '', 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                ret.append(r)
-        return ret
+            return ss

@@ -83,7 +83,7 @@ class Train:
                     self.step += 1
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
-                loss = self.loss_fn(seqs, pairs, fname=fnames)
+                loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
                 loss_total += loss.item()
                 num += n_batch
                 loss.backward()
