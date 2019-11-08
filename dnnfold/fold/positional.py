@@ -1,11 +1,12 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 from .. import interface
-from .encode import SeqEncoder
-from .layers import CNNLayer, FCPairedLayer, FCUnpairedLayer, FCLengthLayer, BilinearPairedLayer
+from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
+                     FCLengthLayer, FCPairedLayer, FCUnpairedLayer)
+from .onehot import OneHotEmbedding
 
 
 class PositionalFold(nn.Module):
@@ -57,56 +58,26 @@ class PositionalFold(nn.Module):
 
 
 class NeuralFold(nn.Module):
-    def __init__(self, args=None, 
+    def __init__(self,  
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
-            use_bilinear=False, lstm_cnn=False, context=1):
+            use_bilinear=False, lstm_cnn=False, context_length=1):
         super(NeuralFold, self).__init__()
-        if args is not None:
-            num_filters = args.num_filters if args.num_filters is not None else num_filters
-            motif_len = args.motif_len if args.motif_len is not None else motif_len
-            dilation = args.dilation #if args.dilation is not None else dilation
-            pool_size = args.pool_size if args.pool_size is not None else pool_size
-            num_lstm_units = args.num_lstm_units #if args.num_lstm_units is not None else num_lstm_units
-            num_lstm_layers = args.num_lstm_layers #if args.num_lstm_layers is not None else num_lstm_layers
-            num_hidden_units = args.num_hidden_units if args.num_hidden_units is not None else num_hidden_units
-            dropout_rate = args.dropout_rate if args.dropout_rate is not None else dropout_rate
-            use_bilinear = args.bilinear
-            context = args.context_length
-            lstm_cnn = args.lstm_cnn
-            # for a in ["num_filters", "motif_len", "pool_size", "num_hidden_units", "dropout_rate"]:
-            #     if getattr(args, a) is not None:
-            #         setattr(self, a, getattr(args, a))
-        if num_lstm_layers == 0 and num_lstm_units > 0:
-            num_lstm_layers = 1
         self.use_bilinear = use_bilinear
-        self.lstm_cnn = lstm_cnn
-
-        self.dropout = nn.Dropout(p=dropout_rate)
-        self.conv = self.lstm = None
-        self.encode = SeqEncoder()
+        self.embedding = OneHotEmbedding()
         n_in = 4
-
-        if not lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
-            n_in = num_filters[-1]
-
-        if num_lstm_layers > 0:
-            self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
-                            dropout=dropout_rate if num_lstm_layers>1 else 0)
-            n_in = num_lstm_units*2
-
-        if lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
-            n_in = num_filters[-1]
+        self.encoder = CNNLSTMEncoder(n_in, lstm_cnn=lstm_cnn, 
+            num_filters=num_filters, motif_len=motif_len, pool_size=pool_size, dilation=dilation, 
+            num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
+        n_in = self.encoder.n_out
 
         if self.use_bilinear:
-            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 2, dropout_rate=dropout_rate, context=context)
+            self.fc_paired = BilinearPairedLayer(n_in, num_hidden_units[0], 2, dropout_rate=dropout_rate, context=context_length)
         else:
-            #self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
-            #self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
-            self.fc_paired = FCPairedLayer(n_in, 2, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
-        self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context)
+            #self.fc_helix_stacking = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
+            #self.fc_mismatch = FCPairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
+            self.fc_paired = FCPairedLayer(n_in, 2, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
+        self.fc_unpair = FCUnpairedLayer(n_in, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
             'score_bulge_length': FCLengthLayer(31),
@@ -118,62 +89,12 @@ class NeuralFold(nn.Module):
 
         self.fold = PositionalFold()
 
-        self.config = {
-            '--num-filters': num_filters,
-            '--motif-len': motif_len,
-            '--pool-size': pool_size,
-            '--dilation': dilation,
-            '--num-lstm-layers': num_lstm_layers,
-            '--num-lstm-units': num_lstm_units,
-            '--dropout-rate': dropout_rate,
-            '--num-hidden-units': num_hidden_units,
-            '--bilinear': use_bilinear,
-            '--lstm-cnn': lstm_cnn,
-            '--context-length': context
-        }
-
-
-    @classmethod
-    def add_args(cls, parser):
-        parser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters')
-        parser.add_argument('--motif-len', type=int, action='append',
-                        help='the length of each filter of CNN')
-        parser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN')
-        parser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution')
-        parser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers')
-        parser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units')
-        parser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers')
-        parser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units')
-        parser.add_argument('--bilinear', default=False, action='store_true')
-        parser.add_argument('--lstm-cnn', default=False, action='store_true')        
-        parser.add_argument('--context-length', type=int, default=1,
-                        help='the length of context for FC layers')
-
 
     def make_param(self, seq):
         device = next(self.parameters()).device
-        x = self.encode(['0' + s for s in seq]).to(device) # (B, 4, N)
-
-        if self.conv is not None and not self.lstm_cnn:
-            x = self.dropout(F.relu(self.conv(x))) # (B, C, N)
-        B, C, N = x.shape
-        x = torch.transpose(x, 1, 2) # (B, N, C)
-
-        if self.lstm is not None:
-            x, _ = self.lstm(x)
-            x = self.dropout(F.relu(x)) # (B, N, H*2)
-
-        if self.conv is not None and self.lstm_cnn:
-            x = torch.transpose(x, 1, 2) # (B, H*2, N)
-            x = self.dropout(F.relu(self.conv(x))) # (B, C, N)
-            x = torch.transpose(x, 1, 2) # (B, N, C)
+        x = self.embedding(['0' + s for s in seq]).to(device) # (B, 4, N)
+        x = self.encoder(x) # (B, N, C)
+        B, N, C = x.shape
 
         # if self.use_bilinear:
         #     score_paired = self.fc_paired(x) # (B, N, N, 2)

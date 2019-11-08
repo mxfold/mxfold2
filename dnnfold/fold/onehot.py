@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 
-class SeqEncoder:
+class OneHotEmbedding:
     def __init__(self, ksize=0):
         self.ksize = ksize
         eye = np.identity(4, dtype=np.float32)

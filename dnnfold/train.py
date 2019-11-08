@@ -12,9 +12,9 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
-from .fold.rnafold import RNAFold
-from .fold.positional import NeuralFold
 from .fold.nussinov import NussinovFold
+from .fold.positional import NeuralFold
+from .fold.rnafold import RNAFold
 
 
 class StructuredLoss(nn.Module):
@@ -142,6 +142,65 @@ class Train:
         return epoch
 
 
+    def build_model(self, args):
+        if args.model == 'Turner':
+            return RNAFold(), {}
+
+        config = {
+            'num_filters': args.num_filters if args.num_filters is not None else (256,),
+            'motif_len': args.motif_len if args.motif_len is not None else (7,),
+            'pool_size': args.pool_size if args.pool_size is not None else (1,),
+            'dilation': args.dilation, 
+            'num_lstm_layers': args.num_lstm_layers, 
+            'num_lstm_units': args.num_lstm_units,
+            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (128,),
+            'dropout_rate': args.dropout_rate,
+            'use_bilinear': args.use_bilinear,
+            'lstm_cnn': args.lstm_cnn,
+            'context_length': args.context_length                
+        }
+
+        if args.model == 'Zuker' or args.model == 'NN': # backward compatibility
+            model = NeuralFold(**config)
+
+        elif args.model == 'Nussinov':
+            model = NussinovFold(**config)
+
+        else:
+            raise('not implemented')
+
+        return model, config
+
+
+    def build_optimizer(self, optimizer, model, lr, l2_weight):
+        if optimizer == 'Adam':
+            return optim.Adam(model.parameters(), lr=lr, amsgrad=True, weight_decay=l2_weight)
+        elif optimizer =='AdamW':
+            return optim.AdamW(model.parameters(), lr=lr, amsgrad=True, weight_decay=l2_weight)
+        elif optimizer == 'RMSprop':
+            return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
+        elif optimizer == 'SGD':
+            return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
+        elif optimizer == 'ASGD':
+            return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+        else:
+            raise('not implemented')
+
+    
+    def save_config(self, file, config):
+        with open(file, 'w') as f:
+            for k, v in config.items():
+                k = '--' + k.replace('_', '-')
+                if type(v) is bool: # pylint: disable=unidiomatic-typecheck
+                    if v:
+                        f.write('{}\n'.format(k))
+                elif isinstance(v, list) or isinstance(v, tuple):
+                    for vv in v:
+                        f.write('{}\n{}\n'.format(k, vv))
+                else:
+                    f.write('{}\n{}\n'.format(k, v))
+
+
     def run(self, args):
         self.disable_progress_bar = args.disable_progress_bar
         self.verbose = args.verbose
@@ -159,31 +218,12 @@ class Train:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
 
-        if args.model == 'Turner':
-            self.model = RNAFold()
-        elif args.model == 'NN' or args.model == 'Zuker':
-            self.model = NeuralFold(args)
-        elif args.model == 'Nussinov':
-            self.model = NussinovFold(args)
-        else:
-            raise('not implemented')
-
+        self.model, config = self.build_model(args)
+        config.update({ 'model': args.model, 'param': args.param })
+        
         if args.gpu >= 0:
             self.model.to(torch.device("cuda", args.gpu))
-
-        if args.optimizer == 'Adam':
-            self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr, amsgrad=True, weight_decay=args.l2_weight)
-        elif args.optimizer =='AdamW':
-            self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr, amsgrad=True, weight_decay=args.l2_weight)
-        elif args.optimizer == 'RMSprop':
-            self.optimizer = optim.RMSprop(self.model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
-        elif args.optimizer == 'SGD':
-            self.optimizer = optim.SGD(self.model.parameters(), nesterov=True, lr=args.lr, momentum=0.9, weight_decay=args.l2_weight)
-        elif args.optimizer == 'ASGD':
-            self.optimizer = optim.ASGD(self.model.parameters(), lr=args.lr, weight_decay=args.l2_weight)
-        else:
-            raise('not implemented')
-
+        self.optimizer = self.build_optimizer(args.optimizer, self.model, args.lr, args.l2_weight)
         self.loss_fn = StructuredLoss(self.model, verbose=self.verbose,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
@@ -203,19 +243,7 @@ class Train:
         if args.param is not None:
             torch.save(self.model.state_dict(), args.param)
         if args.save_config is not None:
-            config = { '--model': args.model, '--param': args.param }
-            if hasattr(self.model, "config"):
-                config.update(self.model.config)
-            with open(args.save_config, 'w') as f:
-                for k, v in config.items():
-                    if type(v) is bool: # pylint: disable=unidiomatic-typecheck
-                        if v:
-                            f.write('{}\n'.format(k))
-                    elif isinstance(v, list) or isinstance(v, tuple):
-                        for vv in v:
-                            f.write('{}\n{}\n'.format(k, vv))
-                    else:
-                        f.write('{}\n{}\n'.format(k, v))
+            self.save_config(args.save_config, config)
 
 
     @classmethod
@@ -226,42 +254,67 @@ class Train:
                             help='Training data of BPSEQ-formatted file')
         subparser.add_argument('--test-input', type=str,
                             help='Test data of BPSEQ-formatted file')
-        subparser.add_argument('--epochs', type=int, default=10, metavar='N',
-                            help='number of epochs to train (default: 10)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
-        subparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
+
+        gparser = subparser.add_argument_group("Training environment")
+        subparser.add_argument('--epochs', type=int, default=10, metavar='N',
+                            help='number of epochs to train (default: 10)')
         subparser.add_argument('--log-dir', type=str, default=None,
                             help='Directory for storing logs')
         subparser.add_argument('--resume', type=str, default=None,
                             help='Checkpoint file for resume')
         subparser.add_argument('--save-config', type=str, default=None,
                             help='save model configurations')
-        subparser.add_argument('--verbose', action='store_true')
         subparser.add_argument('--disable-progress-bar', action='store_true',
                             help='disable the progress bar in training')
+        subparser.add_argument('--verbose', action='store_true',
+                            help='enable verbose outputs for debugging')
 
-        subparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD'), default='AdamW')
-        subparser.add_argument('--l1-weight', type=float, default=0.,
+        gparser = subparser.add_argument_group("Optimizer setting")
+        gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD'), default='AdamW')
+        gparser.add_argument('--l1-weight', type=float, default=0.,
                             help='the weight for L1 regularization (default: 0)')
-        subparser.add_argument('--l2-weight', type=float, default=0.,
+        gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        subparser.add_argument('--lr', type=float, default=0.01,
+        gparser.add_argument('--lr', type=float, default=0.01,
                             help='the learning rate for optimizer (default: 0.01)')
-        subparser.add_argument('--loss-pos-paired', type=float, default=1,
+        gparser.add_argument('--loss-pos-paired', type=float, default=1,
                             help='the penalty for positive base-pairs for loss augmentation (default: 1)')
-        subparser.add_argument('--loss-neg-paired', type=float, default=1,
+        gparser.add_argument('--loss-neg-paired', type=float, default=1,
                             help='the penalty for negative base-pairs for loss augmentation (default: 1)')
-        subparser.add_argument('--loss-pos-unpaired', type=float, default=1,
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=1,
                             help='the penalty for positive unpaired bases for loss augmentation (default: 1)')
-        subparser.add_argument('--loss-neg-unpaired', type=float, default=1,
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=1,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 1)')
 
-        NeuralFold.add_args(subparser)
+        gparser = subparser.add_argument_group("Network setting")
+        gparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
+        gparser.add_argument('--num-filters', type=int, action='append',
+                        help='the number of CNN filters')
+        gparser.add_argument('--motif-len', type=int, action='append',
+                        help='the length of each filter of CNN')
+        gparser.add_argument('--pool-size', type=int, action='append',
+                        help='the width of the max-pooling layer of CNN')
+        gparser.add_argument('--dilation', type=int, default=0, 
+                        help='Use the dilated convolution')
+        gparser.add_argument('--num-lstm-layers', type=int, default=0,
+                        help='the number of the LSTM hidden layers')
+        gparser.add_argument('--num-lstm-units', type=int, default=0,
+                        help='the number of the LSTM hidden units')
+        gparser.add_argument('--num-hidden-units', type=int, action='append',
+                        help='the number of the hidden units of full connected layers')
+        gparser.add_argument('--dropout-rate', type=float, default=0.0,
+                        help='dropout rate of the hidden units')
+        gparser.add_argument('--use-bilinear', default=False, action='store_true')
+        gparser.add_argument('--lstm-cnn', default=False, action='store_true',
+                        help='use LSTM layer before CNN')
+        gparser.add_argument('--context-length', type=int, default=1,
+                        help='the length of context for FC layers')
 
         subparser.set_defaults(func = lambda args: Train().run(args))
