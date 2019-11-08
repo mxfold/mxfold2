@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,9 +8,9 @@ from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
 from .onehot import OneHotEmbedding
 
 
-class PositionalFold(nn.Module):
+class ZukerLayer(nn.Module):
     def __init__(self):
-        super(PositionalFold, self).__init__()
+        super(ZukerLayer, self).__init__()
 
 
     def clear_count(self, param):
@@ -31,7 +30,7 @@ class PositionalFold(nn.Module):
         for i in range(len(seq)):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
             with torch.no_grad():
-                v, pred, pair = interface.predict_positional(seq[i], self.clear_count(param_on_cpu),
+                v, pred, pair = interface.predict_zuker(seq[i], self.clear_count(param_on_cpu),
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
@@ -57,12 +56,12 @@ class PositionalFold(nn.Module):
             return ss
 
 
-class NeuralFold(nn.Module):
+class ZukerFold(nn.Module):
     def __init__(self,  
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
             use_bilinear=False, lstm_cnn=False, context_length=1):
-        super(NeuralFold, self).__init__()
+        super(ZukerFold, self).__init__()
         self.use_bilinear = use_bilinear
         self.embedding = OneHotEmbedding()
         n_in = 4
@@ -87,7 +86,7 @@ class NeuralFold(nn.Module):
             'score_internal_asymmetry': FCLengthLayer(29)
         })
 
-        self.fold = PositionalFold()
+        self.fold = ZukerLayer()
 
 
     def make_param(self, seq):

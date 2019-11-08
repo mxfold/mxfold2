@@ -13,8 +13,8 @@ from tqdm import tqdm
 
 from .dataset import BPseqDataset
 from .fold.nussinov import NussinovFold
-from .fold.positional import NeuralFold
 from .fold.rnafold import RNAFold
+from .fold.zuker import ZukerFold
 
 
 class StructuredLoss(nn.Module):
@@ -161,7 +161,7 @@ class Train:
         }
 
         if args.model == 'Zuker' or args.model == 'NN': # backward compatibility
-            model = NeuralFold(**config)
+            model = ZukerFold(**config)
 
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)

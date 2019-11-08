@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 from .. import interface
 
@@ -56,7 +55,7 @@ class RNAFold(nn.Module):
         for i in range(len(seq)):
             self.clear_count()
             with torch.no_grad():
-                v, pred, pair = interface.predict_zuker(seq[i], self, 
+                v, pred, pair = interface.predict_turner(seq[i], self, 
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 

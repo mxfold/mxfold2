@@ -12,8 +12,8 @@ from torch.utils.data import DataLoader
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.nussinov import NussinovFold
-from .fold.positional import NeuralFold
 from .fold.rnafold import RNAFold
+from .fold.zuker import ZukerFold
 
 
 class Predict:
@@ -75,7 +75,7 @@ class Predict:
         }
 
         if args.model == 'NN' or args.model == 'Zuker':
-            model = NeuralFold(**config)
+            model = ZukerFold(**config)
 
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)
