@@ -52,6 +52,40 @@ class Predict:
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
 
 
+    def build_model(self, args):
+        if args.model == 'Turner':
+            if args.param is not '':
+                return RNAFold(), {}
+            else:
+                from . import param_turner2004
+                return RNAFold(param_turner2004), {}
+
+        config = {
+            'num_filters': args.num_filters if args.num_filters is not None else (256,),
+            'motif_len': args.motif_len if args.motif_len is not None else (7,),
+            'pool_size': args.pool_size if args.pool_size is not None else (1,),
+            'dilation': args.dilation, 
+            'num_lstm_layers': args.num_lstm_layers, 
+            'num_lstm_units': args.num_lstm_units,
+            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (128,),
+            'dropout_rate': args.dropout_rate,
+            'use_bilinear': args.use_bilinear,
+            'lstm_cnn': args.lstm_cnn,
+            'context_length': args.context_length                
+        }
+
+        if args.model == 'NN' or args.model == 'Zuker':
+            model = NeuralFold(**config)
+
+        elif args.model == 'Nussinov':
+            model = NussinovFold(**config)
+
+        else:
+            raise('not implemented')
+
+        return model, config
+
+
     def run(self, args):
         try:
             test_dataset = FastaDataset(args.input)
@@ -65,19 +99,7 @@ class Predict:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
 
-        if args.model == 'Turner':
-            if args.param is not '':
-                self.model = RNAFold()
-            else:
-                from . import param_turner2004
-                self.model = RNAFold(param_turner2004)
-        elif args.model == 'NN' or args.model == 'Zuker':
-            self.model = NeuralFold(args)
-        elif args.model == 'Nussinov':
-            self.model = NussinovFold(args)
-        else:
-            raise('not implemented')
-
+        self.model, _ = self.build_model(args)
         if args.param is not '':
             p = torch.load(args.param)
             if isinstance(p, dict) and 'model_state_dict' in p:
@@ -95,14 +117,12 @@ class Predict:
         subparser = parser.add_parser('predict', help='predict')
         # input
         subparser.add_argument('input', type=str,
-                            help='FASTA-formatted file')
+                            help='FASTA-formatted file or list of BPseq files')
 
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
-        subparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--result', type=str, default=None,
@@ -110,6 +130,29 @@ class Predict:
         subparser.add_argument('--bpseq', type=str, default=None,
                             help='output the prediction with BPSEQ format to the specified directory')
 
-        NeuralFold.add_args(subparser)
+        gparser = subparser.add_argument_group("Network setting")
+        gparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
+        gparser.add_argument('--num-filters', type=int, action='append',
+                        help='the number of CNN filters')
+        gparser.add_argument('--motif-len', type=int, action='append',
+                        help='the length of each filter of CNN')
+        gparser.add_argument('--pool-size', type=int, action='append',
+                        help='the width of the max-pooling layer of CNN')
+        gparser.add_argument('--dilation', type=int, default=0, 
+                        help='Use the dilated convolution')
+        gparser.add_argument('--num-lstm-layers', type=int, default=0,
+                        help='the number of the LSTM hidden layers')
+        gparser.add_argument('--num-lstm-units', type=int, default=0,
+                        help='the number of the LSTM hidden units')
+        gparser.add_argument('--num-hidden-units', type=int, action='append',
+                        help='the number of the hidden units of full connected layers')
+        gparser.add_argument('--dropout-rate', type=float, default=0.0,
+                        help='dropout rate of the hidden units')
+        gparser.add_argument('--use-bilinear', default=False, action='store_true')
+        gparser.add_argument('--lstm-cnn', default=False, action='store_true',
+                        help='use LSTM layer before CNN')
+        gparser.add_argument('--context-length', type=int, default=1,
+                        help='the length of context for FC layers')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

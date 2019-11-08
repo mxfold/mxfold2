@@ -25,6 +25,51 @@ class CNNLayer(nn.Module):
         return x
 
 
+class CNNLSTMEncoder(nn.Module):
+    def __init__(self, n_in, lstm_cnn=False,
+            num_filters=(256,), motif_len=(7,), pool_size=(1,), dilation=0,
+            num_lstm_layers=0, num_lstm_units=0, dropout_rate=0.0):
+        super(CNNLSTMEncoder, self).__init__()
+        self.n_in = self.n_out = n_in
+        self.lstm_cnn = lstm_cnn
+        if num_lstm_layers == 0 and num_lstm_units > 0:
+            num_lstm_layers = 1
+
+        self.dropout = nn.Dropout(p=dropout_rate)
+        self.conv = self.lstm = None
+
+        if not lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
+            self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
+            self.n_out = n_in = num_filters[-1]
+
+        if num_lstm_layers > 0:
+            self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
+                            dropout=dropout_rate if num_lstm_layers>1 else 0)
+            self.n_out = n_in = num_lstm_units*2
+
+        if lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
+            self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
+            self.n_out = n_in = num_filters[-1]
+
+
+    def forward(self, x): # (B, n_in, N)
+        if self.conv is not None and not self.lstm_cnn:
+            x = self.conv(x) # (B, C, N)
+        B, C, N = x.shape
+        x = torch.transpose(x, 1, 2) # (B, N, C)
+
+        if self.lstm is not None:
+            x, _ = self.lstm(x)
+            x = self.dropout(F.relu(x)) # (B, N, H*2)
+
+        if self.conv is not None and self.lstm_cnn:
+            x = torch.transpose(x, 1, 2) # (B, H*2, N)
+            x = self.conv(x) # (B, C, N)
+            x = torch.transpose(x, 1, 2) # (B, N, C)
+
+        return x # (B, N, n_out)
+
+
 class FCPairedLayer(nn.Module):
     def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, join='cat'):
         super(FCPairedLayer, self).__init__()
