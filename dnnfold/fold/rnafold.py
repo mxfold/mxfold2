@@ -3,10 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .. import interface
+from .fold import AbstractFold
 
-class RNAFold(nn.Module):
+
+class RNAFold(AbstractFold):
     def __init__(self, init_param=None):
-        super(RNAFold, self).__init__()
+        super(RNAFold, self).__init__(interface.predict_turner)
         if init_param is None:
             self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
@@ -40,42 +42,6 @@ class RNAFold(nn.Module):
                     setattr(self, n, nn.Parameter(torch.tensor(getattr(init_param, n))))
 
 
-    def clear_count(self):
-        for name, param in self.named_parameters():
-            if name.startswith("score_"):
-                name = "count_" + name[6:]
-                setattr(self, name, torch.zeros_like(param))
-
-
-    def forward(self, seq, max_internal_length=30, constraint=None, reference=None, 
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0, verbose=False):
-        ss = []
-        preds = []
-        pairs = []
-        for i in range(len(seq)):
-            self.clear_count()
-            with torch.no_grad():
-                v, pred, pair = interface.predict_turner(seq[i], self, 
-                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                            constraint=constraint[i] if constraint is not None else '', 
-                            reference=reference[i] if reference is not None else '', 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-            if torch.is_grad_enabled():
-                s = 0
-                for name, param in self.named_parameters():
-                    if name.startswith("score_"):
-                        s += torch.sum(getattr(self, name) * getattr(self, "count_" + name[6:]))
-                s += v - s.item()
-                ss.append(s)
-            else:
-                ss.append(v)
-            if verbose:
-                preds.append(pred)
-                pairs.append(pair)
-
-        ss = torch.stack(ss) if torch.is_grad_enabled() else ss
-        if verbose:
-            return ss, preds, pairs
-        else:
-            return ss
+    def make_param(self, seq):
+        param = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
+        return [ param for s in seq ]

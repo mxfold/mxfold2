@@ -31,7 +31,7 @@ auto predict_zuker(const std::string& seq, py::object pa,
 
 template < class ParamClass >
 auto predict_nussinov(const std::string& seq, py::object pa, 
-            int min_hairpin, std::string constraint, std::string reference, 
+            int min_hairpin, int max_internal, std::string constraint, std::string reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
     typename Nussinov<ParamClass>::Options options;
@@ -84,6 +84,7 @@ PYBIND11_MODULE(interface, m)
         "predict RNA secondary structure with positional nussinov model", 
         "seq"_a, "param"_a, 
         "min_hairpin_length"_a=3, 
+        "max_internal_length"_a=30, 
         "constraint"_a=""s, 
         "reference"_a=""s, 
         "loss_pos_paired"_a=0.0, 

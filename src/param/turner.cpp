@@ -47,9 +47,15 @@ complement_pair[5][5] = {
 TurnerNearestNeighbor::
 TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
     seq2_(convert_sequence(seq)),
+#if 0    
     use_score_hairpin_at_least_(py::hasattr(obj, "score_hairpin_at_least")),
     use_score_bulge_at_least_(py::hasattr(obj, "score_bulge_at_least")),
     use_score_internal_at_least_(py::hasattr(obj, "score_internal_at_least")),
+#else
+    use_score_hairpin_at_least_(obj.contains("score_hairpin_at_least")),
+    use_score_bulge_at_least_(obj.contains("score_bulge_at_least")),
+    use_score_internal_at_least_(obj.contains("score_internal_at_least")),
+#endif    
     score_stack_(::get_unchecked<2>(obj, "score_stack")),
     score_hairpin_(::get_unchecked<1>(obj, use_score_hairpin_at_least_ ? "score_hairpin_at_least" : "score_hairpin")),
     score_bulge_(::get_unchecked<1>(obj, use_score_bulge_at_least_ ? "score_bulge_at_least" : "score_bulge")),
@@ -73,9 +79,15 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
     score_duplex_init_(::get_unchecked<1>(obj, "score_duplex_init")),
     score_terminalAU_(::get_unchecked<1>(obj, "score_terminalAU")),
     score_lxc_(::get_unchecked<1>(obj, "score_lxc")),
+#if 0
     use_count_hairpin_at_least_(py::hasattr(obj, "count_hairpin_at_least")),
     use_count_bulge_at_least_(py::hasattr(obj, "count_bulge_at_least")),
     use_count_internal_at_least_(py::hasattr(obj, "count_internal_at_least")),
+#else
+    use_count_hairpin_at_least_(obj.contains("count_hairpin_at_least")),
+    use_count_bulge_at_least_(obj.contains("count_bulge_at_least")),
+    use_count_internal_at_least_(obj.contains("count_internal_at_least")),
+#endif
     count_stack_(::get_mutable_unchecked<2>(obj, "count_stack")),
     count_hairpin_(::get_mutable_unchecked<1>(obj, use_count_hairpin_at_least_ ? "count_hairpin_at_least" : "count_hairpin")),
     count_bulge_(::get_mutable_unchecked<1>(obj, use_count_bulge_at_least_ ? "count_bulge_at_least" : "count_bulge")),

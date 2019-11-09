@@ -32,10 +32,10 @@ class StructuredLoss(nn.Module):
 
 
     def forward(self, seq, pair, fname=None):
-        pred, pred_s, _ = self.model(seq, reference=pair, verbose=True,
+        pred, pred_s, _ = self.model(seq, reference=pair,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
-        ref, ref_s, _ = self.model(seq, constraint=pair, max_internal_length=None, verbose=True)
+        ref, ref_s, _ = self.model(seq, constraint=pair, max_internal_length=None)
         loss = pred - ref
         if self.verbose:
             print("Loss = {} = ({} - {})".format(loss.item(), pred.item(), ref.item()))
