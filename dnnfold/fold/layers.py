@@ -51,6 +51,9 @@ class CNNLSTMEncoder(nn.Module):
             self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
             self.n_out = n_in = num_filters[-1]
 
+        if self.conv is None and self.lstm is None:
+            self.n_out *= 3
+
 
     def forward(self, x): # (B, n_in, N)
         if self.conv is None and self.lstm is None:
