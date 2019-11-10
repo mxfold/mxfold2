@@ -53,9 +53,13 @@ class CNNLSTMEncoder(nn.Module):
 
 
     def forward(self, x): # (B, n_in, N)
+        if self.conv is None and self.lstm is None:
+            x = torch.transpose(x, 1, 2) # (B, N, C)
+            return x, x, x
+
         if self.conv is not None and not self.lstm_cnn:
             x = self.conv(x) # (B, C, N)
-        B, C, N = x.shape
+        # B, C, N = x.shape
         x = torch.transpose(x, 1, 2) # (B, N, C)
 
         if self.lstm is not None:
@@ -67,7 +71,12 @@ class CNNLSTMEncoder(nn.Module):
             x = self.conv(x) # (B, C, N)
             x = torch.transpose(x, 1, 2) # (B, N, C)
 
-        return x # (B, N, n_out)
+        assert(x.shape[-1] % 3 == 0)
+        x_l = x[:, :, 0::3]
+        x_r = x[:, :, 1::3]
+        x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)] # reverse the last axis
+        x_u = x[:, :, 2::3]
+        return x_l, x_r, x_u # (B, N, n_out//3) * 3
 
 
 class FCPairedLayer(nn.Module):
@@ -91,11 +100,13 @@ class FCPairedLayer(nn.Module):
         linears.append(nn.Linear(n, n_out))
         self.fc = nn.ModuleList(linears)
 
-    def forward(self, x):
-        B, N, C = x.shape
+    def forward(self, x_l, x_r=None):
+        x_r = x_l if x_r is None else x_r
+        assert(x_l.shape == x_r.shape)
+        B, N, C = x_l.shape
 
-        x_l = x.view(B, N, 1, C).expand(B, N, N, C)
-        x_r = x.view(B, 1, N, C).expand(B, N, N, C)
+        x_l = x_l.view(B, N, 1, C).expand(B, N, N, C)
+        x_r = x_r.view(B, 1, N, C).expand(B, N, N, C)
         if self.join=='cat':
             v = torch.cat((x_l, x_r), dim=3) # (B, N, N, C*2)
         elif self.join=='add':

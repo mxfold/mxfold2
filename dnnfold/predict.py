@@ -27,7 +27,7 @@ class Predict:
         with torch.no_grad():
             for headers, seqs, _, refs in self.test_loader:
                 start = time.time()
-                scs, preds, bps = self.model(seqs, verbose=True)
+                scs, preds, bps = self.model(seqs)
                 elapsed_time = time.time() - start
                 for header, seq, ref, sc, pred, bp in zip(headers, seqs, refs, scs, preds, bps):
                     if output_bpseq is None:
@@ -61,17 +61,19 @@ class Predict:
                 return RNAFold(param_turner2004), {}
 
         config = {
-            'num_filters': args.num_filters if args.num_filters is not None else (256,),
-            'motif_len': args.motif_len if args.motif_len is not None else (7,),
+            'num_filters': args.num_filters if args.num_filters is not None else (96,),
+            'motif_len': args.motif_len if args.motif_len is not None else (5,),
             'pool_size': args.pool_size if args.pool_size is not None else (1,),
             'dilation': args.dilation, 
             'num_lstm_layers': args.num_lstm_layers, 
             'num_lstm_units': args.num_lstm_units,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (128,),
+            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
             'dropout_rate': args.dropout_rate,
             'use_bilinear': args.use_bilinear,
             'lstm_cnn': args.lstm_cnn,
-            'context_length': args.context_length                
+            'context_length': args.context_length,
+            'mix_base': args.mix_base,
+            'pair_join': args.pair_join
         }
 
         if args.model == 'NN' or args.model == 'Zuker':
@@ -134,25 +136,29 @@ class Predict:
         gparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
                             help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
         gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters')
+                        help='the number of CNN filters (default: 96)')
         gparser.add_argument('--motif-len', type=int, action='append',
-                        help='the length of each filter of CNN')
+                        help='the length of each filter of CNN (default: 5)')
         gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN')
+                        help='the width of the max-pooling layer of CNN (default: 1)')
         gparser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution')
+                        help='Use the dilated convolution (default: 0)')
         gparser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers')
+                        help='the number of the LSTM hidden layers (default: 0)')
         gparser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units')
+                        help='the number of the LSTM hidden units (default: 0)')
         gparser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers')
+                        help='the number of the hidden units of full connected layers (default: 32)')
         gparser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units')
+                        help='dropout rate of the hidden units (default: 0.0)')
         gparser.add_argument('--use-bilinear', default=False, action='store_true')
         gparser.add_argument('--lstm-cnn', default=False, action='store_true',
-                        help='use LSTM layer before CNN')
+                        help='use LSTM layer before CNN (default: False)')
         gparser.add_argument('--context-length', type=int, default=1,
-                        help='the length of context for FC layers')
+                        help='the length of context for FC layers (default: 1)')
+        gparser.add_argument('--mix-base', default=False, action='store_true',
+                        help='mix the base features to the input of the folding layer (default: False)')
+        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul'), default='cat', 
+                            help="how pairs of vectors are joined ('cat', 'add', 'mul') (default: 'cat')")
 
         subparser.set_defaults(func = lambda args: Predict().run(args))
