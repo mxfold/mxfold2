@@ -13,9 +13,8 @@ class ZukerFold(AbstractFold):
     def __init__(self,  
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
-            use_bilinear=False, lstm_cnn=False, context_length=1, mix_base=False, pair_join='cat'):
+            lstm_cnn=False, context_length=1, mix_base=False, pair_join='cat'):
         super(ZukerFold, self).__init__(interface.predict_zuker)
-        self.use_bilinear = use_bilinear
         self.mix_base = mix_base
         self.embedding = OneHotEmbedding()
         n_in = 4
@@ -26,8 +25,8 @@ class ZukerFold(AbstractFold):
         if self.mix_base:
             n_in += 4*3
 
-        if self.use_bilinear:
-            self.fc_paired = BilinearPairedLayer(n_in//3, num_hidden_units[0], 2, dropout_rate=dropout_rate, context=context_length)
+        if pair_join=='bilinear':
+            self.fc_paired = BilinearPairedLayer(n_in//3, 2, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
         else:
             self.fc_paired = FCPairedLayer(n_in//3, 2, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length, join=pair_join)
         self.fc_unpair = FCUnpairedLayer(n_in//3, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)

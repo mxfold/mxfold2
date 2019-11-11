@@ -155,7 +155,6 @@ class Train:
             'num_lstm_units': args.num_lstm_units,
             'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
             'dropout_rate': args.dropout_rate,
-            'use_bilinear': args.use_bilinear,
             'lstm_cnn': args.lstm_cnn,
             'context_length': args.context_length,
             'mix_base': args.mix_base,
@@ -313,14 +312,13 @@ class Train:
                         help='the number of the hidden units of full connected layers (default: 32)')
         gparser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--use-bilinear', default=False, action='store_true')
         gparser.add_argument('--lstm-cnn', default=False, action='store_true',
                         help='use LSTM layer before CNN (default: False)')
         gparser.add_argument('--context-length', type=int, default=1,
                         help='the length of context for FC layers (default: 1)')
         gparser.add_argument('--mix-base', default=False, action='store_true',
                         help='mix the base features to the input of the folding layer (default: False)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul') (default: 'cat')")
+        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
+                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
 
         subparser.set_defaults(func = lambda args: Train().run(args))

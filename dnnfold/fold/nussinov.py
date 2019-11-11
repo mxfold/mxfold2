@@ -13,7 +13,7 @@ class NussinovFold(AbstractFold):
     def __init__(self,
             num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
-            use_bilinear=False, lstm_cnn=False, context_length=1, mix_base=False, pair_join='cat'):
+            lstm_cnn=False, context_length=1, mix_base=False, pair_join='cat'):
         super(NussinovFold, self).__init__(interface.predict_nussinov)
         self.mix_base = mix_base
         self.embedding = OneHotEmbedding()
@@ -25,8 +25,8 @@ class NussinovFold(AbstractFold):
         if self.mix_base:
             n_in += 4*3
 
-        if use_bilinear:
-            self.fc_paired = BilinearPairedLayer(n_in//3, num_hidden_units[0], 1, dropout_rate=dropout_rate, context=context_length)
+        if pair_join=='bilinear':
+            self.fc_paired = BilinearPairedLayer(n_in//3, 1, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
         else:
             self.fc_paired = FCPairedLayer(n_in//3, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length, join=pair_join)
         self.fc_unpaired = FCUnpairedLayer(n_in//3, layers=num_hidden_units, dropout_rate=dropout_rate, context=context_length)
