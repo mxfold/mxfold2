@@ -83,10 +83,11 @@ class CNNLSTMEncoder(nn.Module):
 
 
 class FCPairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, join='cat'):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0, join='cat'):
         super(FCPairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
+        self.mix_base = mix_base
         self.join = join
         if len(layers)>0 and layers[0]==0:
             layers = ()
@@ -95,6 +96,7 @@ class FCPairedLayer(nn.Module):
             n = n_in*context*2 # concat
         else:
             n = n_in*context # add or mul
+        n += n_in_base*mix_base*2
         
         linears = []
         for m in layers:
@@ -103,48 +105,61 @@ class FCPairedLayer(nn.Module):
         linears.append(nn.Linear(n, n_out))
         self.fc = nn.ModuleList(linears)
 
-    def forward(self, x_l, x_r=None):
+
+    def pairing(self, x_l, x_r, join, context):
+        assert(x_l.shape == x_r.shape)
+        B, N, C = x_l.shape
+        x_l = x_l.view(B, N, 1, C).expand(B, N, N, C)
+        x_r = x_r.view(B, 1, N, C).expand(B, N, N, C)
+        if join=='cat':
+            x = torch.cat((x_l, x_r), dim=3) # (B, N, N, C*2)
+        elif join=='add':
+            x = x_l + x_r # (B, N, N, C)
+        elif join=='mul':
+            x = x_l * x_r # (B, N, N, C)
+
+        if context > 1:
+            z = [x]
+            for d in range(1, context // 2 + 1):
+                z_u = torch.zeros_like(x)
+                z_u[:, d:, :-d, :] = x[:, :-d, d:, :] # (i-d, j+d)
+                z.append(z_u)
+                z_d = torch.zeros_like(x)
+                z_d[:, :-d, d:, :] = x[:, d:, :-d, :] # (i+d, j-d)
+                z.append(z_d)
+            x = torch.cat(z, dim=3) # (B, N, N, C*width)
+        return x
+    
+
+    def forward(self, x_l, x_r=None, x_base=None):
         x_r = x_l if x_r is None else x_r
         assert(x_l.shape == x_r.shape)
         B, N, C = x_l.shape
 
-        x_l = x_l.view(B, N, 1, C).expand(B, N, N, C)
-        x_r = x_r.view(B, 1, N, C).expand(B, N, N, C)
-        if self.join=='cat':
-            v = torch.cat((x_l, x_r), dim=3) # (B, N, N, C*2)
-        elif self.join=='add':
-            v = x_l + x_r # (B, N, N, C)
-        elif self.join=='mul':
-            v = x_l * x_r # (B, N, N, C)
+        x = self.pairing(x_l, x_r, self.join, self.context) # (B, N, N, C*width)
+        if self.mix_base > 0 and x_base is not None:
+            x_base = self.pairing(x_base, x_base, join='cat', context=self.mix_base) # (B, N, N, 4*2*mix_base)
+            x = torch.cat((x_base, x), dim=3)
 
-        if self.context > 1:
-            z = [v]
-            for d in range(1, self.context // 2 + 1):
-                z_u = torch.zeros_like(v)
-                z_u[:, d:, :-d, :] = v[:, :-d, d:, :] # (i-d, j+d)
-                z.append(z_u)
-                z_d = torch.zeros_like(v)
-                z_d[:, :-d, d:, :] = v[:, d:, :-d, :] # (i+d, j-d)
-                z.append(z_d)
-            v = torch.cat(z, dim=3) # (B, N, N, C*width)
-
-        v = v.view(B*N*N, -1)
+        x = x.view(B*N*N, -1)
         for fc in self.fc[:-1]:
-            v = self.dropout(F.relu(fc(v)))
-        y = self.fc[-1](v) # (B*N*N, n_out)
+            x = self.dropout(F.relu(fc(x)))
+        y = self.fc[-1](x) # (B*N*N, n_out)
         y = y.view(B, N, N, -1)
 
         return y
 
 
 class BilinearPairedLayer(nn.Module):
-    def __init__(self, n_in, n_out, layers=(), dropout_rate=0.0, context=1):
+    def __init__(self, n_in, n_out, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0):
         super(BilinearPairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
+        self.mix_base = mix_base
         if len(layers)>0 and layers[0]==0:
             layers = ()
         n = n_in*context
+
         linears_l, linears_r = [], []
         for m in layers:
             linears_l.append(nn.Linear(n, m))
@@ -152,17 +167,17 @@ class BilinearPairedLayer(nn.Module):
             n = m
         self.fc_l = nn.ModuleList(linears_l)
         self.fc_r = nn.ModuleList(linears_r)
+
+        n += n_in_base*mix_base
         self.bilinear = nn.Bilinear(n, n, n_out)
 
-    def forward(self, x_l, x_r=None):
-        if x_r is None:
-            x_r = x_l
+    def pairing(self, x_l, x_r, context):
         assert(x_l.shape == x_r.shape)
         B, N, _ = x_l.shape
 
-        if self.context > 1:
+        if context > 1:
             z_l, z_r = [x_l], [x_l]
-            for d in range(1, self.context // 2 + 1):
+            for d in range(1, context // 2 + 1):
                 z_lu, z_ru= torch.zeros_like(x_l), torch.zeros_like(x_r)
                 z_lu[:, d:, :] = x_l[:, :-d, :]
                 z_ru[:, :-d, :] = x_r[:, d:, :]
@@ -175,7 +190,16 @@ class BilinearPairedLayer(nn.Module):
                 z_r.append(z_rd)
             x_l = torch.cat(z_l, dim=2) # (B, N, n_in*width)
             x_r = torch.cat(z_r, dim=2) # (B, N, n_in*width)
-        
+        return x_l, x_r
+
+
+    def forward(self, x_l, x_r=None, x_base=None):
+        if x_r is None:
+            x_r = x_l
+        assert(x_l.shape == x_r.shape)
+        B, N, _ = x_l.shape
+
+        x_l, x_r = self.pairing(x_l, x_r, self.context) # (B, N, n_in*context)
         x_l = x_l.view(B*N, -1)
         x_r = x_r.view(B*N, -1)
         for fc_l, fc_r in zip(self.fc_l, self.fc_r):
@@ -184,6 +208,11 @@ class BilinearPairedLayer(nn.Module):
         x_l = x_l.view(B, N, -1)
         x_r = x_r.view(B, N, -1)
 
+        if self.mix_base > 0 and x_base is not None:
+            x_base_l, x_base_r = self.pairing(x_base, x_base, self.mix_base) # (B, N, n_in_base*mix_base)
+            x_l = torch.cat((x_base_l, x_l), dim=2)
+            x_r = torch.cat((x_base_r, x_r), dim=2)
+
         H = x_l.shape[2]
         x_l = x_l.view(B, N, 1, H).expand(B, N, N, H).reshape(B*N*N, H)
         x_r = x_r.view(B, 1, N, H).expand(B, N, N, H).reshape(B*N*N, H)
@@ -191,14 +220,17 @@ class BilinearPairedLayer(nn.Module):
 
 
 class FCUnpairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0):
         super(FCUnpairedLayer, self).__init__()
         self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
+        self.mix_base = mix_base
         if len(layers)>0 and layers[0]==0:
             layers = ()
 
         n = n_in * context
+        n += n_in_base*mix_base
+
         linears = []
         for m in layers:
             linears.append(nn.Linear(n, m))
@@ -206,12 +238,10 @@ class FCUnpairedLayer(nn.Module):
         linears.append(nn.Linear(n, n_out))
         self.fc = nn.ModuleList(linears)
 
-    def forward(self, x):
-        B, N, C = x.shape
-
-        if self.context > 1:
+    def contextize(self, x, context):
+        if context > 1:
             z = [x]
-            for d in range(1, self.context // 2 + 1):
+            for d in range(1, context // 2 + 1):
                 z_u = torch.zeros_like(x)
                 z_u[:, d:, :] = x[:, :-d, :] # i-d
                 z.append(z_u)
@@ -219,6 +249,16 @@ class FCUnpairedLayer(nn.Module):
                 z_d[:, :-d, :] = x[:, d:, :] # i+d
                 z.append(z_d)
             x = torch.cat(z, dim=2) # (B, N, C*width)
+        return x
+
+
+    def forward(self, x, x_base=None):
+        B, N, C = x.shape
+
+        x = self.contextize(x, self.context) # (B, N, C*context)
+        if self.mix_base > 0 and x_base is not None:
+            x_base = self.contextize(x_base, self.mix_base) # (B, N, 4*mix_base)
+            x = torch.cat((x_base, x), dim=2)
 
         x = x.view(B*N, -1) # (B*N, C*width)
         for fc in self.fc[:-1]:
