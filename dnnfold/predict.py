@@ -62,7 +62,7 @@ class Predict:
 
         config = {
             'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'motif_len': args.motif_len if args.motif_len is not None else (5,),
+            'filter_size': args.filter_size if args.filter_size is not None else (5,),
             'pool_size': args.pool_size if args.pool_size is not None else (1,),
             'dilation': args.dilation, 
             'num_lstm_layers': args.num_lstm_layers, 
@@ -136,7 +136,7 @@ class Predict:
                             help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
         gparser.add_argument('--num-filters', type=int, action='append',
                         help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--motif-len', type=int, action='append',
+        gparser.add_argument('--filter-size', type=int, action='append',
                         help='the length of each filter of CNN (default: 5)')
         gparser.add_argument('--pool-size', type=int, action='append',
                         help='the width of the max-pooling layer of CNN (default: 1)')

@@ -11,7 +11,7 @@ from .onehot import OneHotEmbedding
 
 class NussinovFold(AbstractFold):
     def __init__(self,
-            num_filters=(256,), motif_len=(7,), dilation=0, pool_size=(1,), 
+            num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
             lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
         super(NussinovFold, self).__init__(interface.predict_nussinov)
@@ -20,7 +20,7 @@ class NussinovFold(AbstractFold):
         self.embedding = OneHotEmbedding()
         n_in = n_in_base
         self.encoder = CNNLSTMEncoder(n_in, lstm_cnn=lstm_cnn, 
-            num_filters=num_filters, motif_len=motif_len, pool_size=pool_size, dilation=dilation, 
+            num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, 
             num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
         n_in = self.encoder.n_out
 

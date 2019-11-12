@@ -4,11 +4,11 @@ import torch.nn.functional as F
 import numpy as np
 
 class CNNLayer(nn.Module):
-    def __init__(self, n_in, num_filters=(128,), motif_len=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
+    def __init__(self, n_in, num_filters=(128,), filter_size=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
         super(CNNLayer, self).__init__()
         conv = []
         pool = []
-        for n_out, ksize, p in zip(num_filters, motif_len, pool_size):
+        for n_out, ksize, p in zip(num_filters, filter_size, pool_size):
             conv.append(nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)))
             if p > 1:
                 pool.append(nn.MaxPool1d(p, stride=1, padding=p//2))
@@ -27,11 +27,15 @@ class CNNLayer(nn.Module):
 
 class CNNLSTMEncoder(nn.Module):
     def __init__(self, n_in, lstm_cnn=False,
-            num_filters=(256,), motif_len=(7,), pool_size=(1,), dilation=0,
+            num_filters=(256,), filter_size=(7,), pool_size=(1,), dilation=0,
             num_lstm_layers=0, num_lstm_units=0, dropout_rate=0.0):
         super(CNNLSTMEncoder, self).__init__()
         self.n_in = self.n_out = n_in
         self.lstm_cnn = lstm_cnn
+        while len(num_filters)>len(filter_size):
+            filter_size = tuple(filter_size) + (filter_size[-1],)
+        while len(num_filters)>len(pool_size):
+            pool_size = tuple(pool_size) + (pool_size[-1],)
         if num_lstm_layers == 0 and num_lstm_units > 0:
             num_lstm_layers = 1
 
@@ -39,7 +43,7 @@ class CNNLSTMEncoder(nn.Module):
         self.conv = self.lstm = None
 
         if not lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
+            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate)
             self.n_out = n_in = num_filters[-1]
 
         if num_lstm_layers > 0:
@@ -48,7 +52,7 @@ class CNNLSTMEncoder(nn.Module):
             self.n_out = n_in = num_lstm_units*2
 
         if lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, motif_len, pool_size, dilation, dropout_rate=dropout_rate)
+            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate)
             self.n_out = n_in = num_filters[-1]
 
         if self.conv is None and self.lstm is None:
