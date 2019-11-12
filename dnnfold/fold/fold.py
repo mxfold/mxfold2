@@ -47,6 +47,5 @@ class AbstractFold(nn.Module):
             ss.append(v)
             preds.append(pred)
             pairs.append(pair)
-
-        ss = torch.stack(ss) if torch.is_grad_enabled() else ss
+        ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss)
         return ss, preds, pairs
