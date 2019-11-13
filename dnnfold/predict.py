@@ -76,8 +76,11 @@ class Predict:
             'pair_join': args.pair_join
         }
 
-        if args.model == 'NN' or args.model == 'Zuker':
+        if args.model == 'Zuker' or args.model == 'NN': # backward compatibility
             model = ZukerFold(**config)
+
+        elif args.model == 'ZukerL':
+            model = ZukerFold(use_large_model=True, **config)
 
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)
@@ -133,8 +136,8 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'NN', 'Zuker', 'Nussinov')")
+        gparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'ZukerL', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'NN', 'Zuker', 'ZukerL', 'Nussinov')")
         gparser.add_argument('--num-filters', type=int, action='append',
                         help='the number of CNN filters (default: 96)')
         gparser.add_argument('--filter-size', type=int, action='append',
