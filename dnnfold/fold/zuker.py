@@ -78,7 +78,7 @@ class ZukerFold(AbstractFold):
 
         if self.model_type == "S":
             score_basepair = score_paired[:, :, :, 0] # (B, N, N)
-            score_helix_stacking = torch.zeros((B, N, N))
+            score_helix_stacking = torch.zeros((B, N, N), device=device)
             score_mismatch_external = score_helix_stacking
             score_mismatch_internal = score_helix_stacking
             score_mismatch_multi = score_helix_stacking
@@ -89,7 +89,7 @@ class ZukerFold(AbstractFold):
             score_base_multi = score_unpair
             score_base_external = score_unpair
         elif self.model_type == "M":
-            score_basepair = torch.zeros((B, N, N))
+            score_basepair = torch.zeros((B, N, N), device=device)
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
@@ -101,7 +101,7 @@ class ZukerFold(AbstractFold):
             score_base_multi = score_unpair
             score_base_external = score_unpair
         elif self.model_type == "L":
-            score_basepair = torch.zeros((B, N, N))
+            score_basepair = torch.zeros((B, N, N), device=device)
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_internal = score_paired[:, :, :, 2] # (B, N, N)
