@@ -73,11 +73,11 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
         {
             if (allow_paired[i][j])
             {
-                bool suc1=false, suc2=false, suc3=false;
+                bool updated=false;
                 if (allow_unpaired[i+1][j-1]) 
                 {
                     auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
-                    suc1 = update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HAIRPIN_LOOP);
+                    updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HAIRPIN_LOOP);
                 }
 
                 for (auto k=i+1; k<j && (k-1)-(i+1)+1<opts.max_internal; k++)
@@ -89,7 +89,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                         if (allow_paired[k][l])
                         {
                             auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
-                            suc2 = update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
+                            updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
                         }
                     }
                 }
@@ -99,10 +99,10 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                 {
                     if (i+1>u-1) break;
                     auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
-                    suc3 = update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_MULTI_LOOP, u);
+                    updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_MULTI_LOOP, u);
                 }
             
-                if (suc1 || suc2 || suc3)
+                if (updated)
                 {
                     split_point_c_l[j].push_back(i);
                     split_point_c_r[i].push_back(j);
@@ -139,20 +139,20 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
             }
 
             /////////////////
-            bool suc1=false, suc2=false;
+            bool updated=false;
             if (allow_paired[i][j])
             {
                 auto s = Cv_[i][j] + param_->score_multi_paired(i, j);
-                suc1 = update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_PAIRED);
+                updated |= update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_PAIRED);
             }
 
             if (allow_unpaired[j][j])
             {
                 auto s = M1v_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
-                suc2 = update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_UNPAIRED);
+                updated |= update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_UNPAIRED);
             }
 
-            if (suc1 || suc2) split_point_m1_l[j].push_back(i);
+            if (updated) split_point_m1_l[j].push_back(i);
         }
     }
 

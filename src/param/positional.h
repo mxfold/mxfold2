@@ -37,6 +37,8 @@ class PositionalNearestNeighbor
         void count_external_unpaired(size_t i, size_t j, ScoreType v);
 
     private:
+        ParamType<2> score_basepair_;
+        CountType<2> count_basepair_;
         ParamType<2> score_helix_stacking_;
         CountType<2> count_helix_stacking_;
         ParamType<2> score_mismatch_external_;

@@ -48,7 +48,7 @@ class Predict:
                                 f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
                     if res_fn is not None and len(ref) == len(bp):
                         x = compare_bpseq(ref, bp)
-                        x = [header, len(seq), elapsed_time, sc] + list(x) + list(accuracy(*x))
+                        x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
 
 
@@ -76,11 +76,14 @@ class Predict:
             'pair_join': args.pair_join
         }
 
-        if args.model == 'Zuker' or args.model == 'NN': # backward compatibility
-            model = ZukerFold(**config)
+        if args.model == 'Zuker':
+            model = ZukerFold(model_type='M', **config)
 
         elif args.model == 'ZukerL':
-            model = ZukerFold(use_large_model=True, **config)
+            model = ZukerFold(model_type='L', **config)
+
+        elif args.model == 'ZukerS':
+            model = ZukerFold(model_type='S', **config)
 
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)
@@ -136,8 +139,8 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'NN', 'Zuker', 'ZukerL', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'NN', 'Zuker', 'ZukerL', 'Nussinov')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov')")
         gparser.add_argument('--num-filters', type=int, action='append',
                         help='the number of CNN filters (default: 96)')
         gparser.add_argument('--filter-size', type=int, action='append',

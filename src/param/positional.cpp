@@ -9,6 +9,8 @@ namespace py = pybind11;
 
 PositionalNearestNeighbor::
 PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
+    score_basepair_(::get_unchecked<2>(obj, "score_helix_stacking")),
+    count_basepair_(::get_mutable_unchecked<2>(obj, "count_helix_stacking")),
     score_helix_stacking_(::get_unchecked<2>(obj, "score_helix_stacking")),
     count_helix_stacking_(::get_mutable_unchecked<2>(obj, "count_helix_stacking")),
     score_mismatch_external_(::get_unchecked<2>(obj, "score_mismatch_external")),
@@ -55,6 +57,7 @@ score_hairpin(size_t i, size_t j) const -> ScoreType
     e += score_hairpin_length_[std::min<u_int32_t>(l, 30)];
     e += score_base_hairpin_(i+1, j-1);
     e += score_mismatch_hairpin_(i, j);
+    e += score_basepair_(i, j);
 
     return e;
 }
@@ -73,6 +76,7 @@ count_hairpin(size_t i, size_t j, ScoreType v)
 #endif
     count_base_hairpin_(i+1, j-1) += v;
     count_mismatch_hairpin_(i, j) += v;
+    count_basepair_(i, j) += v;
 }
 
 auto
@@ -86,7 +90,9 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 
     if (ll==0) // stack
     {
-        auto e = score_helix_stacking_(i, j) + score_helix_stacking_(l, k);
+        auto e = score_helix_stacking_(i, j);
+        e += score_helix_stacking_(l, k);
+        e += score_basepair_(i, j);
         return e;
     }
     else if (ls==0) // bulge
@@ -94,6 +100,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
         auto e = score_bulge_length_[std::min<u_int16_t>(ll, 30)];
         e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
+        e += score_basepair_(i, j);
         return e;
     }
     else // internal loop
@@ -105,6 +112,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
             e += score_internal_symmetry_[std::min<u_int32_t>(ll, 15)];
         e += score_internal_asymmetry_[std::min<u_int32_t>(ll-ls, 28)];
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
+        e += score_basepair_(i, j);
         return e;
     }
 
@@ -123,6 +131,7 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
     {
         count_helix_stacking_(i, j) += v;
         count_helix_stacking_(l, k) += v;
+        count_basepair_(i, j) += v;
     }
     else if (ls==0) // bulge
     {
@@ -136,6 +145,7 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
         count_base_internal_(l+1, j-1) += v;
         count_mismatch_internal_(i, j) += v;
         count_mismatch_internal_(l, k) += v;
+        count_basepair_(i, j) += v;
     }
     else // internal loop
     {
@@ -153,6 +163,7 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
         count_internal_asymmetry_[std::min<u_int32_t>(ll-ls, 28)] += v;
         count_mismatch_internal_(i, j) += v;
         count_mismatch_internal_(l, k) += v;
+        count_basepair_(i, j) += v;
     }
 }
 
@@ -160,7 +171,7 @@ auto
 PositionalNearestNeighbor::
 score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
-    return score_mismatch_multi_(i, j);
+    return score_mismatch_multi_(i, j) + score_basepair_(i, j);
 }
 
 void
@@ -168,6 +179,7 @@ PositionalNearestNeighbor::
 count_multi_loop(size_t i, size_t j, ScoreType v)
 {
     count_mismatch_multi_(i, j) += v;
+    count_basepair_(i, j) += v;
 }
 
 auto

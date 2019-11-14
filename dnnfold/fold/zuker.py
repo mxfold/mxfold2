@@ -10,13 +10,13 @@ from .onehot import OneHotEmbedding
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, use_large_model=False,
+    def __init__(self, model_type="M",
             num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), 
             dropout_rate=0.0, fc_dropout_rate=0.0,
             lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
         super(ZukerFold, self).__init__(interface.predict_zuker)
-        self.use_large_model = use_large_model
+        self.model_type = model_type
         self.mix_base = mix_base
         n_in_base = 4
         self.embedding = OneHotEmbedding()
@@ -26,8 +26,18 @@ class ZukerFold(AbstractFold):
             num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
         n_in = self.encoder.n_out
 
-        n_out_paired_layers = 5 if self.use_large_model else 2
-        n_out_unpaired_layers = 4 if self.use_large_model else 1
+        if model_type == "S":
+            n_out_paired_layers = 1
+            n_out_unpaired_layers = 1
+        elif model_type == "M":
+            n_out_paired_layers = 2
+            n_out_unpaired_layers = 1
+        elif model_type == "L":
+            n_out_paired_layers = 5
+            n_out_unpaired_layers = 4
+        else:
+            raise("not implemented")
+            
         if pair_join=='bilinear':
             self.fc_paired = BilinearPairedLayer(n_in//3, n_out_paired_layers, 
                                     layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
@@ -55,28 +65,31 @@ class ZukerFold(AbstractFold):
 
         x_l, x_r, x_u = self.encoder(x) # (B, N, C)
         x = x.transpose(1, 2)
+        B, N, _ = x_u.shape
 
-        score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 2 or 5)
+        score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
         score_unpair = self.fc_unpair(x_u, x) # (B, N, 1 or 4)
 
         def unpair_interval(su):
-            B, N = su.shape[0], su.shape[1]
             su = su.view(B, 1, N)
             su = torch.bmm(torch.ones(B, N, 1).to(device), su)
             su = torch.bmm(torch.triu(su), torch.triu(torch.ones_like(su)))
             return su
 
-        if self.use_large_model:
-            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
-            score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
-            score_mismatch_internal = score_paired[:, :, :, 2] # (B, N, N)
-            score_mismatch_multi = score_paired[:, :, :, 3] # (B, N, N)
-            score_mismatch_hairpin = score_paired[:, :, :, 4] # (B, N, N)
-            score_base_hairpin = unpair_interval(score_unpair[:, :, 0])
-            score_base_internal = unpair_interval(score_unpair[:, :, 1])
-            score_base_multi = unpair_interval(score_unpair[:, :, 2])
-            score_base_external = unpair_interval(score_unpair[:, :, 3])
-        else:
+        if self.model_type == "S":
+            score_basepair = score_paired[:, :, :, 0] # (B, N, N)
+            score_helix_stacking = torch.zeros((B, N, N))
+            score_mismatch_external = score_helix_stacking
+            score_mismatch_internal = score_helix_stacking
+            score_mismatch_multi = score_helix_stacking
+            score_mismatch_hairpin = score_helix_stacking
+            score_unpair = unpair_interval(score_unpair)
+            score_base_hairpin = score_unpair
+            score_base_internal = score_unpair
+            score_base_multi = score_unpair
+            score_base_external = score_unpair
+        elif self.model_type == "M":
+            score_basepair = torch.zeros((B, N, N))
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
@@ -87,8 +100,22 @@ class ZukerFold(AbstractFold):
             score_base_internal = score_unpair
             score_base_multi = score_unpair
             score_base_external = score_unpair
+        elif self.model_type == "L":
+            score_basepair = torch.zeros((B, N, N))
+            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+            score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_internal = score_paired[:, :, :, 2] # (B, N, N)
+            score_mismatch_multi = score_paired[:, :, :, 3] # (B, N, N)
+            score_mismatch_hairpin = score_paired[:, :, :, 4] # (B, N, N)
+            score_base_hairpin = unpair_interval(score_unpair[:, :, 0])
+            score_base_internal = unpair_interval(score_unpair[:, :, 1])
+            score_base_multi = unpair_interval(score_unpair[:, :, 2])
+            score_base_external = unpair_interval(score_unpair[:, :, 3])
+        else:
+            raise("not implemented")
 
         param = [ { 
+            'score_basepair': score_basepair[i],
             'score_helix_stacking': score_helix_stacking[i],
             'score_mismatch_external': score_mismatch_external[i],
             'score_mismatch_hairpin': score_mismatch_hairpin[i],
