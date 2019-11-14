@@ -12,7 +12,8 @@ from .onehot import OneHotEmbedding
 class ZukerFold(AbstractFold):
     def __init__(self,  
             num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
-            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), dropout_rate=0.0,
+            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), 
+            dropout_rate=0.0, fc_dropout_rate=0.0,
             lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
         super(ZukerFold, self).__init__(interface.predict_zuker)
         self.mix_base = mix_base
@@ -25,12 +26,12 @@ class ZukerFold(AbstractFold):
         n_in = self.encoder.n_out
 
         if pair_join=='bilinear':
-            self.fc_paired = BilinearPairedLayer(n_in//3, 2, layers=num_hidden_units, dropout_rate=dropout_rate, 
+            self.fc_paired = BilinearPairedLayer(n_in//3, 2, layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
                                     context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
         else:
-            self.fc_paired = FCPairedLayer(n_in//3, 2, layers=num_hidden_units, dropout_rate=dropout_rate, 
+            self.fc_paired = FCPairedLayer(n_in//3, 2, layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
                                     context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
-        self.fc_unpair = FCUnpairedLayer(n_in//3, layers=num_hidden_units, dropout_rate=dropout_rate, 
+        self.fc_unpair = FCUnpairedLayer(n_in//3, layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
                                     context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
