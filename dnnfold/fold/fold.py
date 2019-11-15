@@ -68,8 +68,8 @@ class AbstractFold(nn.Module):
                 mask = (s != 0)
                 s = s / torch.mean(s[mask])
                 total_bias *= s
-                w *= torch.where(s.view(-1, 1)==0, torch.zeros_like(s), 1/s.view(-1,1))
-                w *= torch.where(s.view(1, -1)==0, torch.zeros_like(s), 1/s.view(1,-1))
+                w *= torch.where(s.view(-1, 1)==0, torch.zeros_like(s), 1/s.view(-1, 1))
+                w *= torch.where(s.view(1, -1)==0, torch.zeros_like(s), 1/s.view(1, -1))
                 if torch.abs(s-1).max() < tol:
                     break
             

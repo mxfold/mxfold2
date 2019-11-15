@@ -46,7 +46,7 @@ class NussinovFold(AbstractFold):
         score_paired, score_unpaired = self.iterative_correction(F.sigmoid(score_paired), F.sigmoid(score_unpaired))
 
         param = [ { 
-            'score_paired': score_paired[i]*6-1,
-            'score_unpaired': score_unpaired[i]
+            'score_paired': score_paired[i] * 5 - 1,
+            'score_unpaired': torch.zeros_like(score_unpaired[i])
         } for i in range(len(x)) ]
         return param

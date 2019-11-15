@@ -77,13 +77,18 @@ class ZukerFold(AbstractFold):
             return su
 
         if self.model_type == "S":
-            score_basepair = score_paired[:, :, :, 0] # (B, N, N)
+            if False:
+                score_basepair = score_paired[:, :, :, 0] # (B, N, N)
+                score_unpair = unpair_interval(score_unpair)
+            else:
+                score_paired, score_unpaired = self.iterative_correction(F.sigmoid(score_paired.view(B, N, N)), F.sigmoid(score_unpair.view(B, N)))
+                score_basepair = score_paired * 5 - 1
+                score_unpair = unpair_interval(torch.zeros_like(score_unpaired))
             score_helix_stacking = torch.zeros((B, N, N), device=device)
             score_mismatch_external = score_helix_stacking
             score_mismatch_internal = score_helix_stacking
             score_mismatch_multi = score_helix_stacking
             score_mismatch_hairpin = score_helix_stacking
-            score_unpair = unpair_interval(score_unpair)
             score_base_hairpin = score_unpair
             score_base_internal = score_unpair
             score_base_multi = score_unpair
