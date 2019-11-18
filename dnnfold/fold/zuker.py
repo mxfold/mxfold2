@@ -81,7 +81,7 @@ class ZukerFold(AbstractFold):
                 score_basepair = score_paired[:, :, :, 0] # (B, N, N)
                 score_unpair = unpair_interval(score_unpair)
             else:
-                score_paired, score_unpaired = self.iterative_correction(F.sigmoid(score_paired.view(B, N, N)), F.sigmoid(score_unpair.view(B, N)))
+                score_paired, score_unpaired = self.sinkhorn(torch.sigmoid(score_paired.view(B, N, N)), torch.sigmoid(score_unpair.view(B, N)))
                 score_basepair = score_paired * 5 - 1
                 score_unpair = unpair_interval(torch.zeros_like(score_unpaired))
             score_helix_stacking = torch.zeros((B, N, N), device=device)
