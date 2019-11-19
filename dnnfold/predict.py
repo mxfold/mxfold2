@@ -75,6 +75,7 @@ class Predict:
             'mix_base': args.mix_base,
             'pair_join': args.pair_join,
             'fc': args.fc,
+            'no_split_lr': args.no_split_lr
         }
 
         if args.model == 'Zuker':
@@ -170,5 +171,6 @@ class Predict:
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
                             help="type of final layers ('linear', 'conv') (default: 'linear')")
+        gparser.add_argument('--no-split-lr', default=False, action='store_true')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

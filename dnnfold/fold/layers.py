@@ -28,8 +28,9 @@ class CNNLayer(nn.Module):
 class CNNLSTMEncoder(nn.Module):
     def __init__(self, n_in, lstm_cnn=False,
             num_filters=(256,), filter_size=(7,), pool_size=(1,), dilation=0,
-            num_lstm_layers=0, num_lstm_units=0, dropout_rate=0.0):
+            num_lstm_layers=0, num_lstm_units=0, dropout_rate=0.0, no_split_lr=False):
         super(CNNLSTMEncoder, self).__init__()
+        self.split_lr = not no_split_lr
         self.n_in = self.n_out = n_in
         self.lstm_cnn = lstm_cnn
         while len(num_filters)>len(filter_size):
@@ -58,6 +59,9 @@ class CNNLSTMEncoder(nn.Module):
         if self.conv is None and self.lstm is None:
             self.n_out *= 3
 
+        if not self.split_lr:
+            self.n_out *= 3
+
 
     def forward(self, x): # (B, n_in, N)
         if self.conv is None and self.lstm is None:
@@ -78,12 +82,15 @@ class CNNLSTMEncoder(nn.Module):
             x = self.conv(x) # (B, C, N)
             x = torch.transpose(x, 1, 2) # (B, N, C)
 
-        assert(x.shape[-1] % 3 == 0)
-        x_l = x[:, :, 0::3]
-        x_r = x[:, :, 1::3]
-        x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)] # reverse the last axis
-        x_u = x[:, :, 2::3]
-        return x_l, x_r, x_u # (B, N, n_out//3) * 3
+        if self.split_lr:
+            assert(x.shape[-1] % 3 == 0)
+            x_l = x[:, :, 0::3]
+            x_r = x[:, :, 1::3]
+            x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)] # reverse the last axis
+            x_u = x[:, :, 2::3]
+            return x_l, x_r, x_u # (B, N, n_out//3) * 3
+        else:
+            return x, x, x # (B, N, n_out) * 3
 
 
 class FCPairedLayer(nn.Module):
