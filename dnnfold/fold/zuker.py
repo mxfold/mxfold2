@@ -5,7 +5,8 @@ import torch.nn.functional as F
 from .. import interface
 from .fold import AbstractFold
 from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
-                     FCLengthLayer, FCPairedLayer, FCUnpairedLayer)
+                     CNNPairedLayer, CNNUnpairedLayer, FCLengthLayer,
+                     FCPairedLayer, FCUnpairedLayer)
 from .onehot import OneHotEmbedding
 
 
@@ -13,7 +14,7 @@ class ZukerFold(AbstractFold):
     def __init__(self, model_type="M",
             num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), 
-            dropout_rate=0.0, fc_dropout_rate=0.0,
+            dropout_rate=0.0, fc_dropout_rate=0.0, fc='linear',
             lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
         super(ZukerFold, self).__init__(interface.predict_zuker)
         self.model_type = model_type
@@ -42,13 +43,23 @@ class ZukerFold(AbstractFold):
             self.fc_paired = BilinearPairedLayer(n_in//3, n_out_paired_layers, 
                                     layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
                                     context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-        else:
+        elif fc=='linear':
             self.fc_paired = FCPairedLayer(n_in//3, n_out_paired_layers,
                                     layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
                                     context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
-        self.fc_unpair = FCUnpairedLayer(n_in//3, n_out_unpaired_layers,
+            self.fc_unpair = FCUnpairedLayer(n_in//3, n_out_unpaired_layers,
                                     layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
                                     context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
+        elif fc=='conv':
+            self.fc_paired = CNNPairedLayer(n_in//3, n_out_paired_layers,
+                                    layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
+                                    context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
+            self.fc_unpair = CNNUnpairedLayer(n_in//3, n_out_unpaired_layers,
+                                    layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
+                                    context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
+        else:
+            raise('not implemented')
+
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
             'score_bulge_length': FCLengthLayer(31),
@@ -77,13 +88,11 @@ class ZukerFold(AbstractFold):
             return su
 
         if self.model_type == "S":
-            if False:
-                score_basepair = score_paired[:, :, :, 0] # (B, N, N)
-                score_unpair = unpair_interval(score_unpair)
-            else:
-                score_paired, score_unpaired = self.sinkhorn(torch.sigmoid(score_paired.view(B, N, N)), torch.sigmoid(score_unpair.view(B, N)))
-                score_basepair = score_paired * 5 - 1
-                score_unpair = unpair_interval(torch.zeros_like(score_unpaired))
+            score_basepair = score_paired[:, :, :, 0] # (B, N, N)
+            score_unpair = unpair_interval(score_unpair)
+            # score_paired, score_unpaired = self.sinkhorn(torch.sigmoid(score_paired.view(B, N, N)), torch.sigmoid(score_unpair.view(B, N)))
+            # score_basepair = score_paired * 5 - 1
+            # score_unpair = unpair_interval(torch.zeros_like(score_unpaired))
             score_helix_stacking = torch.zeros((B, N, N), device=device)
             score_mismatch_external = score_helix_stacking
             score_mismatch_internal = score_helix_stacking

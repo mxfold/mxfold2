@@ -73,7 +73,8 @@ class Predict:
             'lstm_cnn': args.lstm_cnn,
             'context_length': args.context_length,
             'mix_base': args.mix_base,
-            'pair_join': args.pair_join
+            'pair_join': args.pair_join,
+            'fc': args.fc,
         }
 
         if args.model == 'Zuker':
@@ -167,5 +168,7 @@ class Predict:
                         help='the length of context for mixing the base features to the input of the folding layer (default: 0)')
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
+        gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
+                            help="type of final layers ('linear', 'conv') (default: 'linear')")
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

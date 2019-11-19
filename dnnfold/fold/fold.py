@@ -70,7 +70,7 @@ class AbstractFold(nn.Module):
         w = w + torch.diag_embed(score_unpair)
         w = sinkhorn_(w)
         score_unpair = torch.diagonal(w, dim1=1, dim2=2)
-        w = torch.triu(w, diagonal=0)
+        w = torch.triu(w, diagonal=1)
         score_basepair = w + w.transpose(1, 2) 
 
         return score_basepair, score_unpair

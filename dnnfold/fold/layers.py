@@ -154,6 +154,63 @@ class FCPairedLayer(nn.Module):
         return y
 
 
+class CNNPairedLayer(nn.Module):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0, join='cat'):
+        super(CNNPairedLayer, self).__init__()
+        self.dropout = nn.Dropout(p=dropout_rate)
+        self.context = context
+        self.mix_base = mix_base
+        self.join = join
+        if len(layers)>0 and layers[0]==0:
+            layers = ()
+
+        if join=='cat':
+            n = n_in*2 # concat
+        else:
+            n = n_in # add or mul
+        n += n_in_base*mix_base*2
+        
+        conv = []
+        for m in layers:
+            conv.append(nn.Conv2d(n, m, context, padding=context//2))
+            n = m
+        conv.append(nn.Conv2d(n, n_out, context, padding=context//2))
+        self.conv = nn.ModuleList(conv)
+
+
+    def pairing(self, x_l, x_r, join, context):
+        assert(x_l.shape == x_r.shape)
+        B, N, C = x_l.shape
+        x_l = x_l.view(B, N, 1, C).expand(B, N, N, C)
+        x_r = x_r.view(B, 1, N, C).expand(B, N, N, C)
+        if join=='cat':
+            x = torch.cat((x_l, x_r), dim=3) # (B, N, N, C*2)
+        elif join=='add':
+            x = x_l + x_r # (B, N, N, C)
+        elif join=='mul':
+            x = x_l * x_r # (B, N, N, C)
+        return x
+    
+
+    def forward(self, x_l, x_r=None, x_base=None):
+        x_r = x_l if x_r is None else x_r
+        assert(x_l.shape == x_r.shape)
+        B, N, C = x_l.shape
+
+        x = self.pairing(x_l, x_r, self.join, self.context) # (B, N, N, C*width)
+        if self.mix_base > 0 and x_base is not None:
+            x_base = self.pairing(x_base, x_base, join='cat', context=self.mix_base) # (B, N, N, 4*2*mix_base)
+            x = torch.cat((x_base, x), dim=3)
+
+        x = x.permute(0, 3, 1, 2)
+        for conv in self.conv[:-1]:
+            x = self.dropout(F.relu(conv(x)))
+        y = self.conv[-1](x) # (B, n_out, N, N)
+        y = y.permute(0, 2, 3, 1).view(B, N, N, -1)
+
+        return y
+
+
 class BilinearPairedLayer(nn.Module):
     def __init__(self, n_in, n_out, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0):
         super(BilinearPairedLayer, self).__init__()
@@ -270,6 +327,54 @@ class FCUnpairedLayer(nn.Module):
             x = self.dropout(x)
         x = self.fc[-1](x) # (B*N, n_out)
         return x.view(B, N, -1) # (B, N, n_out)
+
+
+class CNNUnpairedLayer(nn.Module):
+    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0):
+        super(CNNUnpairedLayer, self).__init__()
+        self.dropout = nn.Dropout(p=dropout_rate)
+        self.context = context
+        self.mix_base = mix_base
+        if len(layers)>0 and layers[0]==0:
+            layers = ()
+
+        n = n_in
+        n += n_in_base*mix_base
+
+        conv = []
+        for m in layers:
+            conv.append(nn.Conv1d(n, m, context, padding=context//2))
+            n = m
+        conv.append(nn.Conv1d(n, n_out, context, padding=context//2))
+        self.conv = nn.ModuleList(conv)
+
+
+    def contextize(self, x, context):
+        if context > 1:
+            z = [x]
+            for d in range(1, context // 2 + 1):
+                z_u = torch.zeros_like(x)
+                z_u[:, d:, :] = x[:, :-d, :] # i-d
+                z.append(z_u)
+                z_d = torch.zeros_like(x)
+                z_d[:, :-d, :] = x[:, d:, :] # i+d
+                z.append(z_d)
+            x = torch.cat(z, dim=2) # (B, N, C*width)
+        return x
+
+
+    def forward(self, x, x_base=None):
+        B, N, C = x.shape
+
+        if self.mix_base > 0 and x_base is not None:
+            x_base = self.contextize(x_base, self.mix_base) # (B, N, 4*mix_base)
+            x = torch.cat((x_base, x), dim=2) # (B, N, n_in=C+4*mix_base)
+
+        x = x.transpose(1, 2) # (B, n_in, N)
+        for conv in self.conv[:-1]:
+            x = self.dropout(F.relu(conv(x)))
+        x = self.conv[-1](x) # (B, n_out, N)
+        return x.transpose(1, 2).view(B, N, -1) # (B, N, n_out)
 
 
 class FCLengthLayer(nn.Module):
