@@ -46,4 +46,5 @@ class SparseEmbedding(nn.Module):
 
     def __call__(self, seq):
         seq = torch.LongTensor([[self.vocb[c] for c in s.lower()] for s in seq])
+        seq = seq.to(self.embedding.weight.device)
         return self.embedding(seq).transpose(1, 2)
