@@ -7,11 +7,11 @@ from .fold import AbstractFold
 from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
                      CNNPairedLayer, CNNUnpairedLayer, FCLengthLayer,
                      FCPairedLayer, FCUnpairedLayer)
-from .onehot import OneHotEmbedding
+from .embedding import OneHotEmbedding, SparseEmbedding
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, model_type="M",
+    def __init__(self, model_type="M", embed_size=0,
             num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), no_split_lr=False,
             dropout_rate=0.0, fc_dropout_rate=0.0, fc='linear',
@@ -19,8 +19,8 @@ class ZukerFold(AbstractFold):
         super(ZukerFold, self).__init__(interface.predict_zuker)
         self.model_type = model_type
         self.mix_base = mix_base
-        n_in_base = 4
-        self.embedding = OneHotEmbedding()
+        self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
+        n_in_base = self.embedding.n_out
         n_in = n_in_base
         self.encoder = CNNLSTMEncoder(n_in, lstm_cnn=lstm_cnn, 
             num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, 

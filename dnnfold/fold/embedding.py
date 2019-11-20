@@ -2,10 +2,14 @@ from collections import defaultdict
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
-class OneHotEmbedding:
+class OneHotEmbedding(nn.Module):
     def __init__(self, ksize=0):
+        super(OneHotEmbedding, self).__init__()
+        self.n_out = 4
         self.ksize = ksize
         eye = np.identity(4, dtype=np.float32)
         zero = np.zeros(4, dtype=np.float32)
@@ -25,7 +29,21 @@ class OneHotEmbedding:
         seq = [ s + '0' * (l-len(s)) for s in seq ]
         return seq
 
-    def __call__(self, seq):
+    def forward(self, seq):
         seq = self.pad_all(seq, self.ksize//2)
         seq = [ self.encode(s) for s in seq ]
         return torch.from_numpy(np.stack(seq)) # pylint: disable=no-member
+
+
+class SparseEmbedding(nn.Module):
+    def __init__(self, dim):
+        super(SparseEmbedding, self).__init__()
+        self.n_out = dim
+        self.embedding = nn.Embedding(6, dim, padding_idx=0)
+        self.vocb = defaultdict(lambda: 5,
+            {'0': 0, 'a': 1, 'c': 2, 'g': 3, 't': 4, 'u': 4})
+
+
+    def __call__(self, seq):
+        seq = torch.LongTensor([[self.vocb[c] for c in s.lower()] for s in seq])
+        return self.embedding(seq).transpose(1, 2)

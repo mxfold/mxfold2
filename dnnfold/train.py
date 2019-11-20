@@ -147,6 +147,7 @@ class Train:
             return RNAFold(), {}
 
         config = {
+            'embed_size' : args.embed_size,
             'num_filters': args.num_filters if args.num_filters is not None else (96,),
             'filter_size': args.filter_size if args.filter_size is not None else (5,),
             'pool_size': args.pool_size if args.pool_size is not None else (1,),
@@ -305,6 +306,8 @@ class Train:
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov'), default='Turner', 
                             help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov')")
+        gparser.add_argument('--embed-size', type=int, default=0,
+                        help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',
                         help='the number of CNN filters (default: 96)')
         gparser.add_argument('--filter-size', type=int, action='append',
