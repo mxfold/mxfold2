@@ -72,6 +72,7 @@ class Predict:
             'dropout_rate': args.dropout_rate,
             'fc_dropout_rate': args.fc_dropout_rate,            
             'lstm_cnn': args.lstm_cnn,
+            'num_att': args.num_att,
             'context_length': args.context_length,
             'mix_base': args.mix_base,
             'pair_join': args.pair_join,
@@ -166,6 +167,8 @@ class Predict:
                         help='dropout rate of the hidden units (default: 0.0)')
         gparser.add_argument('--lstm-cnn', default=False, action='store_true',
                         help='use LSTM layer before CNN (default: False)')
+        gparser.add_argument('--num-att', type=int, default=0,
+                        help='the number of the heads of attention (default: 0)')
         gparser.add_argument('--context-length', type=int, default=1,
                         help='the length of context for FC layers (default: 1)')
         gparser.add_argument('--mix-base', default=0, type=int, 

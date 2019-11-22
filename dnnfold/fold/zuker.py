@@ -14,7 +14,7 @@ class ZukerFold(AbstractFold):
     def __init__(self, model_type="M", embed_size=0,
             num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), no_split_lr=False,
-            dropout_rate=0.0, fc_dropout_rate=0.0, fc='linear',
+            dropout_rate=0.0, fc_dropout_rate=0.0, fc='linear', num_att=0,
             lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
         super(ZukerFold, self).__init__(interface.predict_zuker)
         self.model_type = model_type

@@ -28,7 +28,7 @@ class CNNLayer(nn.Module):
 class CNNLSTMEncoder(nn.Module):
     def __init__(self, n_in, lstm_cnn=False,
             num_filters=(256,), filter_size=(7,), pool_size=(1,), dilation=0,
-            num_lstm_layers=0, num_lstm_units=0, dropout_rate=0.0, no_split_lr=False):
+            num_lstm_layers=0, num_lstm_units=0, num_att=0, dropout_rate=0.0, no_split_lr=False):
         super(CNNLSTMEncoder, self).__init__()
         self.split_lr = not no_split_lr
         self.n_in = self.n_out = n_in
@@ -41,7 +41,7 @@ class CNNLSTMEncoder(nn.Module):
             num_lstm_layers = 1
 
         self.dropout = nn.Dropout(p=dropout_rate)
-        self.conv = self.lstm = None
+        self.conv = self.lstm = self.att = None
 
         if not lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
             self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate)
@@ -58,6 +58,9 @@ class CNNLSTMEncoder(nn.Module):
 
         if self.conv is None and self.lstm is None:
             self.n_out *= 3
+
+        if num_att > 0:
+            self.att = nn.MultiheadAttention(self.n_out, num_att)
 
         if not self.split_lr:
             self.n_out *= 3
@@ -81,6 +84,11 @@ class CNNLSTMEncoder(nn.Module):
             x = torch.transpose(x, 1, 2) # (B, H*2, N)
             x = self.conv(x) # (B, C, N)
             x = torch.transpose(x, 1, 2) # (B, N, C)
+
+        if self.att is not None:
+            x = torch.transpose(x, 0, 1)
+            x, _ = self.att(x, x, x)
+            x = torch.transpose(x, 0, 1)
 
         if self.split_lr:
             assert(x.shape[-1] % 3 == 0)
