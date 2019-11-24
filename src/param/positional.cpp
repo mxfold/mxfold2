@@ -9,8 +9,8 @@ namespace py = pybind11;
 
 PositionalNearestNeighbor::
 PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
-    score_basepair_(::get_unchecked<2>(obj, "score_helix_stacking")),
-    count_basepair_(::get_mutable_unchecked<2>(obj, "count_helix_stacking")),
+    score_basepair_(::get_unchecked<2>(obj, "score_basepair")),
+    count_basepair_(::get_mutable_unchecked<2>(obj, "count_basepair")),
     score_helix_stacking_(::get_unchecked<2>(obj, "score_helix_stacking")),
     count_helix_stacking_(::get_mutable_unchecked<2>(obj, "count_helix_stacking")),
     score_mismatch_external_(::get_unchecked<2>(obj, "score_mismatch_external")),

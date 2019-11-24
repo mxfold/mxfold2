@@ -89,6 +89,9 @@ class Predict:
         elif args.model == 'ZukerS':
             model = ZukerFold(model_type='S', **config)
 
+        elif args.model == 'ZukerP':
+            model = ZukerFold(model_type='P', **config)
+
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)
 
@@ -143,8 +146,8 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov')")
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',
