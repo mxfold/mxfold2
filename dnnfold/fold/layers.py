@@ -305,7 +305,7 @@ class FCUnpairedLayer(nn.Module):
             layers = ()
 
         n = n_in * context
-        n += n_in_base*mix_base
+        n += n_in_base * mix_base
 
         linears = []
         for m in layers:
@@ -313,6 +313,7 @@ class FCUnpairedLayer(nn.Module):
             n = m
         linears.append(nn.Linear(n, n_out))
         self.fc = nn.ModuleList(linears)
+
 
     def contextize(self, x, context):
         if context > 1:

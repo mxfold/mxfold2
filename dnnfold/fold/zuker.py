@@ -11,23 +11,7 @@ from .embedding import OneHotEmbedding, SparseEmbedding
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, model_type="M", embed_size=0,
-            num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
-            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), no_split_lr=False,
-            dropout_rate=0.0, fc_dropout_rate=0.0, fc='linear', num_att=0,
-            lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
-        super(ZukerFold, self).__init__(interface.predict_zuker)
-        self.model_type = model_type
-        self.mix_base = mix_base
-        no_split_lr = True if model_type=='P' else no_split_lr
-        self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
-        n_in_base = self.embedding.n_out
-        n_in = n_in_base
-        self.encoder = CNNLSTMEncoder(n_in, lstm_cnn=lstm_cnn, 
-            num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
-            num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate, no_split_lr=no_split_lr)
-        n_in = self.encoder.n_out
-
+    def __init__(self, model_type="M", **kwargs):
         if model_type == "S":
             n_out_paired_layers = 1
             n_out_unpaired_layers = 1
@@ -38,32 +22,19 @@ class ZukerFold(AbstractFold):
             n_out_paired_layers = 5
             n_out_unpaired_layers = 4
         elif model_type == 'P':
-            self.fc_profile = nn.Linear(n_in//3, 6)
-            self.softmax = nn.Softmax(dim=1)
+            n_out_paired_layers = 0
+            n_out_unpaired_layers = 6
+            kwargs['no_split_lr'] = True
+            kwargs['fc'] = 'profile'
         else:
             raise("not implemented")
 
-        if model_type != 'P':
-            if pair_join=='bilinear':
-                self.fc_paired = BilinearPairedLayer(n_in//3, n_out_paired_layers, 
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-            elif fc=='linear':
-                self.fc_paired = FCPairedLayer(n_in//3, n_out_paired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
-                self.fc_unpair = FCUnpairedLayer(n_in//3, n_out_unpaired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-            elif fc=='conv':
-                self.fc_paired = CNNPairedLayer(n_in//3, n_out_paired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
-                self.fc_unpair = CNNUnpairedLayer(n_in//3, n_out_unpaired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-            else:
-                raise('not implemented')
+        super(ZukerFold, self).__init__(**kwargs,
+            predict=interface.predict_zuker, 
+            n_out_paired_layers=n_out_paired_layers,
+            n_out_unpaired_layers=n_out_unpaired_layers)
+
+        self.model_type = model_type
 
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': FCLengthLayer(31),
@@ -91,12 +62,9 @@ class ZukerFold(AbstractFold):
 
         if self.model_type == "S":
             score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
-            score_unpair = self.fc_unpair(x_u, x) # (B, N, 1 or 4)
+            score_unpair = self.fc_unpaired(x_u, x) # (B, N, 1 or 4)
             score_basepair = score_paired[:, :, :, 0] # (B, N, N)
             score_unpair = unpair_interval(score_unpair)
-            # score_paired, score_unpaired = self.sinkhorn(torch.sigmoid(score_paired.view(B, N, N)), torch.sigmoid(score_unpair.view(B, N)))
-            # score_basepair = score_paired * 5 - 1
-            # score_unpair = unpair_interval(torch.zeros_like(score_unpaired))
             score_helix_stacking = torch.zeros((B, N, N), device=device)
             score_mismatch_external = score_helix_stacking
             score_mismatch_internal = score_helix_stacking
@@ -109,7 +77,7 @@ class ZukerFold(AbstractFold):
 
         elif self.model_type == "M":
             score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
-            score_unpair = self.fc_unpair(x_u, x) # (B, N, 1 or 4)
+            score_unpair = self.fc_unpaired(x_u, x) # (B, N, 1 or 4)
             score_basepair = torch.zeros((B, N, N), device=device)
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
@@ -124,7 +92,7 @@ class ZukerFold(AbstractFold):
 
         elif self.model_type == "L":
             score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
-            score_unpair = self.fc_unpair(x_u, x) # (B, N, 1 or 4)
+            score_unpair = self.fc_unpaired(x_u, x) # (B, N, 1 or 4)
             score_basepair = torch.zeros((B, N, N), device=device)
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
@@ -137,9 +105,7 @@ class ZukerFold(AbstractFold):
             score_base_external = unpair_interval(score_unpair[:, :, 3])
 
         elif self.model_type == 'P':
-            x = x_u.view(B*N, -1)
-            x = self.softmax(self.fc_profile(x))
-            x = x.view(B, N, -1)
+            x = self.softmax(self.fc_unpaired(x_u))
             x_l = x[:, :, 0].view(B, N, 1).expand(B, N, N)
             x_r = x[:, :, 1].view(B, 1, N).expand(B, N, N)
             score_basepair = x_l + x_r
@@ -152,7 +118,6 @@ class ZukerFold(AbstractFold):
             score_base_internal = unpair_interval(x[:, :, 3])
             score_base_multi = unpair_interval(x[:, :, 4])
             score_base_external = unpair_interval(x[:, :, 5])
-            #print(score_base_hairpin.shape, torch.max(score_base_hairpin))
 
         else:
             raise("not implemented")
@@ -175,4 +140,5 @@ class ZukerFold(AbstractFold):
             'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
             'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param()
         } for i in range(len(x)) ]
+
         return param
