@@ -24,7 +24,7 @@ class ZukerFold(AbstractFold):
         n_in_base = self.embedding.n_out
         n_in = n_in_base
         self.encoder = CNNLSTMEncoder(n_in, lstm_cnn=lstm_cnn, 
-            num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, 
+            num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
             num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate, no_split_lr=no_split_lr)
         n_in = self.encoder.n_out
 
