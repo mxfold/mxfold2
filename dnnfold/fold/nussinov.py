@@ -12,9 +12,12 @@ from .embedding import OneHotEmbedding, SparseEmbedding
 
 class NussinovFold(AbstractFold):
     def __init__(self, model_type='N', **kwargs):
-        if model_type=='N':
+        self.model_type = model_type
+        if model_type=='N' or model_type=='S':
+            n_out_paired_layers=1
             n_out_unpaired_layers=1
         elif model_type=='P':
+            n_out_paired_layers=0
             n_out_unpaired_layers=3
             kwargs['no_split_lr'] = True
             kwargs['fc'] = 'profile'
@@ -23,9 +26,8 @@ class NussinovFold(AbstractFold):
         
         super(NussinovFold, self).__init__(**kwargs,
             predict=interface.predict_nussinov,
-            n_out_paired_layers=1, n_out_unpaired_layers=n_out_unpaired_layers)
-
-        self.model_type = model_type
+            n_out_paired_layers=n_out_paired_layers, 
+            n_out_unpaired_layers=n_out_unpaired_layers)
 
 
     def make_param(self, seq):
@@ -39,12 +41,18 @@ class NussinovFold(AbstractFold):
             score_paired = self.fc_paired(x_l, x_r, x).view(B, N, N) # (B, N, N)
             score_unpaired = self.fc_unpaired(x_u, x).view(B, N) # (B, N)
 
+        elif self.model_type == 'S':
+            score_paired = self.fc_paired(x_l, x_r, x).view(B, N, N) # (B, N, N)
+            score_unpaired = self.fc_unpaired(x_u, x).view(B, N) # (B, N)
+            score_paired, score_unpaired = self.sinkhorn(score_paired, score_unpaired)
+
         elif self.model_type == 'P':
             x = self.softmax(self.fc_unpaired(x_u))
             x_l = x[:, :, 0].view(B, N, 1).expand(B, N, N)
             x_r = x[:, :, 1].view(B, 1, N).expand(B, N, N)
             score_paired= x_l + x_r
             score_unpaired = x[:, :, 2]
+            #score_paired, score_unpaired = self.sinkhorn(score_paired, score_unpaired)
 
         else:
             raise('not implemented')

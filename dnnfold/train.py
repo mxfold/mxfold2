@@ -179,7 +179,10 @@ class Train:
             model = ZukerFold(model_type="P", **config)
 
         elif args.model == 'Nussinov':
-            model = NussinovFold(**config)
+            model = NussinovFold(model_type='N', **config)
+
+        elif args.model == 'NussinovS':
+            model = NussinovFold(model_type='S', **config)
 
         elif args.model == 'NussinovP':
             model = NussinovFold(model_type='P', **config)
@@ -314,8 +317,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 1)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovP'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovP')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP')")
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',
