@@ -9,7 +9,7 @@ from .embedding import OneHotEmbedding, SparseEmbedding
 
 class AbstractFold(nn.Module):
     def __init__(self, predict, 
-            n_out_paired_layers, n_out_unpaired_layers,
+            n_out_paired_layers=0, n_out_unpaired_layers=0,
             embed_size=0,
             num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
             num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), no_split_lr=False,
@@ -17,6 +17,10 @@ class AbstractFold(nn.Module):
             lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat'):
         super(AbstractFold, self).__init__()
         self.predict = predict
+
+        if n_out_paired_layers == 0 and n_out_unpaired_layers == 0:
+            return 
+            
         self.mix_base = mix_base
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in_base = self.embedding.n_out

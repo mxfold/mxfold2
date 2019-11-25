@@ -198,7 +198,8 @@ class Train:
         elif optimizer == 'RMSprop':
             return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
         elif optimizer == 'SGD':
-            return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
+            # return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
+            return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
         elif optimizer == 'ASGD':
             return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
         else:
