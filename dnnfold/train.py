@@ -88,7 +88,7 @@ class PiecewiseLoss(nn.Module):
             if i<j:
                 ref_mat[i, j] = True
 
-        loss = 0.
+        loss = torch.tensor([0.])
         fp = score_paired[(pred_mat==True) & (ref_mat==False)]
         if len(fp) > 0:
             loss += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
