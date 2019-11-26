@@ -88,7 +88,7 @@ class PiecewiseLoss(nn.Module):
             if i<j:
                 ref_mat[i, j] = True
 
-        loss = torch.tensor([0.])
+        loss = torch.tensor([0.], device=score_paired.device)
         fp = score_paired[(pred_mat==True) & (ref_mat==False)]
         if len(fp) > 0:
             loss += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
@@ -134,11 +134,12 @@ class Train:
                 loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
                 loss_total += loss.item()
                 num += n_batch
-                loss.backward()
-                if self.verbose:
-                    for n, p in self.model.named_parameters():
-                        print(n, torch.min(p).item(), torch.max(p).item(), torch.min(p.grad).item(), torch.max(p.grad).item())
-                self.optimizer.step()
+                if loss.item() > 0.:
+                    loss.backward()
+                    if self.verbose:
+                        for n, p in self.model.named_parameters():
+                            print(n, torch.min(p).item(), torch.max(p).item(), torch.min(p.grad).item(), torch.max(p.grad).item())
+                    self.optimizer.step()
 
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
