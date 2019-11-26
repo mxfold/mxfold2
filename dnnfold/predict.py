@@ -96,6 +96,7 @@ class Predict:
             model = NussinovFold(**config)
 
         elif args.model == 'NussinovS':
+            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn })
             model = NussinovFold(model_type='S', **config)
 
         elif args.model == 'NussinovP':
@@ -187,5 +188,9 @@ class Predict:
         gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
                             help="type of final layers ('linear', 'conv') (default: 'linear')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--gamma', type=float, default=5,
+                        help='the weight of basepair scores in NussinovS model (default: 5)')
+        gparser.add_argument('--sinkhorn', type=int, default=64,
+                        help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

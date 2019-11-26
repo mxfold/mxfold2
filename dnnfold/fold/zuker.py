@@ -3,14 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .. import interface
-from .fold import AbstractFold
+from .fold import AbstractNeuralFold
 from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
                      CNNPairedLayer, CNNUnpairedLayer, FCLengthLayer,
                      FCPairedLayer, FCUnpairedLayer)
 from .embedding import OneHotEmbedding, SparseEmbedding
 
 
-class ZukerFold(AbstractFold):
+class ZukerFold(AbstractNeuralFold):
     def __init__(self, model_type="M", **kwargs):
         if model_type == "S":
             n_out_paired_layers = 1

@@ -32,10 +32,10 @@ class StructuredLoss(nn.Module):
 
 
     def forward(self, seq, pair, fname=None):
-        pred, pred_s, _ = self.model(seq, reference=pair,
+        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pair,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
-        ref, ref_s, _ = self.model(seq, constraint=pair, max_internal_length=None)
+        ref, ref_s, _ = self.model(seq, param=param, constraint=pair, max_internal_length=None)
         loss = pred - ref
         if self.verbose:
             print("Loss = {} = ({} - {})".format(loss.item(), pred.item(), ref.item()))
@@ -48,6 +48,54 @@ class StructuredLoss(nn.Module):
             print(loss.item(), pred.item(), ref.item())
             print(seq)
             print(pair)
+
+        if self.l1_weight > 0.0:
+            for p in self.model.parameters():
+                loss += self.l1_weight * torch.sum(torch.abs(p))
+
+        # if self.l2_weight > 0.0:
+        #     l2_reg = 0.0
+        #     for p in self.model.parameters():
+        #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
+        #     loss += torch.sqrt(l2_reg)
+
+        return loss
+
+class PiecewiseLoss(nn.Module):
+    def __init__(self, model, fp_weight=0.1, fn_weight=0.9, l1_weight=0., l2_weight=0., verbose=False):
+        super(PiecewiseLoss, self).__init__()
+        self.model = model
+        self.fp_weight = fp_weight
+        self.fn_weight = fn_weight
+        self.l1_weight = l1_weight
+        self.l2_weight = l2_weight
+        self.verbose = verbose
+        self.loss_fn = nn.BCELoss(reduction='sum')
+
+
+    def forward(self, seq, pair, fname=None):
+        pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
+        ref_sc, ref_s, ref_bp = self.model(seq, param=param, constraint=pair, max_internal_length=None)
+        score_paired = (param[0]['score_paired']+1)/5
+
+        pred_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+        for i, j in enumerate(pred_bp[0]):
+            if i<j:
+                pred_mat[i, j] = True
+
+        ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+        for i, j in enumerate(ref_bp[0]):
+            if i<j:
+                ref_mat[i, j] = True
+
+        loss = 0.
+        fp = score_paired[(pred_mat==True) & (ref_mat==False)]
+        if len(fp) > 0:
+            loss += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
+
+        fn = score_paired[(pred_mat==False) & (ref_mat==True)]
+        if len(fn) > 0:
+            loss += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
@@ -163,7 +211,7 @@ class Train:
             'mix_base': args.mix_base,
             'pair_join': args.pair_join,
             'fc': args.fc,
-            'no_split_lr': args.no_split_lr
+            'no_split_lr': args.no_split_lr,
         }
 
         if args.model == 'Zuker':
@@ -182,6 +230,7 @@ class Train:
             model = NussinovFold(model_type='N', **config)
 
         elif args.model == 'NussinovS':
+            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn })
             model = NussinovFold(model_type='S', **config)
 
         elif args.model == 'NussinovP':
@@ -201,14 +250,28 @@ class Train:
         elif optimizer == 'RMSprop':
             return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
         elif optimizer == 'SGD':
-            # return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
-            return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
+            #return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
         elif optimizer == 'ASGD':
             return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
         else:
             raise('not implemented')
 
-    
+
+    def build_loss_function(self, loss_func, model, args):
+        if loss_func == 'hinge':
+            return StructuredLoss(model, verbose=self.verbose,
+                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
+                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+        elif loss_func == 'piecewise':
+            return PiecewiseLoss(model, verbose=self.verbose,
+                            fp_weight=args.fp_weight, fn_weight=args.fn_weight,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+        else:
+            raise('not implemented')
+
+
     def save_config(self, file, config):
         with open(file, 'w') as f:
             for k, v in config.items():
@@ -246,10 +309,7 @@ class Train:
         if args.gpu >= 0:
             self.model.to(torch.device("cuda", args.gpu))
         self.optimizer = self.build_optimizer(args.optimizer, self.model, args.lr, args.l2_weight)
-        self.loss_fn = StructuredLoss(self.model, verbose=self.verbose,
-                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
-                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+        self.loss_fn = self.build_loss_function(args.loss_func, self.model, args)
 
         checkpoint_epoch = 0
         if args.resume is not None:
@@ -307,6 +367,8 @@ class Train:
                             help='the weight for L2 regularization (default: 0)')
         gparser.add_argument('--lr', type=float, default=0.01,
                             help='the learning rate for optimizer (default: 0.01)')
+        gparser.add_argument('--loss-func', choices=('hinge', 'piecewise'), default='hinge',
+                            help="loss fuction ('hinge', 'piecewise') ")
         gparser.add_argument('--loss-pos-paired', type=float, default=1,
                             help='the penalty for positive base-pairs for loss augmentation (default: 1)')
         gparser.add_argument('--loss-neg-paired', type=float, default=1,
@@ -315,6 +377,10 @@ class Train:
                             help='the penalty for positive unpaired bases for loss augmentation (default: 1)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=1,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 1)')
+        gparser.add_argument('--fp-weight', type=float, default=0.1,
+                            help='the weight of false positives for piecewise loss (default: 0.1)')
+        gparser.add_argument('--fn-weight', type=float, default=0.9,
+                            help='the weight of false negatives for piecewise loss (default: 0.1)')
 
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP'), default='Turner', 
@@ -352,5 +418,9 @@ class Train:
         gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
                             help="type of final layers ('linear', 'conv') (default: 'linear')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--gamma', type=float, default=5,
+                        help='the weight of basepair scores in NussinovS model (default: 5)')
+        gparser.add_argument('--sinkhorn', type=int, default=64,
+                        help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
 
         subparser.set_defaults(func = lambda args: Train().run(args))
