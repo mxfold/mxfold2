@@ -62,7 +62,7 @@ class StructuredLoss(nn.Module):
         return loss
 
 class PiecewiseLoss(nn.Module):
-    def __init__(self, model, fp_weight=0.1, fn_weight=0.9, l1_weight=0., l2_weight=0., verbose=False):
+    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., verbose=False):
         super(PiecewiseLoss, self).__init__()
         self.model = model
         self.fp_weight = fp_weight
@@ -76,36 +76,71 @@ class PiecewiseLoss(nn.Module):
     def forward(self, seq, pair, fname=None):
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
         ref_sc, ref_s, ref_bp = self.model(seq, param=param, constraint=pair, max_internal_length=None)
-        score_paired = (param[0]['score_paired']+1)/5
 
-        pred_mat = torch.zeros_like(score_paired, dtype=torch.bool)
-        for i, j in enumerate(pred_bp[0]):
-            if i<j:
-                pred_mat[i, j] = True
+        loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
+        for k in range(len(seq)):
+            score_paired = (param[k]['score_paired'] + 1) / self.model.gamma
 
-        ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
-        for i, j in enumerate(ref_bp[0]):
-            if i<j:
-                ref_mat[i, j] = True
+            pred_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+            for i, j in enumerate(pred_bp[k]):
+                if i < j:
+                    pred_mat[i, j] = True
 
-        loss = torch.tensor([0.], device=score_paired.device)
-        fp = score_paired[(pred_mat==True) & (ref_mat==False)]
-        if len(fp) > 0:
-            loss += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
+            ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+            for i, j in enumerate(ref_bp[k]):
+                if i < j:
+                    ref_mat[i, j] = True
 
-        fn = score_paired[(pred_mat==False) & (ref_mat==True)]
-        if len(fn) > 0:
-            loss += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
+            fp = score_paired[(pred_mat==True) & (ref_mat==False)]
+            if len(fp) > 0:
+                loss[k] += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
 
-        if self.l1_weight > 0.0:
-            for p in self.model.parameters():
-                loss += self.l1_weight * torch.sum(torch.abs(p))
+            fn = score_paired[(pred_mat==False) & (ref_mat==True)]
+            if len(fn) > 0:
+                loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
 
-        # if self.l2_weight > 0.0:
-        #     l2_reg = 0.0
-        #     for p in self.model.parameters():
-        #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
-        #     loss += torch.sqrt(l2_reg)
+            if self.l1_weight > 0.0:
+                for p in self.model.parameters():
+                    loss[k] += self.l1_weight * torch.sum(torch.abs(p))
+
+            # if self.l2_weight > 0.0:
+            #     l2_reg = 0.0
+            #     for p in self.model.parameters():
+            #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
+            #     loss += torch.sqrt(l2_reg)
+
+        return loss
+
+
+    def forward_all(self, seq, pair, fname=None):
+        ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=pair, max_internal_length=None)
+
+        loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
+        for k in range(len(seq)):
+            score_paired = (param[k]['score_paired'] + 1) / self.model.gamma
+
+            ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+            for i, j in enumerate(ref_bp[k]):
+                if i < j:
+                    ref_mat[i, j] = True
+
+            fp = score_paired[ref_mat==False]
+            if len(fp) > 0:
+                loss[k] += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
+
+            fn = score_paired[ref_mat==True]
+            if len(fn) > 0:
+                loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
+
+            if self.l1_weight > 0.0:
+                for p in self.model.parameters():
+                    loss[k] += self.l1_weight * torch.sum(torch.abs(p))
+
+            # if self.l2_weight > 0.0:
+            #     l2_reg = 0.0
+            #     for p in self.model.parameters():
+            #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
+            #     loss += torch.sqrt(l2_reg)
 
         return loss
 

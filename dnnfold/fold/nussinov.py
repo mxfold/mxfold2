@@ -56,24 +56,21 @@ class NussinovFold(AbstractNeuralFold):
             score_paired = torch.sigmoid(self.fc_paired(x_l, x_r, x)).view(B, N, N) # (B, N, N)
             score_unpaired = torch.sigmoid(self.fc_unpaired(x_u, x)).view(B, N) # (B, N)
             if self.sinkhorn_itr > 0:
-                score_paired, score_unpaired = self.sinkhorn(score_paired, score_unpaired, self.sinkhorn_itr)
-
-            param = [ { 
-                'score_paired': score_paired[i] * self.gamma - 1,
-                'score_unpaired': torch.zeros_like(score_unpaired[i])
-            } for i in range(len(x)) ]
-
-            return param
+                score_paired, score_unpaired = self.sinkhorn(
+                            torch.clamp(score_paired, min=1e-10), # for numerical stability
+                            torch.clamp(score_unpaired, min=1e-10), 
+                            n_iter=self.sinkhorn_itr)
+            #print(torch.min(score_paired), torch.max(score_paired))
+            return [ {  'score_paired': score_paired[i] * self.gamma - 1,
+                        'score_unpaired': torch.zeros_like(score_unpaired[i])
+                    } for i in range(len(x)) ]
 
         else:
             raise('not implemented')
 
-        param = [ { 
-            'score_paired': score_paired[i],
-            'score_unpaired': score_unpaired[i]
-        } for i in range(len(x)) ]
-
-        return param
+        return [ {  'score_paired': score_paired[i],
+                    'score_unpaired': score_unpaired[i]
+                } for i in range(len(x)) ]
 
 
     def sinkhorn(self, score_basepair, score_unpair, n_iter):
