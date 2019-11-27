@@ -21,7 +21,7 @@ class CNNLayer(nn.Module):
 
     def forward(self, x): # (B=1, 4, N)
         for conv, pool in zip(self.conv, self.pool):
-            x = self.dropout(F.relu(pool(conv(x)))) # (B, num_filters, N)
+            x = self.dropout(F.leaky_relu(pool(conv(x)))) # (B, num_filters, N)
         return x
 
 
@@ -78,7 +78,7 @@ class CNNLSTMEncoder(nn.Module):
 
         if self.lstm is not None:
             x, _ = self.lstm(x)
-            x = self.dropout(F.relu(x)) # (B, N, H*2)
+            x = self.dropout(F.leaky_relu(x)) # (B, N, H*2)
 
         if self.conv is not None and self.lstm_cnn:
             x = torch.transpose(x, 1, 2) # (B, H*2, N)
@@ -162,7 +162,7 @@ class FCPairedLayer(nn.Module):
 
         x = x.view(B*N*N, -1)
         for fc in self.fc[:-1]:
-            x = self.dropout(F.relu(fc(x)))
+            x = self.dropout(F.leaky_relu(fc(x)))
         y = self.fc[-1](x) # (B*N*N, n_out)
         y = y.view(B, N, N, -1)
 
@@ -219,7 +219,7 @@ class CNNPairedLayer(nn.Module):
 
         x = x.permute(0, 3, 1, 2)
         for conv in self.conv[:-1]:
-            x = self.dropout(F.relu(conv(x)))
+            x = self.dropout(F.leaky_relu(conv(x)))
         y = self.conv[-1](x) # (B, n_out, N, N)
         y = y.permute(0, 2, 3, 1).view(B, N, N, -1)
 
@@ -279,8 +279,8 @@ class BilinearPairedLayer(nn.Module):
         x_l = x_l.view(B*N, -1)
         x_r = x_r.view(B*N, -1)
         for fc_l, fc_r in zip(self.fc_l, self.fc_r):
-            x_l = self.dropout(F.relu(fc_l(x_l)))
-            x_r = self.dropout(F.relu(fc_r(x_r)))
+            x_l = self.dropout(F.leaky_relu(fc_l(x_l)))
+            x_r = self.dropout(F.leaky_relu(fc_r(x_r)))
         x_l = x_l.view(B, N, -1)
         x_r = x_r.view(B, N, -1)
 
@@ -339,8 +339,7 @@ class FCUnpairedLayer(nn.Module):
 
         x = x.view(B*N, -1) # (B*N, C*width)
         for fc in self.fc[:-1]:
-            x = F.relu(fc(x))
-            x = self.dropout(x)
+            x = self.dropout(F.leaky_relu(fc(x)))
         x = self.fc[-1](x) # (B*N, n_out)
         return x.view(B, N, -1) # (B, N, n_out)
 
@@ -388,7 +387,7 @@ class CNNUnpairedLayer(nn.Module):
 
         x = x.transpose(1, 2) # (B, n_in, N)
         for conv in self.conv[:-1]:
-            x = self.dropout(F.relu(conv(x)))
+            x = self.dropout(F.leaky_relu(conv(x)))
         x = self.conv[-1](x) # (B, n_out, N)
         return x.transpose(1, 2).view(B, N, -1) # (B, N, n_out)
 
@@ -416,8 +415,7 @@ class FCLengthLayer(nn.Module):
 
     def forward(self, x): 
         for l in self.linears[:-1]:
-            x = F.relu(l(x))
-            x = self.dropout(x)
+            x = self.dropout(F.leaky_relu(l(x)))
         return self.linears[-1](x)
 
 
