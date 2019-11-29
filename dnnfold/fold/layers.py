@@ -6,23 +6,19 @@ import numpy as np
 class CNNLayer(nn.Module):
     def __init__(self, n_in, num_filters=(128,), filter_size=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
         super(CNNLayer, self).__init__()
-        conv = []
-        pool = []
+        l = []
         for n_out, ksize, p in zip(num_filters, filter_size, pool_size):
-            conv.append(nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)))
-            if p > 1:
-                pool.append(nn.MaxPool1d(p, stride=1, padding=p//2))
-            else:
-                pool.append(nn.Identity())
+            l += [ 
+                nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)),
+                nn.MaxPool1d(p, stride=1, padding=p//2) if p > 1 else nn.Identity(),
+                nn.GroupNorm(1, n_out), # same as LayerNorm?
+                nn.ELU(), 
+                nn.Dropout(p=dropout_rate) ]
             n_in = n_out
-        self.conv = nn.ModuleList(conv)
-        self.pool = nn.ModuleList(pool)
-        self.dropout = nn.Dropout(p=dropout_rate)
+        self.net = nn.Sequential(*l)
 
     def forward(self, x): # (B=1, 4, N)
-        for conv, pool in zip(self.conv, self.pool):
-            x = self.dropout(F.leaky_relu(pool(conv(x)))) # (B, num_filters, N)
-        return x
+        return self.net(x)
 
 
 class CNNLSTMEncoder(nn.Module):
@@ -51,6 +47,7 @@ class CNNLSTMEncoder(nn.Module):
             self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
                             dropout=dropout_rate if num_lstm_layers>1 else 0)
             self.n_out = n_in = num_lstm_units*2
+            self.lstm_ln = nn.LayerNorm(self.n_out)
 
         if lstm_cnn and len(num_filters) > 0 and num_filters[0] > 0:
             self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate)
@@ -78,7 +75,8 @@ class CNNLSTMEncoder(nn.Module):
 
         if self.lstm is not None:
             x, _ = self.lstm(x)
-            x = self.dropout(F.leaky_relu(x)) # (B, N, H*2)
+            x = self.lstm_ln(x)
+            x = self.dropout(F.elu(x)) # (B, N, H*2)
 
         if self.conv is not None and self.lstm_cnn:
             x = torch.transpose(x, 1, 2) # (B, H*2, N)
@@ -104,7 +102,6 @@ class CNNLSTMEncoder(nn.Module):
 class FCPairedLayer(nn.Module):
     def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0, join='cat'):
         super(FCPairedLayer, self).__init__()
-        self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
         self.mix_base = mix_base
         self.join = join
@@ -116,13 +113,17 @@ class FCPairedLayer(nn.Module):
         else:
             n = n_in*context # add or mul
         n += n_in_base*mix_base*2
-        
-        linears = []
+
+        l = []
         for m in layers:
-            linears.append(nn.Linear(n, m))
+            l += [ 
+                nn.Linear(n, m), 
+                nn.LayerNorm(m),
+                nn.ELU(), 
+                nn.Dropout(p=dropout_rate) ]
             n = m
-        linears.append(nn.Linear(n, n_out))
-        self.fc = nn.ModuleList(linears)
+        l += [ nn.Linear(n, n_out) ] #, nn.LayerNorm(n_out) ]
+        self.net = nn.Sequential(*l)
 
 
     def pairing(self, x_l, x_r, join, context):
@@ -161,10 +162,8 @@ class FCPairedLayer(nn.Module):
             x = torch.cat((x_base, x), dim=3)
 
         x = x.view(B*N*N, -1)
-        for fc in self.fc[:-1]:
-            x = self.dropout(F.leaky_relu(fc(x)))
-        y = self.fc[-1](x) # (B*N*N, n_out)
-        y = y.view(B, N, N, -1)
+        y = self.net(x)
+        y = y.view(B, N, N, -1) # (B, N, N, n_out)
 
         return y
 
@@ -172,7 +171,6 @@ class FCPairedLayer(nn.Module):
 class CNNPairedLayer(nn.Module):
     def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0, join='cat'):
         super(CNNPairedLayer, self).__init__()
-        self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
         self.mix_base = mix_base
         self.join = join
@@ -185,12 +183,16 @@ class CNNPairedLayer(nn.Module):
             n = n_in # add or mul
         n += n_in_base*mix_base*2
         
-        conv = []
+        l = []
         for m in layers:
-            conv.append(nn.Conv2d(n, m, context, padding=context//2))
+            l += [ 
+                nn.Conv2d(n, m, context, padding=context//2), 
+                nn.GroupNorm(1, m),
+                nn.ELU(), 
+                nn.Dropout(p=dropout_rate) ]
             n = m
-        conv.append(nn.Conv2d(n, n_out, context, padding=context//2))
-        self.conv = nn.ModuleList(conv)
+        l += [ nn.Conv2d(n, n_out, context, padding=context//2), nn.GroupNorm(1, n_out) ]
+        self.net = nn.Sequential(*l)
 
 
     def pairing(self, x_l, x_r, join, context):
@@ -218,10 +220,8 @@ class CNNPairedLayer(nn.Module):
             x = torch.cat((x_base, x), dim=3)
 
         x = x.permute(0, 3, 1, 2)
-        for conv in self.conv[:-1]:
-            x = self.dropout(F.leaky_relu(conv(x)))
-        y = self.conv[-1](x) # (B, n_out, N, N)
-        y = y.permute(0, 2, 3, 1).view(B, N, N, -1)
+        y = self.net(x)
+        y = y.permute(0, 2, 3, 1).view(B, N, N, -1) # (B, N, N, n_out)
 
         return y
 
@@ -279,8 +279,8 @@ class BilinearPairedLayer(nn.Module):
         x_l = x_l.view(B*N, -1)
         x_r = x_r.view(B*N, -1)
         for fc_l, fc_r in zip(self.fc_l, self.fc_r):
-            x_l = self.dropout(F.leaky_relu(fc_l(x_l)))
-            x_r = self.dropout(F.leaky_relu(fc_r(x_r)))
+            x_l = self.dropout(F.elu(fc_l(x_l)))
+            x_r = self.dropout(F.elu(fc_r(x_r)))
         x_l = x_l.view(B, N, -1)
         x_r = x_r.view(B, N, -1)
 
@@ -298,7 +298,6 @@ class BilinearPairedLayer(nn.Module):
 class FCUnpairedLayer(nn.Module):
     def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0):
         super(FCUnpairedLayer, self).__init__()
-        self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
         self.mix_base = mix_base
         if len(layers)>0 and layers[0]==0:
@@ -307,12 +306,16 @@ class FCUnpairedLayer(nn.Module):
         n = n_in * context
         n += n_in_base * mix_base
 
-        linears = []
+        l = []
         for m in layers:
-            linears.append(nn.Linear(n, m))
+            l += [
+                nn.Linear(n, m), 
+                nn.LayerNorm(m),
+                nn.ELU(), 
+                nn.Dropout(p=dropout_rate)]
             n = m
-        linears.append(nn.Linear(n, n_out))
-        self.fc = nn.ModuleList(linears)
+        l += [ nn.Linear(n, n_out) ] # , nn.LayerNorm(n_out) ]
+        self.net = nn.Sequential(*l)
 
 
     def contextize(self, x, context):
@@ -338,16 +341,13 @@ class FCUnpairedLayer(nn.Module):
             x = torch.cat((x_base, x), dim=2)
 
         x = x.view(B*N, -1) # (B*N, C*width)
-        for fc in self.fc[:-1]:
-            x = self.dropout(F.leaky_relu(fc(x)))
-        x = self.fc[-1](x) # (B*N, n_out)
-        return x.view(B, N, -1) # (B, N, n_out)
+        y = self.net(x) # (B*N, n_out)
+        return y.view(B, N, -1) # (B, N, n_out)
 
 
 class CNNUnpairedLayer(nn.Module):
     def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, context=1, n_in_base=4, mix_base=0):
         super(CNNUnpairedLayer, self).__init__()
-        self.dropout = nn.Dropout(p=dropout_rate)
         self.context = context
         self.mix_base = mix_base
         if len(layers)>0 and layers[0]==0:
@@ -356,12 +356,16 @@ class CNNUnpairedLayer(nn.Module):
         n = n_in
         n += n_in_base*mix_base
 
-        conv = []
+        l = []
         for m in layers:
-            conv.append(nn.Conv1d(n, m, context, padding=context//2))
+            l += [ 
+                nn.Conv1d(n, m, context, padding=context//2), 
+                nn.GroupNorm(1, m),
+                nn.ELU(), 
+                nn.Dropout(p=dropout_rate) ]
             n = m
-        conv.append(nn.Conv1d(n, n_out, context, padding=context//2))
-        self.conv = nn.ModuleList(conv)
+        l += [ nn.Conv1d(n, n_out, context, padding=context//2), nn.GroupNorm(1, n_out) ]
+        self.net = nn.Sequential(*l)
 
 
     def contextize(self, x, context):
@@ -386,24 +390,22 @@ class CNNUnpairedLayer(nn.Module):
             x = torch.cat((x_base, x), dim=2) # (B, N, n_in=C+4*mix_base)
 
         x = x.transpose(1, 2) # (B, n_in, N)
-        for conv in self.conv[:-1]:
-            x = self.dropout(F.leaky_relu(conv(x)))
-        x = self.conv[-1](x) # (B, n_out, N)
-        return x.transpose(1, 2).view(B, N, -1) # (B, N, n_out)
+        y = self.net(x)
+        return y.transpose(1, 2).view(B, N, -1) # (B, N, n_out)
 
 
 class FCLengthLayer(nn.Module):
     def __init__(self, n_in, layers=(), dropout_rate=0.5):
         super(FCLengthLayer, self).__init__()
-        self.dropout = nn.Dropout(p=dropout_rate)
         self.n_in = n_in
         n = n_in if isinstance(n_in, int) else np.prod(n_in)
-        linears = []
+
+        l = []
         for m in layers:
-            linears.append(nn.Linear(n, m))
+            l += [ nn.Linear(n, m), nn.ELU(), nn.Dropout(p=dropout_rate) ]
             n = m
-        linears.append(nn.Linear(n, 1))
-        self.linears = nn.ModuleList(linears)
+        l += [ nn.Linear(n, 1) ]
+        self.net = nn.Sequential(*l)
 
         if isinstance(self.n_in, int):
             self.x = torch.tril(torch.ones((self.n_in, self.n_in)))
@@ -414,11 +416,10 @@ class FCLengthLayer(nn.Module):
 
 
     def forward(self, x): 
-        for l in self.linears[:-1]:
-            x = self.dropout(F.leaky_relu(l(x)))
-        return self.linears[-1](x)
+        return self.net(x)
 
 
     def make_param(self):
-        x = self.forward(self.x.to(self.linears[-1].weight.device))
+        device = next(self.net.parameters()).device
+        x = self.forward(self.x.to(device))
         return x.reshape((self.n_in,) if isinstance(self.n_in, int) else self.n_in)

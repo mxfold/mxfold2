@@ -112,7 +112,7 @@ class PiecewiseLoss(nn.Module):
         return loss
 
 
-    def forward_all(self, seq, pair, fname=None):
+    def forward_(self, seq, pair, fname=None):
         ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=pair, max_internal_length=None)
 
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
@@ -131,6 +131,12 @@ class PiecewiseLoss(nn.Module):
             fn = score_paired[ref_mat==True]
             if len(fn) > 0:
                 loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
+
+            # ref_mat = torch.zeros_like(score_paired)
+            # for i, j in enumerate(ref_bp[k]):
+            #     if i < j:
+            #         ref_mat[i, j] = ref_mat[j, i] = 1.
+            # loss[k] += self.loss_fn(score_paired, ref_mat)
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
