@@ -62,18 +62,19 @@ class StructuredLoss(nn.Module):
         return loss
 
 class PiecewiseLoss(nn.Module):
-    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., verbose=False):
+    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., label_smoothing=0.1, verbose=False):
         super(PiecewiseLoss, self).__init__()
         self.model = model
         self.fp_weight = fp_weight
         self.fn_weight = fn_weight
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
+        self.label_smoothing = label_smoothing
         self.verbose = verbose
         self.loss_fn = nn.BCELoss(reduction='sum')
 
 
-    def forward(self, seq, pair, fname=None):
+    def forward(self, seq, pair, fname=None): # BCELoss with 'sum' reduction
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
         ref_sc, ref_s, ref_bp = self.model(seq, param=param, constraint=pair, max_internal_length=None)
 
@@ -93,11 +94,15 @@ class PiecewiseLoss(nn.Module):
 
             fp = score_paired[(pred_mat==True) & (ref_mat==False)]
             if len(fp) > 0:
-                loss[k] += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
+                #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
+                p = self.label_smoothing * 0.5
+                loss[k] += self.fp_weight * self.loss_fn(fp, torch.full_like(fp, p))
 
             fn = score_paired[(pred_mat==False) & (ref_mat==True)]
             if len(fn) > 0:
-                loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
+                #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
+                p = 1 - self.label_smoothing * 0.5
+                loss[k] += self.fn_weight * self.loss_fn(fn, torch.full_like(fn, p))
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
@@ -112,7 +117,7 @@ class PiecewiseLoss(nn.Module):
         return loss
 
 
-    def forward_(self, seq, pair, fname=None):
+    def forward_(self, seq, pair, fname=None):  # BCELoss with 'mean' reduction
         ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=pair, max_internal_length=None)
 
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
@@ -131,12 +136,6 @@ class PiecewiseLoss(nn.Module):
             fn = score_paired[ref_mat==True]
             if len(fn) > 0:
                 loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
-
-            # ref_mat = torch.zeros_like(score_paired)
-            # for i, j in enumerate(ref_bp[k]):
-            #     if i < j:
-            #         ref_mat[i, j] = ref_mat[j, i] = 1.
-            # loss[k] += self.loss_fn(score_paired, ref_mat)
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
@@ -353,6 +352,9 @@ class Train:
         self.optimizer = self.build_optimizer(args.optimizer, self.model, args.lr, args.l2_weight)
         self.loss_fn = self.build_loss_function(args.loss_func, self.model, args)
 
+        if args.init_param is not None:
+            self.model.load_state_dict(torch.load(args.init_param))
+
         checkpoint_epoch = 0
         if args.resume is not None:
             checkpoint_epoch = self.resume_checkpoint(args.resume)
@@ -386,6 +388,8 @@ class Train:
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
+        subparser.add_argument('--init-param', type=str, default=None,
+                            help='initialized parameters')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
@@ -407,18 +411,18 @@ class Train:
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--lr', type=float, default=0.01,
-                            help='the learning rate for optimizer (default: 0.01)')
+        gparser.add_argument('--lr', type=float, default=0.001,
+                            help='the learning rate for optimizer (default: 0.001)')
         gparser.add_argument('--loss-func', choices=('hinge', 'piecewise'), default='hinge',
                             help="loss fuction ('hinge', 'piecewise') ")
-        gparser.add_argument('--loss-pos-paired', type=float, default=1,
-                            help='the penalty for positive base-pairs for loss augmentation (default: 1)')
-        gparser.add_argument('--loss-neg-paired', type=float, default=1,
-                            help='the penalty for negative base-pairs for loss augmentation (default: 1)')
-        gparser.add_argument('--loss-pos-unpaired', type=float, default=1,
-                            help='the penalty for positive unpaired bases for loss augmentation (default: 1)')
-        gparser.add_argument('--loss-neg-unpaired', type=float, default=1,
-                            help='the penalty for negative unpaired bases for loss augmentation (default: 1)')
+        gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
+                            help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
+        gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
+                            help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--fp-weight', type=float, default=0.1,
                             help='the weight of false positives for piecewise loss (default: 0.1)')
         gparser.add_argument('--fn-weight', type=float, default=0.9,

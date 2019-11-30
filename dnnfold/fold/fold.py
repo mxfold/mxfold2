@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
-                     CNNPairedLayer, CNNUnpairedLayer, FCLengthLayer,
-                     FCPairedLayer, FCUnpairedLayer)
+
 from .embedding import OneHotEmbedding, SparseEmbedding
+from .layers import (CNNEncoder, CNNPairedLayer, CNNUnpairedLayer,
+                     FCLengthLayer, FCPairedLayer, FCUnpairedLayer,
+                     LSTMEncoder, Transform2D)
 
 
 class AbstractFold(nn.Module):
@@ -63,59 +64,42 @@ class AbstractFold(nn.Module):
 class AbstractNeuralFold(AbstractFold):
     def __init__(self, predict, 
             n_out_paired_layers=0, n_out_unpaired_layers=0,
-            embed_size=0,
-            num_filters=(256,), filter_size=(7,), dilation=0, pool_size=(1,), 
-            num_lstm_layers=0, num_lstm_units=0, num_hidden_units=(128,), no_split_lr=False,
-            dropout_rate=0.0, fc_dropout_rate=0.0, fc='linear', num_att=0,
-            lstm_cnn=False, context_length=1, mix_base=0, pair_join='cat', **kwargs):
+            embed_size=0, dropout_rate=0.0, pair_join='cat', 
+            num_filters=(), filter_size=(), dilation=0, pool_size=(), 
+            num_lstm_layers=0, num_lstm_units=0, num_att=0,
+            num_filters_2d=(32,), filter_size_2d=(3,),
+            num_hidden_units=(32,), **kwargs):
 
         super(AbstractNeuralFold, self).__init__(predict=predict)
 
-        self.mix_base = mix_base
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
-        n_in_base = self.embedding.n_out
-        n_in = n_in_base
+        n_in = self.embedding.n_out
 
-        self.encoder = CNNLSTMEncoder(n_in, lstm_cnn=lstm_cnn, 
-            num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
-            num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate, no_split_lr=no_split_lr)
-        n_in = self.encoder.n_out
-
-        self.fc_paired = self.fc_unpaired = self.softmax = None
-        if pair_join=='bilinear':
-            if n_out_paired_layers > 0:
-                self.fc_paired = BilinearPairedLayer(n_in//3, n_out_paired_layers, 
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-            if n_out_unpaired_layers > 0:
-                self.fc_unpaired = FCUnpairedLayer(n_in//3, n_out_unpaired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-
-        elif fc=='linear':
-            if n_out_paired_layers > 0:
-                self.fc_paired = FCPairedLayer(n_in//3, n_out_paired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
-            if n_out_unpaired_layers > 0:
-                self.fc_unpaired = FCUnpairedLayer(n_in//3, n_out_unpaired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-
-        elif fc=='conv':
-            if n_out_paired_layers > 0:
-                self.fc_paired = CNNPairedLayer(n_in//3, n_out_paired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, join=pair_join, n_in_base=n_in_base, mix_base=self.mix_base)
-            if n_out_unpaired_layers > 0:
-                self.fc_unpaired = CNNUnpairedLayer(n_in//3, n_out_unpaired_layers,
-                                        layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                        context=context_length, n_in_base=n_in_base, mix_base=self.mix_base)
-
-        elif fc=='profile':
-            if n_out_unpaired_layers > 0:
-                self.fc_unpaired = FCUnpairedLayer(n_in//3, n_out_unpaired_layers, layers=num_hidden_units, dropout_rate=fc_dropout_rate)
-                self.softmax = nn.Softmax(dim=2)
-
+        if len(num_filters) > 0 and num_filters[0] > 0:
+            self.conv1d = CNNEncoder(n_in, num_filters=num_filters, filter_size=filter_size, 
+                            pool_size=pool_size, dilation=dilation, dropout_rate=dropout_rate)
+            n_in = num_filters[-1]
         else:
-            raise('not implemented')
+            self.conv1d = nn.Identity()
+
+        if num_lstm_layers > 0:
+            self.lstm = LSTMEncoder(n_in, num_lstm_units=num_lstm_units, num_att=num_att, dropout_rate=dropout_rate)
+            n_in = num_lstm_units * 2
+        else:
+            self.lstm = nn.Identity()
+
+        self.transform2d = Transform2D(join=pair_join)
+
+        n_in_paired = n_in * 2
+        self.conv2d_paired = CNNPairedLayer(n_in_paired, num_filters_2d=num_filters_2d, 
+                            filter_size_2d=filter_size_2d, dropout_rate=dropout_rate)
+        n_in_paired = num_filters_2d[-1] if len(num_filters_2d) > 0 else n_in_paired
+        self.fc_paired = FCPairedLayer(n_in_paired, n_out_paired_layers, 
+                            fc_layers=num_hidden_units, dropout_rate=dropout_rate)
+
+        n_in_unpaired = n_in
+        self.conv2d_unpaired = CNNUnpairedLayer(n_in_unpaired, num_filters_2d=num_filters_2d, 
+                            filter_size_2d=filter_size_2d, dropout_rate=dropout_rate)
+        n_in_unpaired = num_filters_2d[-1] if len(num_filters_2d) > 0 else n_in_unpaired
+        self.fc_unpaired = FCUnpairedLayer(n_in_unpaired, n_out_unpaired_layers, 
+                            fc_layers=num_hidden_units, dropout_rate=dropout_rate)
