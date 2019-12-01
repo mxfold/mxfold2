@@ -62,22 +62,20 @@ class Predict:
 
         config = {
             'embed_size' : args.embed_size,
-            'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'filter_size': args.filter_size if args.filter_size is not None else (5,),
-            'pool_size': args.pool_size if args.pool_size is not None else (1,),
+            'num_filters': args.num_filters,
+            'filter_size': args.filter_size,
+            'pool_size': args.pool_size,
             'dilation': args.dilation, 
             'num_lstm_layers': args.num_lstm_layers, 
             'num_lstm_units': args.num_lstm_units,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
+            'num_paired_filters': args.num_paired_filters,
+            'paired_filter_size': args.paired_filter_size,
+            'num_unpaired_filters': args.num_paired_filters,
+            'unpaired_filter_size': args.paired_filter_size,
+            'num_hidden_units': args.num_hidden_units,
             'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,            
-            'lstm_cnn': args.lstm_cnn,
             'num_att': args.num_att,
-            'context_length': args.context_length,
-            'mix_base': args.mix_base,
             'pair_join': args.pair_join,
-            'fc': args.fc,
-            'no_split_lr': args.no_split_lr
         }
 
         if args.model == 'Zuker':
@@ -89,18 +87,12 @@ class Predict:
         elif args.model == 'ZukerS':
             model = ZukerFold(model_type='S', **config)
 
-        elif args.model == 'ZukerP':
-            model = ZukerFold(model_type='P', **config)
-
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)
 
         elif args.model == 'NussinovS':
             config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn })
             model = NussinovFold(model_type='S', **config)
-
-        elif args.model == 'NussinovP':
-            model = NussinovFold(model_type='P', **config)
 
         else:
             raise('not implemented')
@@ -153,44 +145,43 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov', 'NussinovS'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov', 'NussinovS')")
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
-        gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--filter-size', type=int, action='append',
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN (default: 1)')
+        gparser.add_argument('--num-filters', type=int, action='append', default=[],
+                        help='the number of CNN filters (default: [])')
+        gparser.add_argument('--filter-size', type=int, action='append', default=[],
+                        help='the length of each filter of CNN (default: [])')
+        gparser.add_argument('--pool-size', type=int, action='append', default=[],
+                        help='the width of the max-pooling layer of CNN (default: [])')
         gparser.add_argument('--dilation', type=int, default=0, 
                         help='Use the dilated convolution (default: 0)')
         gparser.add_argument('--num-lstm-layers', type=int, default=0,
                         help='the number of the LSTM hidden layers (default: 0)')
         gparser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units (default: 0)')
+        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
+                        help='the number of paired CNN filters (default: [])')
+        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
+                        help='the size of each filter of paired CNN (default: [])')
+        gparser.add_argument('--num-unpaired-filters', type=int, action='append', default=[],
+                        help='the number of unpaired CNN filters (default: [])')
+        gparser.add_argument('--unpaired-filter-size', type=int, action='append', default=[],
+                        help='the size of each filter of unpaired CNN (default: [])')
         gparser.add_argument('--num-hidden-units', type=int, action='append',
                         help='the number of the hidden units of full connected layers (default: 32)')
         gparser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the CNN and LSTM units (default: 0.0)')
-        gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--lstm-cnn', default=False, action='store_true',
-                        help='use LSTM layer before CNN (default: False)')
+        # gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
+        #                 help='dropout rate of the hidden units (default: 0.0)')
         gparser.add_argument('--num-att', type=int, default=0,
                         help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--context-length', type=int, default=1,
-                        help='the length of context for FC layers (default: 1)')
-        gparser.add_argument('--mix-base', default=0, type=int, 
-                        help='the length of context for mixing the base features to the input of the folding layer (default: 0)')
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
-        gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
-                            help="type of final layers ('linear', 'conv') (default: 'linear')")
-        gparser.add_argument('--no-split-lr', default=False, action='store_true')
         gparser.add_argument('--gamma', type=float, default=5,
                         help='the weight of basepair scores in NussinovS model (default: 5)')
-        gparser.add_argument('--sinkhorn', type=int, default=64,
-                        help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
+        gparser.add_argument('--sinkhorn', type=int, default=32,
+                        help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 32)')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

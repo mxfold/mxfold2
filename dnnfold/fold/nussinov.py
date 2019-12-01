@@ -19,20 +19,15 @@ class NussinovFold(AbstractNeuralFold):
 
 
     def make_param(self, seq):
-        device = next(self.parameters()).device
-        x = self.embedding(['0' + s for s in seq]).to(device) # (B, embed_size, N)
-        B, _, N = x.shape
-        x = self.conv1d(x) # (B, num_filters[-1], N)
-        x = torch.transpose(x, dim0=1, dim1=2) # (B, N, num_filters[-1])
-        x = self.lstm(x) # (B, N, C=num_lstm_units*2)
-        x2 = self.transform2d(x, x) # (B, N, N, C*2)
-        score_paired = self.fc_paired(self.conv2d_paired(x2)).view(B, N, N)
-        score_unpaired = self.fc_unpaired(self.conv2d_unpaired(x)).view(B, N)
+        score_paired, score_unpaired = super(NussinovFold, self).make_param(seq)
+        B, N, _ = score_unpaired.shape
+        score_paired = score_paired.view(B, N, N)
+        score_unpaired = score_unpaired.view(B, N)
 
         if self.model_type == 'N':
             return [ {  'score_paired': score_paired[i],
                         'score_unpaired': score_unpaired[i]
-                    } for i in range(len(x)) ]
+                    } for i in range(B) ]
 
         elif self.model_type == 'S':
             score_paired = torch.sigmoid(score_paired)
@@ -41,7 +36,7 @@ class NussinovFold(AbstractNeuralFold):
             #print(torch.min(score_paired), torch.max(score_paired))
             return [ {  'score_paired': score_paired[i] * self.gamma - 1,
                         'score_unpaired': torch.zeros_like(score_unpaired[i])
-                    } for i in range(len(x)) ]
+                    } for i in range(B) ]
 
         else:
             raise('not implemented')
