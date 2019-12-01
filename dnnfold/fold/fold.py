@@ -119,9 +119,7 @@ class AbstractNeuralFold(AbstractFold):
         x = torch.transpose(x, dim0=1, dim1=2) # (B, N, num_filters[-1])
         x = self.lstm(x) # (B, N, C=num_lstm_units*2)
         if self.att is not None:
-            x = torch.transpose(x, 0, 1)
             x, _ = self.att(x, x, x)
-            x = torch.transpose(x, 0, 1)
         x2 = self.transform2d(x, x) # (B, N, N, C*2)
         score_paired = self.fc_paired(self.conv_paired(x2)) # (B, N, N, n_out_paired_layers)
         score_unpaired = self.fc_unpaired(self.conv_unpaired(x)) # (B, N, n_out_unpaired_layers)

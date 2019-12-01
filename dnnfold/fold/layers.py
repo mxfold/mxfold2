@@ -74,14 +74,15 @@ class CNNPairedLayer(nn.Module):
                 nn.Dropout(p=dropout_rate)
             ]
             n_in = n_out
-        self.conv = nn.Sequential(*conv) if len(conv) > 0 else nn.Identity()
+        self.conv = nn.Sequential(*conv) if len(conv) > 0 else None #nn.Identity()
 
     
     def forward(self, x): # (B, N, N, n_in)
-        B, N, _, _ = x.shape
-        x = x.permute(0, 3, 1, 2)
-        x = self.conv(x)
-        x = x.permute(0, 2, 3, 1).view(B, N, N, -1)
+        if self.conv is not None:
+            B, N, _, _ = x.shape
+            x = x.permute(0, 3, 1, 2)
+            x = self.conv(x)
+            x = x.permute(0, 2, 3, 1).view(B, N, N, -1)
         return x # (B, N, N, n_out)
 
 
@@ -121,14 +122,15 @@ class CNNUnpairedLayer(nn.Module):
                 nn.Dropout(p=dropout_rate)
             ]
             n_in = n_out
-        self.conv = nn.Sequential(*conv) if len(conv) > 0 else nn.Identity()
+        self.conv = nn.Sequential(*conv) if len(conv) > 0 else None #nn.Identity()
 
     
     def forward(self, x): # (B, N, n_in)
-        B, N, _ = x.shape
-        x = x.permute(0, 2, 1)
-        x = self.conv(x)
-        x = x.permute(0, 2, 1).view(B, N, -1)
+        if self.conv is not None:
+            B, N, _ = x.shape
+            x = x.permute(0, 2, 1)
+            x = self.conv(x)
+            x = x.permute(0, 2, 1).view(B, N, -1)
         return x # (B, N, n_out)
 
 
