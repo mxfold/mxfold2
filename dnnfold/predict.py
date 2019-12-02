@@ -71,10 +71,8 @@ class Predict:
             'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
             'dropout_rate': args.dropout_rate,
             'fc_dropout_rate': args.fc_dropout_rate,            
-            'lstm_cnn': args.lstm_cnn,
             'num_att': args.num_att,
             'context_length': args.context_length,
-            'mix_base': args.mix_base,
             'pair_join': args.pair_join,
             'fc': args.fc,
             'no_split_lr': args.no_split_lr
@@ -89,18 +87,12 @@ class Predict:
         elif args.model == 'ZukerS':
             model = ZukerFold(model_type='S', **config)
 
-        elif args.model == 'ZukerP':
-            model = ZukerFold(model_type='P', **config)
-
         elif args.model == 'Nussinov':
             model = NussinovFold(**config)
 
         elif args.model == 'NussinovS':
             config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn })
             model = NussinovFold(model_type='S', **config)
-
-        elif args.model == 'NussinovP':
-            model = NussinovFold(model_type='P', **config)
 
         else:
             raise('not implemented')
@@ -175,16 +167,14 @@ class Predict:
                         help='dropout rate of the CNN and LSTM units (default: 0.0)')
         gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--lstm-cnn', default=False, action='store_true',
-                        help='use LSTM layer before CNN (default: False)')
         gparser.add_argument('--num-att', type=int, default=0,
                         help='the number of the heads of attention (default: 0)')
         gparser.add_argument('--context-length', type=int, default=1,
                         help='the length of context for FC layers (default: 1)')
         gparser.add_argument('--mix-base', default=0, type=int, 
                         help='the length of context for mixing the base features to the input of the folding layer (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
+        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul'), default='cat', 
+                            help="how pairs of vectors are joined ('cat', 'add', 'mul') (default: 'cat')")
         gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
                             help="type of final layers ('linear', 'conv') (default: 'linear')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')

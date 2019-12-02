@@ -4,10 +4,7 @@ import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractNeuralFold
-from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
-                     CNNPairedLayer, CNNUnpairedLayer, FCLengthLayer,
-                     FCPairedLayer, FCUnpairedLayer)
-from .embedding import OneHotEmbedding, SparseEmbedding
+from .layers import FCLengthLayer
 
 
 class ZukerFold(AbstractNeuralFold):
@@ -21,11 +18,6 @@ class ZukerFold(AbstractNeuralFold):
         elif model_type == "L":
             n_out_paired_layers = 5
             n_out_unpaired_layers = 4
-        elif model_type == 'P':
-            n_out_paired_layers = 0
-            n_out_unpaired_layers = 6
-            kwargs['no_split_lr'] = True
-            kwargs['fc'] = 'profile'
         else:
             raise("not implemented")
 
@@ -48,11 +40,8 @@ class ZukerFold(AbstractNeuralFold):
 
     def make_param(self, seq):
         device = next(self.parameters()).device
-        x = self.embedding(['0' + s for s in seq]).to(device) # (B, 4, N)
-
-        x_l, x_r, x_u = self.encoder(x) # (B, N, C)
-        x = x.transpose(1, 2)
-        B, N, _ = x_u.shape
+        score_paired, score_unpaired = super(ZukerFold, self).make_param(seq)
+        B, N, _ = score_unpaired.shape
 
         def unpair_interval(su):
             su = su.view(B, 1, N)
@@ -61,63 +50,42 @@ class ZukerFold(AbstractNeuralFold):
             return su
 
         if self.model_type == "S":
-            score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
-            score_unpair = self.fc_unpaired(x_u, x) # (B, N, 1 or 4)
             score_basepair = score_paired[:, :, :, 0] # (B, N, N)
-            score_unpair = unpair_interval(score_unpair)
+            score_unpaired = unpair_interval(score_unpaired)
             score_helix_stacking = torch.zeros((B, N, N), device=device)
             score_mismatch_external = score_helix_stacking
             score_mismatch_internal = score_helix_stacking
             score_mismatch_multi = score_helix_stacking
             score_mismatch_hairpin = score_helix_stacking
-            score_base_hairpin = score_unpair
-            score_base_internal = score_unpair
-            score_base_multi = score_unpair
-            score_base_external = score_unpair
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
 
         elif self.model_type == "M":
-            score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
-            score_unpair = self.fc_unpaired(x_u, x) # (B, N, 1 or 4)
             score_basepair = torch.zeros((B, N, N), device=device)
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
-            score_unpair = unpair_interval(score_unpair)
-            score_base_hairpin = score_unpair
-            score_base_internal = score_unpair
-            score_base_multi = score_unpair
-            score_base_external = score_unpair
+            score_unpaired = unpair_interval(score_unpaired)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
 
         elif self.model_type == "L":
-            score_paired = self.fc_paired(x_l, x_r, x) # (B, N, N, 1, 2 or 5)
-            score_unpair = self.fc_unpaired(x_u, x) # (B, N, 1 or 4)
             score_basepair = torch.zeros((B, N, N), device=device)
             score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
             score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_internal = score_paired[:, :, :, 2] # (B, N, N)
             score_mismatch_multi = score_paired[:, :, :, 3] # (B, N, N)
             score_mismatch_hairpin = score_paired[:, :, :, 4] # (B, N, N)
-            score_base_hairpin = unpair_interval(score_unpair[:, :, 0])
-            score_base_internal = unpair_interval(score_unpair[:, :, 1])
-            score_base_multi = unpair_interval(score_unpair[:, :, 2])
-            score_base_external = unpair_interval(score_unpair[:, :, 3])
-
-        elif self.model_type == 'P':
-            x = self.softmax(self.fc_unpaired(x_u))
-            x_l = x[:, :, 0].view(B, N, 1).expand(B, N, N)
-            x_r = x[:, :, 1].view(B, 1, N).expand(B, N, N)
-            score_basepair = x_l + x_r
-            score_helix_stacking = torch.zeros((B, N, N), device=device)
-            score_mismatch_external = score_helix_stacking
-            score_mismatch_internal = score_helix_stacking
-            score_mismatch_multi = score_helix_stacking
-            score_mismatch_hairpin = score_helix_stacking
-            score_base_hairpin = unpair_interval(x[:, :, 2])
-            score_base_internal = unpair_interval(x[:, :, 3])
-            score_base_multi = unpair_interval(x[:, :, 4])
-            score_base_external = unpair_interval(x[:, :, 5])
+            score_base_hairpin = unpair_interval(score_unpaired[:, :, 0])
+            score_base_internal = unpair_interval(score_unpaired[:, :, 1])
+            score_base_multi = unpair_interval(score_unpaired[:, :, 2])
+            score_base_external = unpair_interval(score_unpaired[:, :, 3])
 
         else:
             raise("not implemented")
@@ -139,6 +107,6 @@ class ZukerFold(AbstractNeuralFold):
             'score_internal_explicit': self.fc_length['score_internal_explicit'].make_param(),
             'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
             'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param()
-        } for i in range(len(x)) ]
+        } for i in range(B) ]
 
         return param
