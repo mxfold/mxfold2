@@ -4,6 +4,10 @@ import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractNeuralFold
+from .layers import (BilinearPairedLayer, CNNLayer, CNNLSTMEncoder,
+                     CNNPairedLayer, CNNUnpairedLayer, FCLengthLayer,
+                     FCPairedLayer, FCUnpairedLayer)
+from .embedding import OneHotEmbedding, SparseEmbedding
 
 
 class ZukerFold(AbstractNeuralFold):
