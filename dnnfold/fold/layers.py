@@ -12,7 +12,7 @@ class CNNLayer(nn.Module):
                 nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)),
                 nn.MaxPool1d(p, stride=1, padding=p//2) if p > 1 else nn.Identity(),
                 nn.GroupNorm(1, n_out), # same as LayerNorm?
-                nn.ELU(), 
+                nn.CELU(), 
                 nn.Dropout(p=dropout_rate) ]
             n_in = n_out
         self.net = nn.Sequential(*l)
@@ -76,7 +76,7 @@ class CNNLSTMEncoder(nn.Module):
         if self.lstm is not None:
             x, _ = self.lstm(x)
             x = self.lstm_ln(x)
-            x = self.dropout(F.elu(x)) # (B, N, H*2)
+            x = self.dropout(F.celu(x)) # (B, N, H*2)
 
         if self.conv is not None and self.lstm_cnn:
             x = torch.transpose(x, 1, 2) # (B, H*2, N)
@@ -119,7 +119,7 @@ class FCPairedLayer(nn.Module):
             l += [ 
                 nn.Linear(n, m), 
                 nn.LayerNorm(m),
-                nn.ELU(), 
+                nn.CELU(), 
                 nn.Dropout(p=dropout_rate) ]
             n = m
         l += [ nn.Linear(n, n_out) ] #, nn.LayerNorm(n_out) ]
@@ -188,7 +188,7 @@ class CNNPairedLayer(nn.Module):
             l += [ 
                 nn.Conv2d(n, m, context, padding=context//2), 
                 nn.GroupNorm(1, m),
-                nn.ELU(), 
+                nn.CELU(), 
                 nn.Dropout(p=dropout_rate) ]
             n = m
         l += [ nn.Conv2d(n, n_out, context, padding=context//2), nn.GroupNorm(1, n_out) ]
@@ -279,8 +279,8 @@ class BilinearPairedLayer(nn.Module):
         x_l = x_l.view(B*N, -1)
         x_r = x_r.view(B*N, -1)
         for fc_l, fc_r in zip(self.fc_l, self.fc_r):
-            x_l = self.dropout(F.elu(fc_l(x_l)))
-            x_r = self.dropout(F.elu(fc_r(x_r)))
+            x_l = self.dropout(F.celu(fc_l(x_l)))
+            x_r = self.dropout(F.celu(fc_r(x_r)))
         x_l = x_l.view(B, N, -1)
         x_r = x_r.view(B, N, -1)
 
@@ -311,7 +311,7 @@ class FCUnpairedLayer(nn.Module):
             l += [
                 nn.Linear(n, m), 
                 nn.LayerNorm(m),
-                nn.ELU(), 
+                nn.CELU(), 
                 nn.Dropout(p=dropout_rate)]
             n = m
         l += [ nn.Linear(n, n_out) ] # , nn.LayerNorm(n_out) ]
@@ -361,7 +361,7 @@ class CNNUnpairedLayer(nn.Module):
             l += [ 
                 nn.Conv1d(n, m, context, padding=context//2), 
                 nn.GroupNorm(1, m),
-                nn.ELU(), 
+                nn.CELU(), 
                 nn.Dropout(p=dropout_rate) ]
             n = m
         l += [ nn.Conv1d(n, n_out, context, padding=context//2), nn.GroupNorm(1, n_out) ]
@@ -402,7 +402,7 @@ class FCLengthLayer(nn.Module):
 
         l = []
         for m in layers:
-            l += [ nn.Linear(n, m), nn.ELU(), nn.Dropout(p=dropout_rate) ]
+            l += [ nn.Linear(n, m), nn.CELU(), nn.Dropout(p=dropout_rate) ]
             n = m
         l += [ nn.Linear(n, 1) ]
         self.net = nn.Sequential(*l)

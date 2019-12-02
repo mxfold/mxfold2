@@ -407,18 +407,18 @@ class Train:
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--lr', type=float, default=0.01,
-                            help='the learning rate for optimizer (default: 0.01)')
+        gparser.add_argument('--lr', type=float, default=0.001,
+                            help='the learning rate for optimizer (default: 0.001)')
         gparser.add_argument('--loss-func', choices=('hinge', 'piecewise'), default='hinge',
                             help="loss fuction ('hinge', 'piecewise') ")
-        gparser.add_argument('--loss-pos-paired', type=float, default=1,
-                            help='the penalty for positive base-pairs for loss augmentation (default: 1)')
-        gparser.add_argument('--loss-neg-paired', type=float, default=1,
-                            help='the penalty for negative base-pairs for loss augmentation (default: 1)')
-        gparser.add_argument('--loss-pos-unpaired', type=float, default=1,
-                            help='the penalty for positive unpaired bases for loss augmentation (default: 1)')
-        gparser.add_argument('--loss-neg-unpaired', type=float, default=1,
-                            help='the penalty for negative unpaired bases for loss augmentation (default: 1)')
+        gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
+                            help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
+        gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
+                            help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--fp-weight', type=float, default=0.1,
                             help='the weight of false positives for piecewise loss (default: 0.1)')
         gparser.add_argument('--fn-weight', type=float, default=0.9,
