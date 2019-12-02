@@ -22,18 +22,26 @@ class CNNEncoder(nn.Module):
 
 
 class LSTMEncoder(nn.Module):
-    def __init__(self, n_in, num_lstm_layers=1, num_lstm_units=60, dropout_rate=0.0):
+    def __init__(self, n_in, num_lstm_layers=1, num_lstm_units=60, num_att=8, dropout_rate=0.0):
         super(LSTMEncoder, self).__init__()
         self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, 
                         batch_first=True, bidirectional=True, 
                         dropout=dropout_rate if num_lstm_layers>1 else 0)
         self.norm = nn.LayerNorm(num_lstm_units*2)
         self.dropout = nn.Dropout(p=dropout_rate)
+        self.att = None
+        if num_att > 0:
+            self.att = nn.MultiheadAttention(num_lstm_units*2, num_att)
 
 
     def forward(self, x): # (B, N, n_in)
         x, _ = self.lstm(x) # (B, N, n_out*2)
         x = self.dropout(F.celu(self.norm(x))) # (B, N, n_out*2)
+
+        if self.att is not None:
+            x = torch.transpose(x, 0, 1)
+            x, _ = self.att(x, x, x)
+            x = torch.transpose(x, 0, 1)
 
         # assert(x.shape[-1] % 2 == 0)
         # x_l = x[:, :, 0::2]
@@ -63,10 +71,10 @@ class Transform2D(nn.Module):
 
 
 class CNNPairedLayer(nn.Module):
-    def __init__(self, n_in, num_filters=(), filter_size=(), dropout_rate=0.0):
+    def __init__(self, n_in, num_filters_2d=(), filter_size_2d=(), dropout_rate=0.0):
         super(CNNPairedLayer, self).__init__()
         conv = []
-        for n_out, f_sz in zip(num_filters, filter_size):
+        for n_out, f_sz in zip(num_filters_2d, filter_size_2d):
             conv += [
                 nn.Conv2d(n_in, n_out, f_sz, padding=f_sz//2), 
                 nn.GroupNorm(1, n_out),
@@ -110,10 +118,10 @@ class FCPairedLayer(nn.Module):
 
 
 class CNNUnpairedLayer(nn.Module):
-    def __init__(self, n_in, num_filters=(), filter_size=(), dropout_rate=0.0):
+    def __init__(self, n_in, num_filters_2d=(), filter_size_2d=(), dropout_rate=0.0):
         super(CNNUnpairedLayer, self).__init__()
         conv = []
-        for n_out, f_sz in zip(num_filters, filter_size):
+        for n_out, f_sz in zip(num_filters_2d, filter_size_2d):
             conv += [
                 nn.Conv1d(n_in, n_out, f_sz, padding=f_sz//2), 
                 nn.GroupNorm(1, n_out),
@@ -208,12 +216,15 @@ class Sinkhorn(nn.Module):
 
     def forward(self, x_p, x_u): # (B, N, N), (B, N)
         if self.n_iter > 0:
-            x_p = torch.clamp(x_p, min=self.eps) # for numerical stability
-            x_u = torch.clamp(x_u, min=self.eps) 
-            x_p = (x_p + x_p.transpose(1, 2)) / 2
-            w = torch.triu(x_p, diagonal=1) + torch.tril(x_p, diagonal=1)
+            if self.eps > 0:
+                x_p = torch.clamp(x_p, min=self.eps) # for numerical stability
+                x_u = torch.clamp(x_u, min=self.eps) 
+
+            w = torch.triu(x_p, diagonal=1)
+            w = w + w.transpose(1, 2) 
             w = w + torch.diag_embed(x_u)
             w = self.sinkhorn(w)
             x_u = torch.diagonal(w, dim1=1, dim2=2)
-            x_p = torch.triu(w, diagonal=1) + torch.tril(w, diagonal=1)
+            w = torch.triu(w, diagonal=1)
+            x_p = w + w.transpose(1, 2) 
         return x_p, x_u
