@@ -69,13 +69,13 @@ class Predict:
             'num_lstm_layers': args.num_lstm_layers, 
             'num_lstm_units': args.num_lstm_units,
             'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
+            'num_paired_filters': args.num_paired_filters,
+            'paired_filter_size': args.paired_filter_size,
             'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,            
+            'fc_dropout_rate': args.fc_dropout_rate,
             'num_att': args.num_att,
-            'context_length': args.context_length,
             'pair_join': args.pair_join,
-            'fc': args.fc,
-            'no_split_lr': args.no_split_lr
+            'no_split_lr': args.no_split_lr,
         }
 
         if args.model == 'Zuker':
@@ -145,8 +145,8 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerP', 'Nussinov', 'NussinovS', 'NussinovP')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov', 'NussinovS'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov', 'NussinovS')")
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',
@@ -161,6 +161,10 @@ class Predict:
                         help='the number of the LSTM hidden layers (default: 0)')
         gparser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units (default: 0)')
+        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
+                        help='the number of CNN filters (default: 96)')
+        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
+                        help='the length of each filter of CNN (default: 5)')
         gparser.add_argument('--num-hidden-units', type=int, action='append',
                         help='the number of the hidden units of full connected layers (default: 32)')
         gparser.add_argument('--dropout-rate', type=float, default=0.0,
@@ -169,14 +173,8 @@ class Predict:
                         help='dropout rate of the hidden units (default: 0.0)')
         gparser.add_argument('--num-att', type=int, default=0,
                         help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--context-length', type=int, default=1,
-                        help='the length of context for FC layers (default: 1)')
-        gparser.add_argument('--mix-base', default=0, type=int, 
-                        help='the length of context for mixing the base features to the input of the folding layer (default: 0)')
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul') (default: 'cat')")
-        gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
-                            help="type of final layers ('linear', 'conv') (default: 'linear')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
         gparser.add_argument('--gamma', type=float, default=5,
                         help='the weight of basepair scores in NussinovS model (default: 5)')

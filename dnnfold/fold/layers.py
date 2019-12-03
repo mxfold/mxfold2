@@ -49,7 +49,7 @@ class CNNLSTMEncoder(nn.Module):
             self.lstm_ln = nn.LayerNorm(self.n_out)
 
         if num_att > 0:
-            self.att = nn.MultiheadAttention(self.n_out, num_att, dropout_rate=dropout_rate)
+            self.att = nn.MultiheadAttention(self.n_out, num_att, dropout=dropout_rate)
 
 
     def forward(self, x): # (B, n_in, N)
@@ -63,7 +63,10 @@ class CNNLSTMEncoder(nn.Module):
             x = self.dropout(F.celu(x)) # (B, N, H*2)
 
         if self.att is not None:
-            x, _ = self.att(x, x, x)
+            x = torch.transpose(x, 0, 1)
+            x_a, _ = self.att(x, x, x)
+            x = x + x_a
+            x = torch.transpose(x, 0, 1)
 
         return x
 
@@ -90,113 +93,85 @@ class Transform2D(nn.Module):
         return x
 
 
-class FCPairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0, n_in_base=4):
-        super(FCPairedLayer, self).__init__()
-        if len(layers)>0 and layers[0]==0:
-            layers = ()
+class PairedLayer(nn.Module):
+    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0):
+        super(PairedLayer, self).__init__()
 
-        l = []
-        for m in layers:
-            l += [ 
-                nn.Linear(n_in, m), 
-                nn.LayerNorm(m),
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate) ]
-            n_in = m
-        l += [ nn.Linear(n_in, n_out) ] #, nn.LayerNorm(n_out) ]
-        self.net = nn.Sequential(*l)
+        while len(filters) > len(ksize):
+            ksize = tuple(ksize) + (ksize[-1],)
 
-
-    def forward(self, x):
-        B, N, N, C = x.shape
-        x = x.view(B*N*N, -1)
-        x = self.net(x)
-        x = x.view(B, N, N, -1) # (B, N, N, n_out)
-        return x
-
-
-class FCUnpairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), dropout_rate=0.0):
-        super(FCUnpairedLayer, self).__init__()
-        if len(layers)>0 and layers[0]==0:
-            layers = ()
-
-        l = []
-        for m in layers:
-            l += [
-                nn.Linear(n_in, m), 
-                nn.LayerNorm(m),
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate)]
-            n_in = m
-        l += [ nn.Linear(n_in, n_out) ] # , nn.LayerNorm(n_out) ]
-        self.net = nn.Sequential(*l)
-
-
-    def forward(self, x):
-        B, N, C = x.shape
-        x = x.view(B*N, -1) # (B*N, C*width)
-        x = self.net(x) # (B*N, n_out)
-        return x.view(B, N, -1) # (B, N, n_out)
-
-
-class CNNPairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), ksize=(), dropout_rate=0.0):
-        super(CNNPairedLayer, self).__init__()
-        if len(layers)>0 and layers[0]==0:
-            layers = ()
-
-        l = []
-        for m, k in zip(layers, ksize):
-            l += [ 
+        conv = []
+        for m, k in zip(filters, ksize):
+            conv += [ 
                 nn.Conv2d(n_in, m, k, padding=k//2), 
                 nn.GroupNorm(1, m),
                 nn.CELU(), 
                 nn.Dropout(p=dropout_rate) ]
             n_in = m
-        self.net = nn.Sequential(*l)
-        self.linear = nn.Linear(n_in, n_out)
+        self.conv = nn.Sequential(*conv)
+
+        fc = []
+        for m in fc_layers:
+            fc += [
+                nn.Linear(n_in, m), 
+                nn.LayerNorm(m),
+                nn.CELU(), 
+                nn.Dropout(p=dropout_rate) ]
+            n_in = m
+        fc += [ nn.Linear(n_in, n_out) ]
+        self.fc = nn.Sequential(*fc)
 
 
     def forward(self, x):
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
-        x = self.net(x)
+        x = self.conv(x)
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
-        return self.linear(x).view(B, N, N, -1) # (B, N, N, n_out)
+        x = self.fc(x)
+        return x.view(B, N, N, -1) # (B, N, N, n_out)
 
 
+class UnpairedLayer(nn.Module):
+    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0):
+        super(UnpairedLayer, self).__init__()
 
-class CNNUnpairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, layers=(), ksize=(), dropout_rate=0.0):
-        super(CNNUnpairedLayer, self).__init__()
-        if len(layers)>0 and layers[0]==0:
-            layers = ()
+        while len(filters) > len(ksize):
+            ksize = tuple(ksize) + (ksize[-1],)
 
-        l = []
-        for m, k in zip(layers, ksize):
-            l += [ 
+        conv = []
+        for m, k in zip(filters, ksize):
+            conv += [ 
                 nn.Conv1d(n_in, m, k, padding=k//2), 
                 nn.GroupNorm(1, m),
                 nn.CELU(), 
                 nn.Dropout(p=dropout_rate) ]
             n_in = m
-        self.net = nn.Sequential(*l)
-        self.linear = nn.Linear(n_in, n_out)  #, nn.LayerNorm(n_out) ]
+        self.conv = nn.Sequential(*conv)
+
+        fc = []
+        for m in fc_layers:
+            fc += [
+                nn.Linear(n_in, m), 
+                nn.LayerNorm(m),
+                nn.CELU(), 
+                nn.Dropout(p=dropout_rate)]
+            n_in = m
+        fc += [ nn.Linear(n_in, n_out) ] # , nn.LayerNorm(n_out) ]
+        self.fc = nn.Sequential(*fc)
 
 
     def forward(self, x, x_base=None):
         B, N, C = x.shape
         x = x.transpose(1, 2) # (B, n_in, N)
-        x = self.net(x)
+        x = self.conv(x)
         x = x.transpose(1, 2).view(B*N, -1) # (B, N, n_out)
-        return self.linear(x).view(B, N, -1)
+        x = self.fc(x)
+        return x.view(B, N, -1)
 
 
-class FCLengthLayer(nn.Module):
+class LengthLayer(nn.Module):
     def __init__(self, n_in, layers=(), dropout_rate=0.5):
-        super(FCLengthLayer, self).__init__()
+        super(LengthLayer, self).__init__()
         self.n_in = n_in
         n = n_in if isinstance(n_in, int) else np.prod(n_in)
 

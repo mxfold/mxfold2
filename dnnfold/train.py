@@ -62,18 +62,19 @@ class StructuredLoss(nn.Module):
         return loss
 
 class PiecewiseLoss(nn.Module):
-    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., verbose=False):
+    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., label_smoothing=0.1, verbose=False):
         super(PiecewiseLoss, self).__init__()
         self.model = model
         self.fp_weight = fp_weight
         self.fn_weight = fn_weight
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
+        self.label_smoothing = label_smoothing
         self.verbose = verbose
         self.loss_fn = nn.BCELoss(reduction='sum')
 
 
-    def forward(self, seq, pair, fname=None):
+    def forward(self, seq, pair, fname=None): # BCELoss with 'sum' reduction
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
         ref_sc, ref_s, ref_bp = self.model(seq, param=param, constraint=pair, max_internal_length=None)
 
@@ -93,11 +94,15 @@ class PiecewiseLoss(nn.Module):
 
             fp = score_paired[(pred_mat==True) & (ref_mat==False)]
             if len(fp) > 0:
-                loss[k] += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
+                #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
+                p = self.label_smoothing * 0.5
+                loss[k] += self.fp_weight * self.loss_fn(fp, torch.full_like(fp, p))
 
             fn = score_paired[(pred_mat==False) & (ref_mat==True)]
             if len(fn) > 0:
-                loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
+                #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
+                p = 1 - self.label_smoothing * 0.5
+                loss[k] += self.fn_weight * self.loss_fn(fn, torch.full_like(fn, p))
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
@@ -112,7 +117,7 @@ class PiecewiseLoss(nn.Module):
         return loss
 
 
-    def forward_(self, seq, pair, fname=None):
+    def forward_(self, seq, pair, fname=None):  # BCELoss with 'mean' reduction
         ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=pair, max_internal_length=None)
 
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
@@ -131,12 +136,6 @@ class PiecewiseLoss(nn.Module):
             fn = score_paired[ref_mat==True]
             if len(fn) > 0:
                 loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
-
-            # ref_mat = torch.zeros_like(score_paired)
-            # for i, j in enumerate(ref_bp[k]):
-            #     if i < j:
-            #         ref_mat[i, j] = ref_mat[j, i] = 1.
-            # loss[k] += self.loss_fn(score_paired, ref_mat)
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
@@ -245,12 +244,12 @@ class Train:
             'num_lstm_layers': args.num_lstm_layers, 
             'num_lstm_units': args.num_lstm_units,
             'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
+            'num_paired_filters': args.num_paired_filters,
+            'paired_filter_size': args.paired_filter_size,
             'dropout_rate': args.dropout_rate,
             'fc_dropout_rate': args.fc_dropout_rate,
             'num_att': args.num_att,
-            'context_length': args.context_length,
             'pair_join': args.pair_join,
-            'fc': args.fc,
             'no_split_lr': args.no_split_lr,
         }
 
@@ -300,7 +299,7 @@ class Train:
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
         elif loss_func == 'piecewise':
             return PiecewiseLoss(model, verbose=self.verbose,
-                            fp_weight=args.fp_weight, fn_weight=args.fn_weight,
+                            fp_weight=args.fp_weight, fn_weight=args.fn_weight, label_smoothing=args.label_smoothing,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
         else:
             raise('not implemented')
@@ -403,6 +402,8 @@ class Train:
                             help='the learning rate for optimizer (default: 0.001)')
         gparser.add_argument('--loss-func', choices=('hinge', 'piecewise'), default='hinge',
                             help="loss fuction ('hinge', 'piecewise') ")
+        gparser.add_argument('--label-smoothing', type=float, default=0.0,
+                            help='the label smoothing for piecewise loss (default: 0.0)')
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
@@ -433,6 +434,10 @@ class Train:
                         help='the number of the LSTM hidden layers (default: 0)')
         gparser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units (default: 0)')
+        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
+                        help='the number of CNN filters (default: 96)')
+        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
+                        help='the length of each filter of CNN (default: 5)')
         gparser.add_argument('--num-hidden-units', type=int, action='append',
                         help='the number of the hidden units of full connected layers (default: 32)')
         gparser.add_argument('--dropout-rate', type=float, default=0.0,
@@ -441,14 +446,8 @@ class Train:
                         help='dropout rate of the hidden units (default: 0.0)')
         gparser.add_argument('--num-att', type=int, default=0,
                         help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--context-length', type=int, default=1,
-                        help='the length of context for FC layers (default: 1)')
-        gparser.add_argument('--mix-base', default=0, type=int, 
-                        help='the length of context for mixing the base features to the input of the folding layer (default: 0)')
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul') (default: 'cat')")
-        gparser.add_argument('--fc', choices=('linear', 'conv'), default='linear', 
-                            help="type of final layers ('linear', 'conv') (default: 'linear')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
         gparser.add_argument('--gamma', type=float, default=5,
                         help='the weight of basepair scores in NussinovS model (default: 5)')

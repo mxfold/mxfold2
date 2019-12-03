@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractNeuralFold
-from .layers import FCLengthLayer
+from .layers import LengthLayer
 
 
 class ZukerFold(AbstractNeuralFold):
@@ -29,12 +29,12 @@ class ZukerFold(AbstractNeuralFold):
         self.model_type = model_type
 
         self.fc_length = nn.ModuleDict({
-            'score_hairpin_length': FCLengthLayer(31),
-            'score_bulge_length': FCLengthLayer(31),
-            'score_internal_length': FCLengthLayer(31),
-            'score_internal_explicit': FCLengthLayer((5, 5)),
-            'score_internal_symmetry': FCLengthLayer(16),
-            'score_internal_asymmetry': FCLengthLayer(29)
+            'score_hairpin_length': LengthLayer(31),
+            'score_bulge_length': LengthLayer(31),
+            'score_internal_length': LengthLayer(31),
+            'score_internal_explicit': LengthLayer((5, 5)),
+            'score_internal_symmetry': LengthLayer(16),
+            'score_internal_asymmetry': LengthLayer(29)
         })
 
 
