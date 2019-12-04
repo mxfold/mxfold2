@@ -4,29 +4,37 @@ import torch.nn.functional as F
 import numpy as np
 
 class CNNLayer(nn.Module):
-    def __init__(self, n_in, num_filters=(128,), filter_size=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0):
+    def __init__(self, n_in, num_filters=(128,), filter_size=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0, resnet=False):
         super(CNNLayer, self).__init__()
-        l = []
+        self.resnet = resnet
+        self.net = []
         for n_out, ksize, p in zip(num_filters, filter_size, pool_size):
-            l += [ 
-                nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)),
-                nn.MaxPool1d(p, stride=1, padding=p//2) if p > 1 else nn.Identity(),
-                nn.GroupNorm(1, n_out), # same as LayerNorm?
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate) ]
+            self.net.append( 
+                nn.Sequential( 
+                    nn.Conv1d(n_in, n_out, kernel_size=ksize, dilation=2**dilation, padding=2**dilation*(ksize//2)),
+                    nn.MaxPool1d(p, stride=1, padding=p//2) if p > 1 else nn.Identity(),
+                    nn.GroupNorm(1, n_out), # same as LayerNorm?
+                    nn.CELU(), 
+                    nn.Dropout(p=dropout_rate) ) )
             n_in = n_out
-        self.net = nn.Sequential(*l)
 
     def forward(self, x): # (B=1, 4, N)
-        return self.net(x)
+        n_in = x.shape[1]
+        for net in self.net:
+            x_a = net(x)
+            n_out = x_a.shape[1]
+            x = x + x_a if self.resnet and n_in == n_out else x_a
+            n_in = n_out
+        return x
 
 
 class CNNLSTMEncoder(nn.Module):
     def __init__(self, n_in, 
             num_filters=(256,), filter_size=(7,), pool_size=(1,), dilation=0,
-            num_lstm_layers=0, num_lstm_units=0, num_att=0, dropout_rate=0.0):
+            num_lstm_layers=0, num_lstm_units=0, num_att=0, dropout_rate=0.0, resnet=True):
 
         super(CNNLSTMEncoder, self).__init__()
+        self.resnet = resnet
         self.n_in = self.n_out = n_in
         while len(num_filters) > len(filter_size):
             filter_size = tuple(filter_size) + (filter_size[-1],)
@@ -39,7 +47,7 @@ class CNNLSTMEncoder(nn.Module):
         self.conv = self.lstm = self.att = None
 
         if len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate)
+            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate, resnet=self.resnet)
             self.n_out = n_in = num_filters[-1]
 
         if num_lstm_layers > 0:
@@ -58,9 +66,10 @@ class CNNLSTMEncoder(nn.Module):
         x = torch.transpose(x, 1, 2) # (B, N, C)
 
         if self.lstm is not None:
-            x, _ = self.lstm(x)
-            x = self.lstm_ln(x)
-            x = self.dropout(F.celu(x)) # (B, N, H*2)
+            x_a, _ = self.lstm(x)
+            x_a = self.lstm_ln(x)
+            x_a = self.dropout(F.celu(x)) # (B, N, H*2)
+            x = x + x_a if self.resnet and x.shape[2]==x_a.shape[2] else x_a
 
         if self.att is not None:
             x = torch.transpose(x, 0, 1)
