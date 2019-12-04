@@ -7,7 +7,7 @@ class CNNLayer(nn.Module):
     def __init__(self, n_in, num_filters=(128,), filter_size=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0, resnet=False):
         super(CNNLayer, self).__init__()
         self.resnet = resnet
-        self.net = []
+        self.net = nn.ModuleList()
         for n_out, ksize, p in zip(num_filters, filter_size, pool_size):
             self.net.append( 
                 nn.Sequential( 
@@ -18,13 +18,11 @@ class CNNLayer(nn.Module):
                     nn.Dropout(p=dropout_rate) ) )
             n_in = n_out
 
+
     def forward(self, x): # (B=1, 4, N)
-        n_in = x.shape[1]
         for net in self.net:
             x_a = net(x)
-            n_out = x_a.shape[1]
-            x = x + x_a if self.resnet and n_in == n_out else x_a
-            n_in = n_out
+            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
         return x
 
 
@@ -84,7 +82,6 @@ class Transform2D(nn.Module):
     def __init__(self, join='cat', context_length=0):
         super(Transform2D, self).__init__()
         self.join = join
-        # self.context_length = context_length
 
 
     def forward(self, x_l, x_r):
@@ -110,7 +107,7 @@ class PairedLayer(nn.Module):
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
-        self.conv = []
+        self.conv = nn.ModuleList()
         for m, k in zip(filters, ksize):
             self.conv.append(
                 nn.Sequential( 
@@ -151,7 +148,7 @@ class UnpairedLayer(nn.Module):
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
-        self.conv = []
+        self.conv = nn.ModuleList()
         for m, k in zip(filters, ksize):
             self.conv.append(
                 nn.Sequential(

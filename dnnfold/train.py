@@ -277,9 +277,9 @@ class Train:
 
     def build_optimizer(self, optimizer, model, lr, l2_weight):
         if optimizer == 'Adam':
-            return optim.Adam(model.parameters(), lr=lr, amsgrad=True, weight_decay=l2_weight)
+            return optim.Adam(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
         elif optimizer =='AdamW':
-            return optim.AdamW(model.parameters(), lr=lr, amsgrad=True, weight_decay=l2_weight)
+            return optim.AdamW(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
         elif optimizer == 'RMSprop':
             return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
         elif optimizer == 'SGD':
