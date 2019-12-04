@@ -103,21 +103,22 @@ class Transform2D(nn.Module):
 
 
 class PairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0):
+    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0, resnet=True):
         super(PairedLayer, self).__init__()
 
+        self.resnet = resnet        
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
-        conv = []
+        self.conv = []
         for m, k in zip(filters, ksize):
-            conv += [ 
-                nn.Conv2d(n_in, m, k, padding=k//2), 
-                nn.GroupNorm(1, m),
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate) ]
+            self.conv.append(
+                nn.Sequential( 
+                    nn.Conv2d(n_in, m, k, padding=k//2), 
+                    nn.GroupNorm(1, m),
+                    nn.CELU(), 
+                    nn.Dropout(p=dropout_rate) ) )
             n_in = m
-        self.conv = nn.Sequential(*conv)
 
         fc = []
         for m in fc_layers:
@@ -134,28 +135,31 @@ class PairedLayer(nn.Module):
     def forward(self, x):
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
-        x = self.conv(x)
+        for conv in self.conv:
+            x_a = conv(x)
+            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
         x = self.fc(x)
         return x.view(B, N, N, -1) # (B, N, N, n_out)
 
 
 class UnpairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0):
+    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0, resnet=True):
         super(UnpairedLayer, self).__init__()
 
+        self.resnet = resnet
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
-        conv = []
+        self.conv = []
         for m, k in zip(filters, ksize):
-            conv += [ 
-                nn.Conv1d(n_in, m, k, padding=k//2), 
-                nn.GroupNorm(1, m),
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate) ]
+            self.conv.append(
+                nn.Sequential(
+                    nn.Conv1d(n_in, m, k, padding=k//2), 
+                    nn.GroupNorm(1, m),
+                    nn.CELU(), 
+                    nn.Dropout(p=dropout_rate) ) )
             n_in = m
-        self.conv = nn.Sequential(*conv)
 
         fc = []
         for m in fc_layers:
@@ -172,7 +176,9 @@ class UnpairedLayer(nn.Module):
     def forward(self, x, x_base=None):
         B, N, C = x.shape
         x = x.transpose(1, 2) # (B, n_in, N)
-        x = self.conv(x)
+        for conv in self.conv:
+            x_a = conv(x)
+            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
         x = x.transpose(1, 2).view(B*N, -1) # (B, N, n_out)
         x = self.fc(x)
         return x.view(B, N, -1)
