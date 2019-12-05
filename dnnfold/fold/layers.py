@@ -213,7 +213,7 @@ class LengthLayer(nn.Module):
 
 
 class Sinkhorn(nn.Module):
-    def __init__(self, n_iter=64, eps=10e-5):
+    def __init__(self, n_iter=64, eps=1e-5):
         super(Sinkhorn, self).__init__()
         self.n_iter = n_iter
         self.eps = eps

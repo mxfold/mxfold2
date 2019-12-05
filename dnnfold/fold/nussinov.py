@@ -29,8 +29,8 @@ class NussinovFold(AbstractNeuralFold):
                     } for i in range(B) ]
 
         elif self.model_type == 'S':
-            score_paired = torch.sigmoid(score_paired).view(B, N, N) # (B, N, N)
-            score_unpaired = torch.sigmoid(score_unpaired).view(B, N) # (B, N)
+            score_paired = torch.exp(score_paired).view(B, N, N) # (B, N, N)
+            score_unpaired = torch.exp(score_unpaired).view(B, N) # (B, N)
             score_paired, score_unpaired = self.sinkhorn(score_paired, score_unpaired)
             #print(torch.min(score_paired), torch.max(score_paired))
             return [ {  'score_paired': score_paired[i] * self.gamma - 1,
