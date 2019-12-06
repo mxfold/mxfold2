@@ -65,8 +65,8 @@ class CNNLSTMEncoder(nn.Module):
 
         if self.lstm is not None:
             x_a, _ = self.lstm(x)
-            x_a = self.lstm_ln(x)
-            x_a = self.dropout(F.celu(x)) # (B, N, H*2)
+            x_a = self.lstm_ln(x_a)
+            x_a = self.dropout(F.celu(x_a)) # (B, N, H*2)
             x = x + x_a if self.resnet and x.shape[2]==x_a.shape[2] else x_a
 
         if self.att is not None:
@@ -213,7 +213,7 @@ class LengthLayer(nn.Module):
 
 
 class Sinkhorn(nn.Module):
-    def __init__(self, n_iter=64, eps=10e-5):
+    def __init__(self, n_iter=64, eps=1e-5):
         super(Sinkhorn, self).__init__()
         self.n_iter = n_iter
         self.eps = eps
