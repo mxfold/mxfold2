@@ -70,6 +70,7 @@ class AbstractNeuralFold(AbstractFold):
         super(AbstractNeuralFold, self).__init__(predict=predict)
 
         self.no_split_lr = no_split_lr
+        self.pair_join = pair_join
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
@@ -78,21 +79,24 @@ class AbstractNeuralFold(AbstractFold):
             num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
         n_in = self.encoder.n_out
 
-        self.transform2d = Transform2D(join=pair_join)
+        if self.pair_join != 'bilinear':
+            self.transform2d = Transform2D(join=pair_join)
 
-        n_in_paired = n_in // 2 if pair_join!='cat' else n_in
-        if self.no_split_lr:
-            n_in_paired *= 2
+            n_in_paired = n_in // 2 if pair_join!='cat' else n_in
+            if self.no_split_lr:
+                n_in_paired *= 2
 
-        self.fc_paired = self.fc_unpaired = None
-        if n_out_paired_layers > 0:
             self.fc_paired = PairedLayer(n_in_paired, n_out_paired_layers,
                                     filters=num_paired_filters, ksize=paired_filter_size,
                                     fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
-        if n_out_unpaired_layers > 0:
             self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
                                     filters=num_paired_filters, ksize=paired_filter_size,
                                     fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
+
+        else:
+            n_in_paired = n_in // 2 if not self.no_split_lr else n_in
+            self.bilinear = nn.Bilinear(n_in_paired, n_in_paired, n_out_paired_layers)
+            self.linear = nn.Linear(n_in, n_out_unpaired_layers)
 
 
     def make_param(self, seq):
@@ -106,9 +110,20 @@ class AbstractNeuralFold(AbstractFold):
             x_l = x[:, :, 0::2]
             x_r = x[:, :, 1::2]
         x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)] # reverse the last axis
-        x_lr = self.transform2d(x_l, x_r)
 
-        score_paired = self.fc_paired(x_lr)
-        score_unpaired = self.fc_unpaired(x)
+        if self.pair_join != 'bilinear':
+            x_lr = self.transform2d(x_l, x_r)
 
-        return score_paired, score_unpaired
+            score_paired = self.fc_paired(x_lr)
+            score_unpaired = self.fc_unpaired(x)
+
+            return score_paired, score_unpaired
+
+        else:
+            B, N, C = x_l.shape
+            x_l = x_l.view(B, N, 1, C).expand(B, N, N, C).reshape(B*N*N, -1)
+            x_r = x_r.view(B, 1, N, C).expand(B, N, N, C).reshape(B*N*N, -1)
+            score_paired = self.bilinear(x_l, x_r).view(B, N, N, -1)
+            score_unpaired = self.linear(x)
+
+            return score_paired, score_unpaired

@@ -446,8 +446,8 @@ class Train:
                         help='dropout rate of the hidden units (default: 0.0)')
         gparser.add_argument('--num-att', type=int, default=0,
                         help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul') (default: 'cat')")
+        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
+                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
         gparser.add_argument('--gamma', type=float, default=5,
                         help='the weight of basepair scores in NussinovS model (default: 5)')
