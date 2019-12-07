@@ -231,16 +231,20 @@ class Sinkhorn(nn.Module):
             A /= A.sum(dim=2, keepdim=True)
         return A
 
+    def sinkhorn_logsumexp(self, A):
+        for i in range(self.n_iter):
+            A = A - torch.logsumexp(A, dim=1, keepdim=True)
+            A = A - torch.logsumexp(A, dim=2, keepdim=True)
+        return A
+
 
     def forward(self, x_paired, x_unpaired):
         if self.n_iter > 0:
-            x_paired = torch.clamp(x_paired, min=self.eps) # for numerical stability
-            x_unpaired = torch.clamp(x_unpaired, min=self.eps)
             w_u = torch.triu(x_paired, diagonal=1)
             w_l = torch.tril(x_paired, diagonal=1)
             w = w_u + w_l + torch.diag_embed(x_unpaired)
             w = (w + w.transpose(1, 2)) / 2
-            w = self.sinkhorn(w)
+            w = torch.exp(self.sinkhorn_logsumexp(w))
             x_unpaired = torch.diagonal(w, dim1=1, dim2=2)
             x_paired = torch.triu(w, diagonal=1) + torch.tril(w, diagonal=1)
         return x_paired, x_unpaired
