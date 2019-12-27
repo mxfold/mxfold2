@@ -31,11 +31,11 @@ class StructuredLoss(nn.Module):
         self.verbose = verbose
 
 
-    def forward(self, seq, pair, fname=None):
-        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pair,
+    def forward(self, seq, structure, pairs, fname=None):
+        pred, pred_s, _, param = self.model(seq, return_param=True, reference=structure,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
-        ref, ref_s, _ = self.model(seq, param=param, constraint=pair, max_internal_length=None)
+        ref, ref_s, _ = self.model(seq, param=param, constraint=structure, max_internal_length=None)
         loss = pred - ref
         if self.verbose:
             print("Loss = {} = ({} - {})".format(loss.item(), pred.item(), ref.item()))
@@ -47,7 +47,7 @@ class StructuredLoss(nn.Module):
             print(fname)
             print(loss.item(), pred.item(), ref.item())
             print(seq)
-            print(pair)
+            print(structure)
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
@@ -62,63 +62,98 @@ class StructuredLoss(nn.Module):
         return loss
 
 class PiecewiseLoss(nn.Module):
-    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., label_smoothing=0.1, verbose=False):
+    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., 
+                weak_label_weight=1., label_smoothing=0.1, verbose=False):
         super(PiecewiseLoss, self).__init__()
         self.model = model
         self.fp_weight = fp_weight
         self.fn_weight = fn_weight
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
+        self.weak_label_weight = weak_label_weight
         self.label_smoothing = label_smoothing
         self.verbose = verbose
         self.loss_fn = nn.BCELoss(reduction='sum')
 
 
-    def forward(self, seq, pair, fname=None): # BCELoss with 'sum' reduction
+    def forward(self, seq, structure, pairs, fname=None): # BCELoss with 'sum' reduction
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
-        ref_sc, ref_s, ref_bp = self.model(seq, param=param, constraint=pair, max_internal_length=None)
-
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
         for k in range(len(seq)):
             score_paired = (param[k]['score_paired'] + 1) / self.model.gamma
-
-            pred_mat = torch.zeros_like(score_paired, dtype=torch.bool)
-            for i, j in enumerate(pred_bp[k]):
-                if i < j:
-                    pred_mat[i, j] = True
-
-            ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
-            for i, j in enumerate(ref_bp[k]):
-                if i < j:
-                    ref_mat[i, j] = True
-
-            fp = score_paired[(pred_mat==True) & (ref_mat==False)]
-            if len(fp) > 0:
-                #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
-                p = self.label_smoothing * 0.5
-                loss[k] += self.fp_weight * self.loss_fn(fp, torch.full_like(fp, p))
-
-            fn = score_paired[(pred_mat==False) & (ref_mat==True)]
-            if len(fn) > 0:
-                #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
-                p = 1 - self.label_smoothing * 0.5
-                loss[k] += self.fn_weight * self.loss_fn(fn, torch.full_like(fn, p))
+            #print(score_paired[1:, 1:])
+            if len(structure[k]) > 0:
+                ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[structure[k]], max_internal_length=None)
+                loss[k] += self.loss_known_structure(seq[k], structure[k], score_paired, pred_bp[k], ref_bp[0])
+            else:
+                loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, param[k]['_score_unpaired'], pred_bp[k]) * self.weak_label_weight
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
                     loss[k] += self.l1_weight * torch.sum(torch.abs(p))
+        
+        return loss
 
-            # if self.l2_weight > 0.0:
-            #     l2_reg = 0.0
-            #     for p in self.model.parameters():
-            #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
-            #     loss += torch.sqrt(l2_reg)
+
+    def loss_known_structure(self, seq, structure, score_paired, pred_bp, ref_bp):
+        pred_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+        for i, j in enumerate(pred_bp):
+            if i < j:
+                pred_mat[i, j] = True
+
+        ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+        for i, j in enumerate(ref_bp):
+            if i < j:
+                ref_mat[i, j] = True
+
+        loss = torch.zeros((1,), device=score_paired.device)
+        fp = score_paired[(pred_mat==True) & (ref_mat==False)]
+        if len(fp) > 0:
+            #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
+            p = self.label_smoothing * 0.5
+            loss += self.fp_weight * self.loss_fn(fp, torch.full_like(fp, p))
+
+        fn = score_paired[(pred_mat==False) & (ref_mat==True)]
+        if len(fn) > 0:
+            #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
+            p = 1 - self.label_smoothing * 0.5
+            loss += self.fn_weight * self.loss_fn(fn, torch.full_like(fn, p))
+
+        return loss[0]
+
+
+    def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
+        pred_unpaired = torch.ones_like(score_unpaired, dtype=torch.bool)
+        print(torch.max(score_paired[1:, 1:]))
+        for i, j in enumerate(pred_bp):
+            if i < j:
+                pred_unpaired[i] = pred_unpaired[j] = False
+        score_unpaired = score_unpaired[1:]
+        score_paired = 1 - score_unpaired
+        pred_unpaired = pred_unpaired[1:]
+
+        #print(pred_bp)
+        #print(score_paired)
+        #print(pairs[pred_unpaired==True, 0], score_unpaired[pred_unpaired==True])
+        #print(pairs[pred_unpaired==False, 1].shape, score_unpaired[pred_unpaired==False].shape)
+        loss  = torch.sum(pairs[pred_unpaired==True, 0] * score_unpaired[pred_unpaired==True])
+        loss += torch.sum(pairs[pred_unpaired==False, 1] * score_paired[pred_unpaired==False])
+
+        #print(score_paired[1:, 1:])
+        #score_paired = score_paired[1:, 1:]
+        #score_paired = score_paired.sum(dim=0)# + score_paired.sum(dim=1)
+        # score_unpaired = score_unpaired[1:]
+        # print(score_unpaired)
+        # score_paired = 1 - score_unpaired
+        # #print(pred_bp)
+        # loss  = torch.sum(pairs[:, 0] * score_unpaired)
+        # loss += torch.sum(pairs[:, 1] * score_paired)
 
         return loss
 
 
-    def forward_(self, seq, pair, fname=None):  # BCELoss with 'mean' reduction
-        ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=pair, max_internal_length=None)
+    def forward_(self, seq, structure, pairs, fname=None):  # BCELoss with 'mean' reduction
+        ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=structure, max_internal_length=None)
 
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
         for k in range(len(seq)):
@@ -164,14 +199,14 @@ class Train:
         loss_total, num = 0, 0
         running_loss, n_running_loss = 0, 0
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs, _ in self.train_loader:
+            for fnames, seqs, structures, pairs in self.train_loader:
                 if self.verbose:
                     print()
                     print("Step: {}, {}".format(self.step, fnames))
                     self.step += 1
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
-                loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
+                loss = torch.sum(self.loss_fn(seqs, structures, pairs, fname=fnames))
                 loss_total += loss.item()
                 num += n_batch
                 if loss.item() > 0.:
@@ -201,9 +236,9 @@ class Train:
         n_dataset = len(self.test_loader.dataset)
         loss_total, num = 0, 0
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs, _ in self.test_loader:
+            for fnames, seqs, structures, pairs in self.test_loader:
                 n_batch = len(seqs)
-                loss = self.loss_fn(seqs, pairs, fname=fnames)
+                loss = self.loss_fn(seqs, structures, pairs, fname=fnames)
                 loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))

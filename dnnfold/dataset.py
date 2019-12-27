@@ -1,6 +1,7 @@
 from itertools import groupby
 from torch.utils.data import Dataset
 import torch
+import math
 
 class FastaDataset(Dataset):
     def __init__(self, fasta):
@@ -43,18 +44,38 @@ class BPseqDataset(Dataset):
 
     def read(self, filename):
         with open(filename) as f:
+            structure_is_known = True
             p = [0]
             s = ['']
             for l in f:
                 if not l.startswith('#'):
-                    idx, c, pair = l.rstrip('\n').split()
-                    s.append(c)
-                    p.append(int(pair))
-        seq = ''.join(s)
-        pair = [self.unpaired] * len(seq)
-        for i, j in enumerate(p):
-            if j > 0 and i < j:
-                pair[i-1] = '('
-                pair[j-1] = ')'
-        pair = ''.join(pair)
-        return (filename, seq, pair, torch.tensor(p))
+                    l = l.rstrip('\n').split()
+                    if len(l) == 3:
+                        if not structure_is_known:
+                            raise('invalid format: {}'.format(filename))
+                        idx, c, pair = l
+                        s.append(c)
+                        p.append(int(pair))
+                    elif len(l) == 4:
+                        structure_is_known = False
+                        idx, c, nll_unpaired, nll_paired = l
+                        s.append(c)
+                        nll_unpaired = math.nan if nll_unpaired=='-' else float(nll_unpaired)
+                        nll_paired = math.nan if nll_paired=='-' else float(nll_paired)
+                        p.append([nll_unpaired, nll_paired])
+                    else:
+                        raise('invalid format: {}'.format(filename))
+        
+        if structure_is_known:
+            seq = ''.join(s)
+            pair = [self.unpaired] * len(seq)
+            for i, j in enumerate(p):
+                if j > 0 and i < j:
+                    pair[i-1] = '('
+                    pair[j-1] = ')'
+            pair = ''.join(pair)
+            return (filename, seq, pair, torch.tensor(p))
+        else:
+            seq = ''.join(s)
+            p.pop(0)
+            return (filename, seq, '', torch.tensor(p))
