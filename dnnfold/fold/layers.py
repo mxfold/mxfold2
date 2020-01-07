@@ -213,10 +213,14 @@ class LengthLayer(nn.Module):
 
 
 class Sinkhorn(nn.Module):
-    def __init__(self, n_iter=64, eps=1e-5):
+    def __init__(self, n_iter=64, tau=1., eps=1e-5, do_sampling=True):
         super(Sinkhorn, self).__init__()
         self.n_iter = n_iter
+        self.tau = tau
         self.eps = eps
+        self.do_sampling = do_sampling
+        if do_sampling:
+            self.uniform = torch.distributions.uniform.Uniform(1e-5, 1)
 
 
     def sinkhorn(self, A):
@@ -238,6 +242,10 @@ class Sinkhorn(nn.Module):
         return A
 
 
+    def gumbel_sampling(self, shape):
+        return -torch.log(-torch.log(self.uniform.sample(shape)))
+
+
     def forward(self, x_paired, x_unpaired):
         if self.n_iter > 0:
             x_paired[:, :1, :1] = torch.exp(x_paired[:, :1, :1])
@@ -246,8 +254,9 @@ class Sinkhorn(nn.Module):
             w_l = torch.tril(x_paired[:, 1:, 1:], diagonal=-1)
             w = w_u + w_l + torch.diag_embed(x_unpaired[:, 1:])
             w = (w + w.transpose(1, 2)) / 2
-            #w = torch.exp(self.sinkhorn_logsumexp(w/0.001))
-            w = torch.exp(self.sinkhorn_logsumexp(w))
+            if self.do_sampling:
+                w = w + self.gumbel_sampling(w.shape)
+            w = torch.exp(self.sinkhorn_logsumexp(w/self.tau))
             x_unpaired[:, 1:] = torch.diagonal(w, dim1=1, dim2=2)
             x_paired[:, 1:, 1:] = torch.triu(w, diagonal=1) + torch.tril(w, diagonal=-1)
         return x_paired, x_unpaired

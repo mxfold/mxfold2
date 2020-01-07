@@ -16,7 +16,9 @@ class NussinovFold(AbstractNeuralFold):
         self.model_type = model_type
         if self.model_type=='S':
             self.gamma = kwargs['gamma']
-            self.sinkhorn = Sinkhorn(n_iter=kwargs['sinkhorn'])
+            self.sinkhorn = Sinkhorn(n_iter=kwargs['sinkhorn'], 
+                                    tau=kwargs['sinkhorn_tau'], 
+                                    do_sampling=kwargs['gumbel_sinkhorn'])
 
 
     def make_param(self, seq):

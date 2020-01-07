@@ -129,7 +129,7 @@ class PiecewiseLoss(nn.Module):
         score_unpaired = score_unpaired[1:]
         # print(score_unpaired)
         score_paired = 1 - score_unpaired
-        #print(pred_bp)
+        # print(pred_bp)
         pairs_not_nan = torch.logical_not(torch.isnan(pairs))
         loss  = torch.sum(pairs[pairs_not_nan[:, 0], 0] * score_unpaired[pairs_not_nan[:, 0]])
         loss += torch.sum(pairs[pairs_not_nan[:, 1], 1] * score_paired[pairs_not_nan[:, 1]])
@@ -286,8 +286,9 @@ class Train:
             model = NussinovFold(model_type='N', **config)
 
         elif args.model == 'NussinovS':
-            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn })
-            model = NussinovFold(model_type='S', **config)
+            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn,
+                            'sinkhorn_tau': args.sinkhorn_tau})
+            model = NussinovFold(model_type='S', gumbel_sinkhorn=args.gumbel_sinkhorn, **config)
 
         else:
             raise('not implemented')
@@ -473,5 +474,9 @@ class Train:
                         help='the weight of basepair scores in NussinovS model (default: 5)')
         gparser.add_argument('--sinkhorn', type=int, default=64,
                         help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
+        gparser.add_argument('--gumbel-sinkhorn', action='store_true',
+                        help='perform Gumbel sampling for secondary structures')
+        gparser.add_argument('--sinkhorn-tau', type=float, default=1,
+                        help='set the temparature of Sinkhorn')
 
         subparser.set_defaults(func = lambda args: Train().run(args))
