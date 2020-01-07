@@ -123,31 +123,16 @@ class PiecewiseLoss(nn.Module):
 
 
     def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
-        pred_unpaired = torch.ones_like(score_unpaired, dtype=torch.bool)
-        print(torch.max(score_paired[1:, 1:]))
-        for i, j in enumerate(pred_bp):
-            if i < j:
-                pred_unpaired[i] = pred_unpaired[j] = False
+        #print(torch.max(score_paired[1:, 1:]))
+        # score_paired = score_paired[1:, 1:]
+        # score_paired = score_paired.sum(dim=0)# + score_paired.sum(dim=1)
         score_unpaired = score_unpaired[1:]
-        score_paired = 1 - score_unpaired
-        pred_unpaired = pred_unpaired[1:]
-
-        #print(pred_bp)
-        #print(score_paired)
-        #print(pairs[pred_unpaired==True, 0], score_unpaired[pred_unpaired==True])
-        #print(pairs[pred_unpaired==False, 1].shape, score_unpaired[pred_unpaired==False].shape)
-        loss  = torch.sum(pairs[pred_unpaired==True, 0] * score_unpaired[pred_unpaired==True])
-        loss += torch.sum(pairs[pred_unpaired==False, 1] * score_paired[pred_unpaired==False])
-
-        #print(score_paired[1:, 1:])
-        #score_paired = score_paired[1:, 1:]
-        #score_paired = score_paired.sum(dim=0)# + score_paired.sum(dim=1)
-        # score_unpaired = score_unpaired[1:]
         # print(score_unpaired)
-        # score_paired = 1 - score_unpaired
-        # #print(pred_bp)
-        # loss  = torch.sum(pairs[:, 0] * score_unpaired)
-        # loss += torch.sum(pairs[:, 1] * score_paired)
+        score_paired = 1 - score_unpaired
+        #print(pred_bp)
+        pairs_not_nan = torch.logical_not(torch.isnan(pairs))
+        loss  = torch.sum(pairs[pairs_not_nan[:, 0], 0] * score_unpaired[pairs_not_nan[:, 0]])
+        loss += torch.sum(pairs[pairs_not_nan[:, 1], 1] * score_paired[pairs_not_nan[:, 1]])
 
         return loss
 
