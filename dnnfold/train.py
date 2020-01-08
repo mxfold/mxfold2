@@ -123,6 +123,7 @@ class PiecewiseLoss(nn.Module):
 
 
     def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
+        pairs = pairs.to(score_paired.device)
         #print(torch.max(score_paired[1:, 1:]))
         # score_paired = score_paired[1:, 1:]
         # score_paired = score_paired.sum(dim=0)# + score_paired.sum(dim=1)
