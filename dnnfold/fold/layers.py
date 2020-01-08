@@ -255,7 +255,7 @@ class Sinkhorn(nn.Module):
             w = w_u + w_l + torch.diag_embed(x_unpaired[:, 1:])
             w = (w + w.transpose(1, 2)) / 2
             if self.do_sampling:
-                w = w + self.gumbel_sampling(w.shape)
+                w = w + self.gumbel_sampling(w.shape).to(w.device)
             w = torch.exp(self.sinkhorn_logsumexp(w/self.tau))
             x_unpaired[:, 1:] = torch.diagonal(w, dim1=1, dim2=2)
             x_paired[:, 1:, 1:] = torch.triu(w, diagonal=1) + torch.tril(w, diagonal=-1)
