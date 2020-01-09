@@ -51,7 +51,7 @@ def output(nll_unpaired, nll_paired, noise_rate=0.0):
             print(i+1, c, '-', '-')
 
 #%%
-seq, pair = read_bpseq('data/TrainSetA/0.bpseq')
+seq, pair = read_bpseq(sys.argv[1])
 reactivity = fake_reactivity(seq, pair, dist_unpaired, dist_paired)
 nll_unpaired, nll_paired = calculate_scores(reactivity, dist_unpaired, dist_paired)
 output(nll_paired, nll_unpaired, 0.05)

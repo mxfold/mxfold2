@@ -91,7 +91,8 @@ class Predict:
             model = NussinovFold(**config)
 
         elif args.model == 'NussinovS':
-            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn })
+            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn,
+                            'sinkhorn_tau': args.sinkhorn_tau})
             model = NussinovFold(model_type='S', **config)
 
         else:
@@ -180,5 +181,9 @@ class Predict:
                         help='the weight of basepair scores in NussinovS model (default: 5)')
         gparser.add_argument('--sinkhorn', type=int, default=64,
                         help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
+        gparser.add_argument('--gumbel-sinkhorn', action='store_true',
+                        help='perform Gumbel sampling for secondary structures')
+        gparser.add_argument('--sinkhorn-tau', type=float, default=1,
+                        help='set the temparature of Sinkhorn')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))
