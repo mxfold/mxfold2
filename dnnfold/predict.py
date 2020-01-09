@@ -93,7 +93,7 @@ class Predict:
         elif args.model == 'NussinovS':
             config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn,
                             'sinkhorn_tau': args.sinkhorn_tau})
-            model = NussinovFold(model_type='S', **config)
+            model = NussinovFold(model_type='S', gumbel_sinkhorn=args.gumbel_sinkhorn, **config)
 
         else:
             raise('not implemented')
