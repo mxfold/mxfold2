@@ -63,7 +63,7 @@ class StructuredLoss(nn.Module):
 
 class PiecewiseLoss(nn.Module):
     def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., 
-                weak_label_weight=1., label_smoothing=0.1, verbose=False):
+                weak_label_weight=1., label_smoothing=0.1, gamma=5., verbose=False):
         super(PiecewiseLoss, self).__init__()
         self.model = model
         self.fp_weight = fp_weight
@@ -72,6 +72,7 @@ class PiecewiseLoss(nn.Module):
         self.l2_weight = l2_weight
         self.weak_label_weight = weak_label_weight
         self.label_smoothing = label_smoothing
+        self.gamma = gamma
         self.verbose = verbose
         self.loss_fn = nn.BCELoss(reduction='sum')
 
@@ -128,12 +129,16 @@ class PiecewiseLoss(nn.Module):
         # score_paired = score_paired[1:, 1:]
         # score_paired = score_paired.sum(dim=0)# + score_paired.sum(dim=1)
         score_unpaired = score_unpaired[1:]
-        # print(score_unpaired)
-        score_paired = 1 - score_unpaired
-        # print(pred_bp)
+        #print(score_unpaired)
+        # score_paired = 1 - score_unpaired
+        print(pred_bp)
         pairs_not_nan = torch.logical_not(torch.isnan(pairs))
-        loss  = torch.sum(pairs[pairs_not_nan[:, 0], 0] * score_unpaired[pairs_not_nan[:, 0]])
-        loss += torch.sum(pairs[pairs_not_nan[:, 1], 1] * score_paired[pairs_not_nan[:, 1]])
+        pairs_not_nan = pairs_not_nan[:, 0] * pairs_not_nan[:, 1]
+        pairs = pairs[pairs_not_nan, 0] - pairs[pairs_not_nan, 1]
+        score_unpaired = score_unpaired[pairs_not_nan]
+        #print(pairs * (score_unpaired-0.5))
+        #print(score_unpaired>0.5)
+        loss = torch.sum(torch.clamp(pairs * (score_unpaired-0.5), min=0))
 
         return loss
 

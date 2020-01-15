@@ -1,6 +1,7 @@
 #%%
 import sys
 import torch
+import math
 from torch.distributions import log_normal, uniform
 
 mu_paired = -2.2424660388377395
@@ -36,25 +37,26 @@ def fake_reactivity(seq, pair, dist_unpaired, dist_paired):
 def calculate_scores(reactivity, dist_unpaired, dist_paired):
     nll_unpaired = -dist_unpaired.log_prob(reactivity)
     nll_paired = -dist_paired.log_prob(reactivity)
-    nll = torch.stack([nll_unpaired, nll_paired])
-    nll = -torch.logsumexp(-nll, dim=0)
-    nll_unpaired = nll_unpaired - nll
-    nll_paired = nll_paired - nll
+    # nll = torch.stack([nll_unpaired, nll_paired])
+    # nll = -torch.logsumexp(-nll, dim=0)
+    # nll_unpaired = nll_unpaired - nll
+    # nll_paired = nll_paired - nll
     return nll_unpaired, nll_paired
 
-def output(nll_unpaired, nll_paired, noise_rate=0.0):
+def output(nll_unpaired, nll_paired, reactivity, noise_rate=0.0):
     d = uniform.Uniform(0, 1)
-    for i, (c, nll_u, nll_p) in enumerate(zip(seq, nll_unpaired, nll_paired)):
+    for i, (c, nll_u, nll_p, r) in enumerate(zip(seq, nll_unpaired, nll_paired, reactivity)):
         if d.sample() > noise_rate:
-            print(i+1, c, float(nll_u), float(nll_p))
+            print(i+1, c, float(nll_u), float(nll_p)) #, float(r))
         else:
             print(i+1, c, '-', '-')
 
 #%%
+#print(math.exp(mu_paired), math.exp(mu_unpaired))
 seq, pair = read_bpseq(sys.argv[1])
 reactivity = fake_reactivity(seq, pair, dist_unpaired, dist_paired)
 nll_unpaired, nll_paired = calculate_scores(reactivity, dist_unpaired, dist_paired)
-output(nll_paired, nll_unpaired, 0.05)
+output(nll_unpaired, nll_paired, reactivity, 0.05)
 
 # def fake_data_simple(file):
 #     with open(file) as fh:
