@@ -62,12 +62,10 @@ class StructuredLoss(nn.Module):
         return loss
 
 class PiecewiseLoss(nn.Module):
-    def __init__(self, model, fp_weight=0.1, fn_weight=.9, l1_weight=0., l2_weight=0., 
+    def __init__(self, model, l1_weight=0., l2_weight=0., 
                 weak_label_weight=1., label_smoothing=0.1, gamma=5., verbose=False):
         super(PiecewiseLoss, self).__init__()
         self.model = model
-        self.fp_weight = fp_weight
-        self.fn_weight = fn_weight
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.weak_label_weight = weak_label_weight
@@ -81,13 +79,17 @@ class PiecewiseLoss(nn.Module):
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
         for k in range(len(seq)):
-            score_paired = (param[k]['score_paired'] + 1) / self.model.gamma
-            #print(score_paired[1:, 1:])
+            score_paired = param[k]['score_paired'] / (self.model.gamma*2)
+            score_unpaired = param[k]['score_unpaired']
+            # print(torch.max(score_unpaired[1:]), torch.max(score_paired[1:, 1:]))
+            # print(score_unpaired[score_unpaired>0.5].shape)
+            # print(score_paired[1:, 1:])
+            # print(pred_bp)
             if len(structure[k]) > 0:
                 ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[structure[k]], max_internal_length=None)
-                loss[k] += self.loss_known_structure(seq[k], structure[k], score_paired, pred_bp[k], ref_bp[0])
+                loss[k] += self.loss_known_structure(seq[k], structure[k], score_paired, score_unpaired, pred_bp[k], ref_bp[0])
             else:
-                loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, param[k]['_score_unpaired'], pred_bp[k]) * self.weak_label_weight
+                loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, score_unpaired, pred_bp[k]) * self.weak_label_weight
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
@@ -96,84 +98,86 @@ class PiecewiseLoss(nn.Module):
         return loss
 
 
-    def loss_known_structure(self, seq, structure, score_paired, pred_bp, ref_bp):
-        pred_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+    def loss_known_structure(self, seq, structure, score_paired, score_unpaired, pred_bp, ref_bp):
+        pred_paired = torch.zeros_like(score_paired, dtype=torch.bool)
+        pred_unpaired = torch.zeros_like(score_unpaired)
         for i, j in enumerate(pred_bp):
             if i < j:
-                pred_mat[i, j] = True
+                pred_paired[i, j] = True
+            else:
+                pred_unpaired[i] = True
+        pred_paired = pred_paired[1:, 1:]
+        pred_unpaired = pred_unpaired[1:]
 
-        ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
+        ref_paired = torch.zeros_like(score_paired, dtype=torch.bool)
+        ref_unpaired = torch.zeros_like(score_unpaired, dtype=torch.bool)
         for i, j in enumerate(ref_bp):
             if i < j:
-                ref_mat[i, j] = True
+                ref_paired[i, j] = True
+            else:
+                ref_unpaired[i] = True
+        ref_paired = ref_paired[1:, 1:]
+        ref_unpaired = ref_unpaired[1:]
 
-        loss = torch.zeros((1,), device=score_paired.device)
-        fp = score_paired[(pred_mat==True) & (ref_mat==False)]
+        score_paired = score_paired[1:, 1:]
+        loss_paired = torch.zeros((1,), device=score_paired.device)
+        fp = score_paired[(pred_paired==True) & (ref_paired==False)]
         if len(fp) > 0:
             #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
             p = self.label_smoothing * 0.5
-            loss += self.fp_weight * self.loss_fn(fp, torch.full_like(fp, p))
+            loss_paired += self.loss_fn(fp, torch.full_like(fp, p))
 
-        fn = score_paired[(pred_mat==False) & (ref_mat==True)]
+        fn = score_paired[(pred_paired==False) & (ref_paired==True)]
         if len(fn) > 0:
             #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
             p = 1 - self.label_smoothing * 0.5
-            loss += self.fn_weight * self.loss_fn(fn, torch.full_like(fn, p))
+            loss_paired += self.loss_fn(fn, torch.full_like(fn, p))
 
-        return loss[0]
+        score_unpaired = score_unpaired[1:]
+        loss_unpaired = torch.zeros((1,), device=score_unpaired.device)
+        fp = score_unpaired[(pred_unpaired==True) & (ref_unpaired==False)]
+        if len(fp) > 0:
+            p = self.label_smoothing * 0.5
+            loss_unpaired += self.loss_fn(fp, torch.full_like(fp, p))
+
+        fn = score_unpaired[(pred_unpaired==False) & (ref_unpaired==True)]
+        if len(fn) > 0:
+            #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
+            p = 1 - self.label_smoothing * 0.5
+            loss_unpaired += self.loss_fn(fn, torch.full_like(fn, p))
+
+        return 2*self.gamma*loss_paired[0] + loss_unpaired[0]
 
 
     def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
+        pred_unpaired = torch.zeros_like(score_unpaired)
+        for i, j in enumerate(pred_bp):
+            if j == 0:
+                pred_unpaired[i] = True
+        pred_unpaired = pred_unpaired[1:]
+
         pairs = pairs.to(score_paired.device)
-        #print(torch.max(score_paired[1:, 1:]))
-        # score_paired = score_paired[1:, 1:]
-        # score_paired = score_paired.sum(dim=0)# + score_paired.sum(dim=1)
         score_unpaired = score_unpaired[1:]
+        #print(pred_bp)
         #print(score_unpaired)
-        # score_paired = 1 - score_unpaired
-        print(pred_bp)
         pairs_not_nan = torch.logical_not(torch.isnan(pairs))
         pairs_not_nan = pairs_not_nan[:, 0] * pairs_not_nan[:, 1]
         pairs = pairs[pairs_not_nan, 0] - pairs[pairs_not_nan, 1]
         score_unpaired = score_unpaired[pairs_not_nan]
-        #print(pairs * (score_unpaired-0.5))
-        #print(score_unpaired>0.5)
-        loss = torch.sum(torch.clamp(pairs * (score_unpaired-0.5), min=0))
+        pred_unpaired = pred_unpaired[pairs_not_nan]        
 
-        return loss
+        loss_unpaired = torch.zeros((1,), device=score_unpaired.device)
+        fp = score_unpaired[(pred_unpaired==True) & (pairs>0)]
+        if len(fp) > 0:
+            loss_unpaired += torch.sum(fp * pairs[(pred_unpaired==True) & (pairs>0)])
+            # print(len(fp), torch.sum(fp * pairs[(pred_unpaired==True) & (pairs>0)]))
 
+        fn = score_unpaired[(pred_unpaired==False) & (pairs<=0)]
+        if len(fn) > 0:
+            loss_unpaired += torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)])
+            # print(len(fn), torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)]))
 
-    def forward_(self, seq, structure, pairs, fname=None):  # BCELoss with 'mean' reduction
-        ref_sc, ref_s, ref_bp, param = self.model(seq, return_param=True, constraint=structure, max_internal_length=None)
-
-        loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
-        for k in range(len(seq)):
-            score_paired = (param[k]['score_paired'] + 1) / self.model.gamma
-
-            ref_mat = torch.zeros_like(score_paired, dtype=torch.bool)
-            for i, j in enumerate(ref_bp[k]):
-                if i < j:
-                    ref_mat[i, j] = True
-
-            fp = score_paired[ref_mat==False]
-            if len(fp) > 0:
-                loss[k] += self.fp_weight * self.loss_fn(fp, torch.zeros_like(fp))
-
-            fn = score_paired[ref_mat==True]
-            if len(fn) > 0:
-                loss[k] += self.fn_weight * self.loss_fn(fn, torch.ones_like(fn))
-
-            if self.l1_weight > 0.0:
-                for p in self.model.parameters():
-                    loss[k] += self.l1_weight * torch.sum(torch.abs(p))
-
-            # if self.l2_weight > 0.0:
-            #     l2_reg = 0.0
-            #     for p in self.model.parameters():
-            #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
-            #     loss += torch.sqrt(l2_reg)
-
-        return loss
+        return loss_unpaired[0]
 
 
 class Train:
@@ -325,8 +329,7 @@ class Train:
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
         elif loss_func == 'piecewise':
-            return PiecewiseLoss(model, verbose=self.verbose,
-                            fp_weight=args.fp_weight, fn_weight=args.fn_weight, label_smoothing=args.label_smoothing,
+            return PiecewiseLoss(model, verbose=self.verbose, label_smoothing=args.label_smoothing,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
         else:
             raise('not implemented')

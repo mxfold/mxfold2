@@ -36,9 +36,8 @@ class NussinovFold(AbstractNeuralFold):
             score_paired, score_unpaired = self.sinkhorn(score_paired, score_unpaired)
             #print(torch.min(score_paired), torch.max(score_paired))
             #print(score_paired[0, 1:, 1:])
-            return [ {  'score_paired': score_paired[i] * self.gamma - 1,
-                        'score_unpaired': torch.zeros_like(score_unpaired[i]),
-                        '_score_unpaired': score_unpaired[i] # don't use for folding but keep as param
+            return [ {  'score_paired': score_paired[i] * self.gamma * 2,
+                        'score_unpaired': score_unpaired[i]
                     } for i in range(B) ]
 
         else:
