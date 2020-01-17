@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.10)
 project(dnnfold CXX)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -8,6 +8,7 @@ pybind11_add_module(interface
     src/param/turner.cpp src/param/turner.h 
     src/param/positional.cpp src/param/positional.h 
     src/param/bpscore.cpp src/param/bpscore.h     
+    src/param/mix.cpp src/param/mix.h
     src/param/util.h
     src/fold/fold.cpp src/fold/fold.h 
     src/fold/zuker.cpp src/fold/zuker.h 

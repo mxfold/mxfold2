@@ -383,6 +383,8 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
 // instantiation
 #include "../param/turner.h"
 #include "../param/positional.h"
+#include "../param/mix.h"
 
 template class Zuker<TurnerNearestNeighbor>;
 template class Zuker<PositionalNearestNeighbor>;
+template class Zuker<MixedNearestNeighbor>;

@@ -15,6 +15,7 @@ from .dataset import BPseqDataset
 from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
+from .fold.mix import MixedFold
 
 
 class StructuredLoss(nn.Module):
@@ -300,6 +301,10 @@ class Train:
                             'sinkhorn_tau': args.sinkhorn_tau})
             model = NussinovFold(model_type='S', gumbel_sinkhorn=args.gumbel_sinkhorn, **config)
 
+        elif args.model == 'Mix':
+            from . import param_turner2004
+            model = MixedFold(init_param=param_turner2004, **config)
+
         else:
             raise('not implemented')
 
@@ -448,8 +453,8 @@ class Train:
                             help='the weight of false negatives for piecewise loss (default: 0.9)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov', 'NussinovS'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Nussinov', 'NussinovS')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS')")
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',
