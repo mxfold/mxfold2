@@ -374,6 +374,12 @@ class Train:
         self.model, config = self.build_model(args)
         config.update({ 'model': args.model, 'param': args.param })
         
+        if args.init_param is not '':
+            p = torch.load(args.init_param)
+            if isinstance(p, dict) and 'model_state_dict' in p:
+                p = p['model_state_dict']
+            self.model.load_state_dict(p)
+
         if args.gpu >= 0:
             self.model.to(torch.device("cuda", args.gpu))
         self.optimizer = self.build_optimizer(args.optimizer, self.model, args.lr, args.l2_weight)
@@ -412,6 +418,8 @@ class Train:
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
+        subparser.add_argument('--init-param', type=str, default='',
+                            help='the file name of the initial parameters')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
@@ -447,10 +455,6 @@ class Train:
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--fp-weight', type=float, default=0.1,
-                            help='the weight of false positives for piecewise loss (default: 0.1)')
-        gparser.add_argument('--fn-weight', type=float, default=0.9,
-                            help='the weight of false negatives for piecewise loss (default: 0.9)')
 
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS'), default='Turner', 
