@@ -335,7 +335,7 @@ class Train:
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
         elif loss_func == 'piecewise':
             return PiecewiseLoss(model, verbose=self.verbose, label_smoothing=args.label_smoothing,
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight, weak_label_weight=args.weak_label_weight)
         else:
             raise('not implemented')
 
@@ -441,6 +441,8 @@ class Train:
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
+        gparser.add_argument('--weak-label-weight', type=float, default=1.,
+                            help='the weight for weak label data (default: 1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
         gparser.add_argument('--loss-func', choices=('hinge', 'piecewise'), default='hinge',
