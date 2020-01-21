@@ -147,7 +147,7 @@ class PiecewiseLoss(nn.Module):
             p = 1 - self.label_smoothing * 0.5
             loss_unpaired += self.loss_fn(fn, torch.full_like(fn, p))
 
-        return 2*self.gamma*loss_paired[0] + loss_unpaired[0]
+        return self.gamma*loss_paired[0] + loss_unpaired[0]
 
 
     def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
