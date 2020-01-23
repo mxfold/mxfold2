@@ -178,6 +178,7 @@ class PiecewiseLoss(nn.Module):
             loss_unpaired += torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)])
             # print(len(fn), torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)]))
 
+        print(loss_unpaired[0], len(fp), len(fn))
         return loss_unpaired[0]
 
 class F1Loss(nn.Module):
@@ -203,9 +204,9 @@ class F1Loss(nn.Module):
             # print(pred_bp)
             if len(structure[k]) > 0:
                 ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[structure[k]], max_internal_length=None)
-                loss[k] += self.loss_known_structure(seq[k], score_paired, score_unpaired, ref_bp[0])
+                loss[k] += self.loss_known_structure(seq[k], score_paired, score_unpaired, pred_bp[k], ref_bp[0])
             else:
-                loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, score_unpaired) * self.weak_label_weight
+                loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, score_unpaired, pred_bp[k]) * self.weak_label_weight
 
             if self.l1_weight > 0.0:
                 for p in self.model.parameters():
@@ -214,30 +215,37 @@ class F1Loss(nn.Module):
         return loss
 
 
-    def loss_known_structure(self, seq, score_paired, score_unpaired, ref_bp):
-        # pred_paired = torch.zeros_like(score_paired)
-        # for i, j in enumerate(pred_bp):
-        #     if i < j:
-        #         pred_paired[i, j] = pred_paired[j, i] = 1
-        # pred_paired = pred_paired[1:, 1:]
+    def loss_known_structure(self, seq, score_paired, score_unpaired, pred_bp, ref_bp):
+        pred_paired = torch.zeros_like(score_paired, dtype=torch.bool)
+        for i, j in enumerate(pred_bp):
+            if i < j:
+                pred_paired[i, j] = True
+        pred_paired = pred_paired[1:, 1:]
 
-        ref_paired = torch.zeros_like(score_paired)
+        ref_paired = torch.zeros_like(score_paired, dtype=torch.bool)
         for i, j in enumerate(ref_bp):
             if i < j:
-                ref_paired[i, j] = ref_paired[j, i] = 1
+                ref_paired[i, j] = True
         ref_paired = ref_paired[1:, 1:]
 
         score_paired = score_paired[1:, 1:]
-        pred_paired = score_paired
-        tp = torch.sum(pred_paired * ref_paired)
-        fp = torch.sum(pred_paired * (1-ref_paired))
-        fn = torch.sum((1-pred_paired) * ref_paired)
+
+        tp = torch.sum(score_paired[(pred_paired==True) & (ref_paired==True)])
+        fp = torch.sum(score_paired[(pred_paired==True) & (ref_paired==False)])
+        fn = torch.sum(1-score_paired[(pred_paired==False) & (ref_paired==True)])
+
         f = 2*tp / (2*tp + fn + fp) if tp>0 else tp
-        #print(f, pred_paired)
+        # print(f, tp, fp, fn)
         return 1-f
 
 
-    def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired):
+    def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
+        pred_unpaired = torch.zeros_like(score_unpaired)
+        for i, j in enumerate(pred_bp):
+            if j == 0:
+                pred_unpaired[i] = True
+        pred_unpaired = pred_unpaired[1:]
+
         pairs = pairs.to(score_paired.device)
         score_unpaired = score_unpaired[1:]
         #print(pred_bp)
@@ -247,13 +255,17 @@ class F1Loss(nn.Module):
         pairs = pairs[pairs_not_nan, 0] - pairs[pairs_not_nan, 1]
         ref_unpaired = torch.sigmoid(-pairs)
         score_unpaired = score_unpaired[pairs_not_nan]
-        pred_unpaired = score_unpaired #pred_unpaired[pairs_not_nan]        
+        pred_unpaired = pred_unpaired[pairs_not_nan]        
 
-        tp = torch.sum(pred_unpaired * ref_unpaired)
-        fp = torch.sum(pred_unpaired * (1-ref_unpaired))
-        fn = torch.sum((1-pred_unpaired) * ref_unpaired)
+        tp_ind = (pred_unpaired==True) & (ref_unpaired>=0.5)
+        fp_ind = (pred_unpaired==True) & (ref_unpaired<0.5)
+        fn_ind = (pred_unpaired==False) & (ref_unpaired>=0.5)
+        tp = torch.sum(score_unpaired[tp_ind] * ref_unpaired[tp_ind])
+        fp = torch.sum(score_unpaired[fp_ind] * (1-ref_unpaired[fp_ind]))
+        fn = torch.sum((1-score_unpaired[fn_ind]) * ref_unpaired[fn_ind])
+
         f = 2*tp / (2*tp + fn + fp) if tp>0 else tp
-        #print(f, pred_paired)
+        #print(f.item(), tp.item(), fp.item(), fn.item(), torch.sum(score_unpaired>0.5).item() / score_unpaired.shape[0])
         return 1-f
 
 
