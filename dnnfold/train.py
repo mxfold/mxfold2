@@ -122,24 +122,24 @@ class PiecewiseLoss(nn.Module):
 
         score_paired = score_paired[1:, 1:]
         loss_paired = torch.zeros((1,), device=score_paired.device)
-        fp = score_paired[(pred_paired==True) & (ref_paired==False)]
-        if len(fp) > 0:
-            #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
-            p = self.label_smoothing * 0.5
-            loss_paired += self.loss_fn(fp, torch.full_like(fp, p))
+        # fp = score_paired[(pred_paired==True) & (ref_paired==False)]
+        # if len(fp) > 0:
+        #     #p = (1 - self.label_smoothing) * 0 + self.label_smoothing * 0.5
+        #     p = self.label_smoothing * 0.5
+        #     loss_paired += self.loss_fn(fp, torch.full_like(fp, p))
 
         fn = score_paired[(pred_paired==False) & (ref_paired==True)]
         if len(fn) > 0:
             #p = (1 - self.label_smoothing) * 1 + self.label_smoothing * 0.5
             p = 1 - self.label_smoothing * 0.5
-            loss_paired += self.loss_fn(fn, torch.full_like(fn, p))
+            loss_paired += self.gamma * self.loss_fn(fn, torch.full_like(fn, p))
 
         score_unpaired = score_unpaired[1:]
         loss_unpaired = torch.zeros((1,), device=score_unpaired.device)
-        fp = score_unpaired[(pred_unpaired==True) & (ref_unpaired==False)]
-        if len(fp) > 0:
-            p = self.label_smoothing * 0.5
-            loss_unpaired += self.loss_fn(fp, torch.full_like(fp, p))
+        # fp = score_unpaired[(pred_unpaired==True) & (ref_unpaired==False)]
+        # if len(fp) > 0:
+        #     p = self.label_smoothing * 0.5
+        #     loss_unpaired += self.loss_fn(fp, torch.full_like(fp, p))
 
         fn = score_unpaired[(pred_unpaired==False) & (ref_unpaired==True)]
         if len(fn) > 0:
@@ -147,7 +147,8 @@ class PiecewiseLoss(nn.Module):
             p = 1 - self.label_smoothing * 0.5
             loss_unpaired += self.loss_fn(fn, torch.full_like(fn, p))
 
-        return self.gamma*loss_paired[0] + loss_unpaired[0]
+        return (loss_paired[0] + loss_unpaired[0]) / len(seq)
+        #return loss_paired[0]
 
 
     def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
@@ -178,8 +179,8 @@ class PiecewiseLoss(nn.Module):
             loss_unpaired += torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)])
             # print(len(fn), torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)]))
 
-        print(loss_unpaired[0], len(fp), len(fn))
-        return loss_unpaired[0]
+        #print(loss_unpaired[0], len(fp), len(fn))
+        return loss_unpaired[0] / len(seq)
 
 class F1Loss(nn.Module):
     def __init__(self, model, l1_weight=0., l2_weight=0., 
