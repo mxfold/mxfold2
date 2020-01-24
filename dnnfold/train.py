@@ -233,9 +233,10 @@ class F1Loss(nn.Module):
         tp = torch.sum(score_paired[(pred_paired==True) & (ref_paired==True)])
         fp = torch.sum(score_paired[(pred_paired==True) & (ref_paired==False)])
         fn = torch.sum(1-score_paired[(pred_paired==False) & (ref_paired==True)])
-
-        f = 2*tp / (2*tp + fn + fp) if tp>0 else tp
-        # print(f, tp, fp, fn)
+        
+        f = 2*tp / (2*tp + fn + fp) #if tp>0 else tp
+        #print(f, tp, fp, fn)
+        #print((pred_paired==False) & (ref_paired==True))
         return 1-f
 
 
