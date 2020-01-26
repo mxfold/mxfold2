@@ -248,6 +248,8 @@ class Sinkhorn(nn.Module):
 
     def forward(self, x_paired, x_unpaired):
         if self.n_iter > 0:
+            x_paired = x_paired.clamp_max(50.)
+            x_unpaired = x_unpaired.clamp_max(50.)
             x_paired[:, :1, :1] = torch.exp(x_paired[:, :1, :1])
             x_unpaired[:, :1] = torch.exp(x_unpaired[:, :1])
             w_u = torch.triu(x_paired[:, 1:, 1:], diagonal=1)

@@ -463,6 +463,8 @@ class Train:
         if args.seed >= 0:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
         self.model, config = self.build_model(args)
         config.update({ 'model': args.model, 'param': args.param })
