@@ -1,5 +1,6 @@
 import os
 import random
+import time
 from argparse import ArgumentParser
 
 import numpy as np
@@ -152,31 +153,35 @@ class PiecewiseLoss(nn.Module):
 
 
     def loss_unknown_structure(self, seq, pairs, score_paired, score_unpaired, pred_bp):
-        pred_unpaired = torch.zeros_like(score_unpaired)
+        pred_unpaired = torch.zeros_like(score_unpaired, dtype=torch.bool)
         for i, j in enumerate(pred_bp):
             if j == 0:
                 pred_unpaired[i] = True
         pred_unpaired = pred_unpaired[1:]
 
-        pairs = pairs.to(score_paired.device)
-        score_unpaired = score_unpaired[1:]
         #print(pred_bp)
         #print(score_unpaired)
+        pairs = pairs.to(score_paired.device)
         pairs_not_nan = torch.logical_not(torch.isnan(pairs))
         pairs_not_nan = pairs_not_nan[:, 0] * pairs_not_nan[:, 1]
         pairs = pairs[pairs_not_nan, 0] - pairs[pairs_not_nan, 1]
+        ref_unpaired = torch.sigmoid(-pairs)
+
+        score_unpaired = score_unpaired[1:]
         score_unpaired = score_unpaired[pairs_not_nan]
         pred_unpaired = pred_unpaired[pairs_not_nan]        
 
         loss_unpaired = torch.zeros((1,), device=score_unpaired.device)
-        fp = score_unpaired[(pred_unpaired==True) & (pairs>0)]
+        fp = score_unpaired[(pred_unpaired==True) & (ref_unpaired<0.5)]
         if len(fp) > 0:
-            loss_unpaired += torch.sum(fp * pairs[(pred_unpaired==True) & (pairs>0)])
+            #loss_unpaired += torch.sum(fp * pairs[(pred_unpaired==True) & (pairs>0)])
+            loss_unpaired += self.loss_fn(fp, ref_unpaired[(pred_unpaired==True) & (ref_unpaired<0.5)])
             # print(len(fp), torch.sum(fp * pairs[(pred_unpaired==True) & (pairs>0)]))
 
-        fn = score_unpaired[(pred_unpaired==False) & (pairs<=0)]
+        fn = score_unpaired[(pred_unpaired==False) & (ref_unpaired>=0.5)]
         if len(fn) > 0:
-            loss_unpaired += torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)])
+            #loss_unpaired += torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)])
+            loss_unpaired += self.loss_fn(fn, ref_unpaired[(pred_unpaired==False) & (ref_unpaired>=0.5)])
             # print(len(fn), torch.sum((1-fn) * -pairs[(pred_unpaired==False) & (pairs<=0)]))
 
         #print(loss_unpaired[0], len(fp), len(fn))
@@ -284,6 +289,7 @@ class Train:
         n_dataset = len(self.train_loader.dataset)
         loss_total, num = 0, 0
         running_loss, n_running_loss = 0, 0
+        start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, structures, pairs in self.train_loader:
                 if self.verbose:
@@ -312,9 +318,10 @@ class Train:
                     if self.writer is not None:
                         self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
                     running_loss, n_running_loss = 0, 0
+        elapsed_time = time.time() - start
         if self.verbose:
             print()
-        print('Train Epoch: {}\tLoss: {:.6f}'.format(epoch, loss_total / num))
+        print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time, elapsed_time))
 
 
     def test(self, epoch):
