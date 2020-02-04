@@ -69,6 +69,9 @@ class Predict:
             'dilation': args.dilation, 
             'num_lstm_layers': args.num_lstm_layers, 
             'num_lstm_units': args.num_lstm_units,
+            'num_transformer_layers': args.num_transformer_layers,
+            'num_transformer_hidden_units': args.num_transformer_hidden_units,
+            'num_transformer_att': args.num_transformer_att,
             'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
             'num_paired_filters': args.num_paired_filters,
             'paired_filter_size': args.paired_filter_size,
@@ -167,6 +170,12 @@ class Predict:
                         help='the number of the LSTM hidden layers (default: 0)')
         gparser.add_argument('--num-lstm-units', type=int, default=0,
                         help='the number of the LSTM hidden units (default: 0)')
+        gparser.add_argument('--num-transformer-layers', type=int, default=0,
+                        help='the number of the transformer layers (default: 0)')
+        gparser.add_argument('--num-transformer-hidden-units', type=int, default=2048,
+                        help='the number of the hidden units of each transformer layer (default: 2048)')
+        gparser.add_argument('--num-transformer-att', type=int, default=8,
+                        help='the number of the attention heads of each transformer layer (default: 8)')
         gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
                         help='the number of CNN filters (default: 96)')
         gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],

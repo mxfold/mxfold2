@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from .embedding import OneHotEmbedding, SparseEmbedding
 from .layers import CNNLSTMEncoder, PairedLayer, Transform2D, UnpairedLayer
+from .transformer import TransformerLayer
 
 
 class AbstractFold(nn.Module):
@@ -62,8 +63,11 @@ class AbstractFold(nn.Module):
 class AbstractNeuralFold(AbstractFold):
     def __init__(self, predict, embed_size=0,
             num_filters=(96,), filter_size=(5,), dilation=0, pool_size=(1,), 
-            num_lstm_layers=0, num_lstm_units=0, num_att=0, no_split_lr=False,
-            pair_join='cat', num_paired_filters=(), paired_filter_size=(),
+            num_lstm_layers=0, num_lstm_units=0, num_att=0, 
+            num_transformer_layers=0, num_transformer_hidden_units=2048,
+            num_transformer_att=8,
+            no_split_lr=False, pair_join='cat',
+            num_paired_filters=(), paired_filter_size=(),
             num_hidden_units=(32,), dropout_rate=0.0, fc_dropout_rate=0.0, 
             n_out_paired_layers=0, n_out_unpaired_layers=0, **kwargs):
 
@@ -74,9 +78,14 @@ class AbstractNeuralFold(AbstractFold):
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
-        self.encoder = CNNLSTMEncoder(n_in,
-            num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
-            num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
+        if num_transformer_layers==0:
+            self.encoder = CNNLSTMEncoder(n_in,
+                num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
+                num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
+        else:
+            self.encoder = TransformerLayer(n_in, n_head=num_transformer_att, 
+                            n_hidden=num_transformer_hidden_units, 
+                            n_layers=num_transformer_layers, dropout=dropout_rate)
         n_in = self.encoder.n_out
 
         if self.pair_join != 'bilinear':
