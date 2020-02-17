@@ -424,6 +424,33 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
 
 auto
 TurnerNearestNeighbor::
+score_helix(size_t i, size_t j, size_t m) const -> ScoreType
+{
+    auto e = ScoreType(0.);
+    for (auto k=1; k<m; k++)
+    {
+        const auto type1 = complement_pair[seq2_[i+(k-1)]][seq2_[j-(k-1)]];
+        const auto type2 = complement_pair[seq2_[j-k]][seq2_[i+k]];
+        e += score_stack_(type1, type2);
+    }
+    return e;
+}
+
+void
+TurnerNearestNeighbor::
+count_helix(size_t i, size_t j, size_t m, ScoreType v)
+{
+    auto e = ScoreType(0.);
+    for (auto k=1; k<m; k++)
+    {
+        const auto type1 = complement_pair[seq2_[i+(k-1)]][seq2_[j-(k-1)]];
+        const auto type2 = complement_pair[seq2_[j-k]][seq2_[i+k]];
+        count_stack_(type1, type2) += v;
+    }
+}
+
+auto
+TurnerNearestNeighbor::
 score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
     auto e = 0.;

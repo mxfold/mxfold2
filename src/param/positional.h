@@ -20,6 +20,7 @@ class PositionalNearestNeighbor
 
         ScoreType score_hairpin(size_t i, size_t j) const;
         ScoreType score_single_loop(size_t i, size_t j, size_t k, size_t l) const;
+        ScoreType score_helix(size_t i, size_t j, size_t m) const;
         ScoreType score_multi_loop(size_t i, size_t j) const;
         ScoreType score_multi_paired(size_t i, size_t j) const;
         ScoreType score_multi_unpaired(size_t i, size_t j) const;
@@ -29,6 +30,7 @@ class PositionalNearestNeighbor
 
         void count_hairpin(size_t i, size_t j, ScoreType v);
         void count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v);
+        void count_helix(size_t i, size_t j, size_t m, ScoreType v);
         void count_multi_loop(size_t i, size_t j, ScoreType v);
         void count_multi_paired(size_t i, size_t j, ScoreType v);
         void count_multi_unpaired(size_t i, size_t j, ScoreType v);
@@ -71,4 +73,16 @@ class PositionalNearestNeighbor
         CountType<1> count_internal_symmetry_;
         ParamType<1> score_internal_asymmetry_;
         CountType<1> count_internal_asymmetry_;
+        ParamType<1> score_helix_length_;
+        CountType<1> count_helix_length_;
+
+    public:
+        const u_int32_t MAX_HAIRPIN_LENGTH;
+        const u_int32_t MAX_BULGE_LENGTH;
+        const u_int32_t MAX_INTERNAL_LENGTH;
+        const u_int32_t MAX_SINGLE_LENGTH;
+        const u_int32_t MAX_INTERNAL_SYMMETRIC_LENGTH;
+        const u_int32_t MAX_INTERNAL_ASYMMETRY;
+        const u_int32_t MAX_INTERNAL_EXPLICIT_LENGTH;
+        const u_int32_t MAX_HELIX_LENGTH;
 };

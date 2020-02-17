@@ -34,7 +34,8 @@ class ZukerFold(AbstractNeuralFold):
             'score_internal_length': LengthLayer(31),
             'score_internal_explicit': LengthLayer((5, 5)),
             'score_internal_symmetry': LengthLayer(16),
-            'score_internal_asymmetry': LengthLayer(29)
+            'score_internal_asymmetry': LengthLayer(29),
+            'score_helix_length': LengthLayer(31)
         })
 
 
@@ -106,7 +107,8 @@ class ZukerFold(AbstractNeuralFold):
             'score_internal_length': self.fc_length['score_internal_length'].make_param(),
             'score_internal_explicit': self.fc_length['score_internal_explicit'].make_param(),
             'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
-            'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param()
+            'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param(),
+            'score_helix_length': self.fc_length['score_helix_length'].make_param()
         } for i in range(B) ]
 
         return param

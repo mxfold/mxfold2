@@ -21,6 +21,7 @@ class TurnerNearestNeighbor
 
         ScoreType score_hairpin(size_t i, size_t j) const;
         ScoreType score_single_loop(size_t i, size_t j, size_t k, size_t l) const;
+        ScoreType score_helix(size_t i, size_t j, size_t m) const;
         ScoreType score_multi_loop(size_t i, size_t j) const;
         ScoreType score_multi_paired(size_t i, size_t j) const;
         ScoreType score_multi_unpaired(size_t i, size_t j) const;
@@ -30,6 +31,7 @@ class TurnerNearestNeighbor
 
         void count_hairpin(size_t i, size_t j, ScoreType v);
         void count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v);
+        void count_helix(size_t i, size_t j, size_t m, ScoreType v);
         void count_multi_loop(size_t i, size_t j, ScoreType v);
         void count_multi_paired(size_t i, size_t j, ScoreType v);
         void count_multi_unpaired(size_t i, size_t j, ScoreType v);

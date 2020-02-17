@@ -42,7 +42,18 @@ PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
     score_internal_symmetry_(::get_unchecked<1>(obj, "score_internal_symmetry")),
     count_internal_symmetry_(::get_mutable_unchecked<1>(obj, "count_internal_symmetry")),
     score_internal_asymmetry_(::get_unchecked<1>(obj, "score_internal_asymmetry")),
-    count_internal_asymmetry_(::get_mutable_unchecked<1>(obj, "count_internal_asymmetry"))
+    count_internal_asymmetry_(::get_mutable_unchecked<1>(obj, "count_internal_asymmetry")),
+    score_helix_length_(::get_unchecked<1>(obj, "score_helix_length")),
+    count_helix_length_(::get_mutable_unchecked<1>(obj, "count_helix_length")),
+
+    MAX_HAIRPIN_LENGTH(score_hairpin_length_.shape(0)-1),
+    MAX_BULGE_LENGTH(score_bulge_length_.shape(0)-1),
+    MAX_INTERNAL_LENGTH(score_internal_length_.shape(0)-1),
+    MAX_SINGLE_LENGTH(std::min(MAX_BULGE_LENGTH, MAX_INTERNAL_LENGTH)),
+    MAX_INTERNAL_SYMMETRIC_LENGTH(score_internal_symmetry_.shape(0)-1),
+    MAX_INTERNAL_ASYMMETRY(score_internal_asymmetry_.shape(0)-1),
+    MAX_INTERNAL_EXPLICIT_LENGTH(score_internal_explicit_.shape(0)-1),
+    MAX_HELIX_LENGTH(score_helix_length_.shape(0)-1)
 {
 
 }
@@ -54,7 +65,7 @@ score_hairpin(size_t i, size_t j) const -> ScoreType
     const auto l = (j-1)-(i+1)+1;
     auto e = 0.;
 
-    e += score_hairpin_length_[std::min<u_int32_t>(l, 30)];
+    e += score_hairpin_length_[std::min<u_int32_t>(l, MAX_HAIRPIN_LENGTH)];
     e += score_base_hairpin_(i+1, j-1);
     e += score_mismatch_hairpin_(i, j);
     e += score_basepair_(i, j);
@@ -71,7 +82,7 @@ count_hairpin(size_t i, size_t j, ScoreType v)
 #if 0 // ignore very long unpaired regions that cannot be parsed in prediction
     count_hairpin_length_[std::min<u_int32_t>(l, 30)] += v;
 #else    
-    if (l <= 30)
+    if (l <= MAX_HAIRPIN_LENGTH)
         count_hairpin_length_[l] += v;
 #endif
     count_base_hairpin_(i+1, j-1) += v;
@@ -97,7 +108,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     }
     else if (ls==0) // bulge
     {
-        auto e = score_bulge_length_[std::min<u_int16_t>(ll, 30)];
+        auto e = score_bulge_length_[std::min<u_int16_t>(ll, MAX_BULGE_LENGTH)];
         e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
         e += score_basepair_(i, j);
@@ -105,12 +116,13 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     }
     else // internal loop
     {
-        auto e = score_internal_length_[std::min<u_int32_t>(ls+ll, 30)];
+        auto e = score_internal_length_[std::min<u_int32_t>(ls+ll, MAX_INTERNAL_LENGTH)];
         e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
-        e += score_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4));
+        e += score_internal_explicit_(std::min<u_int32_t>(ls, MAX_INTERNAL_EXPLICIT_LENGTH),
+                                        std::min<u_int32_t>(ll, MAX_INTERNAL_EXPLICIT_LENGTH));
         if (ls==ll)
-            e += score_internal_symmetry_[std::min<u_int32_t>(ll, 15)];
-        e += score_internal_asymmetry_[std::min<u_int32_t>(ll-ls, 28)];
+            e += score_internal_symmetry_[std::min<u_int32_t>(ll, MAX_INTERNAL_SYMMETRIC_LENGTH)];
+        e += score_internal_asymmetry_[std::min<u_int32_t>(ll-ls, MAX_INTERNAL_ASYMMETRY)];
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
         e += score_basepair_(i, j);
         return e;
@@ -138,7 +150,7 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
 #if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         count_bulge_length_[std::min<u_int32_t>(ll, 30)] += v;
 #else
-        if (ll <= 30)
+        if (ll <= MAX_BULGE_LENGTH)
             count_bulge_length_[ll] += v;
 #endif
         count_base_internal_(i+1, k-1) += v;
@@ -152,19 +164,48 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
 #if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         count_internal_length_[std::min<u_int32_t>(ls+ll, 30)] += v;
 #else
-        if (ls+ll <= 30)
+        if (ls+ll <= MAX_INTERNAL_LENGTH)
             count_internal_length_[ls+ll] += v;
 #endif
         count_base_internal_(i+1, k-1) += v;
         count_base_internal_(l+1, j-1) += v;
-        count_internal_explicit_(std::min<u_int32_t>(ls, 4), std::min<u_int32_t>(ll, 4)) += v;
+        count_internal_explicit_(std::min<u_int32_t>(ls, MAX_INTERNAL_EXPLICIT_LENGTH), 
+                            std::min<u_int32_t>(ll, MAX_INTERNAL_EXPLICIT_LENGTH)) += v;
         if (ls==ll)
-            count_internal_symmetry_[std::min<u_int32_t>(ll, 15)] += v;
-        count_internal_asymmetry_[std::min<u_int32_t>(ll-ls, 28)] += v;
+            count_internal_symmetry_[std::min<u_int32_t>(ll, MAX_INTERNAL_SYMMETRIC_LENGTH)] += v;
+        count_internal_asymmetry_[std::min<u_int32_t>(ll-ls, MAX_INTERNAL_ASYMMETRY)] += v;
         count_mismatch_internal_(i, j) += v;
         count_mismatch_internal_(l, k) += v;
         count_basepair_(i, j) += v;
     }
+}
+
+auto
+PositionalNearestNeighbor::
+score_helix(size_t i, size_t j, size_t m) const -> ScoreType
+{
+    auto e = ScoreType(0.);
+    for (auto k=1; k<m; k++)
+    {
+        e += score_helix_stacking_(i+(k-1), j-(k-1));
+        e += score_helix_stacking_(j-k, i+k);
+        e += score_basepair_(i+(k-1), j-(k-1));
+    }
+    e += score_helix_length_[std::min<u_int32_t>(m, MAX_HELIX_LENGTH)];
+    return e;
+}
+
+void
+PositionalNearestNeighbor::
+count_helix(size_t i, size_t j, size_t m, ScoreType v)
+{
+    for (auto k=1; k<m; k++)
+    {
+        count_helix_stacking_(i+(k-1), j-(k-1)) += v;
+        count_helix_stacking_(j-k, i+k) += v;
+        count_basepair_(i+(k-1), j-(k-1)) += v;
+    }
+    count_helix_length_[std::min<u_int32_t>(m, MAX_HELIX_LENGTH)] += v;
 }
 
 auto

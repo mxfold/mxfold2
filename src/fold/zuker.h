@@ -2,6 +2,8 @@
 
 #include "fold.h"
 
+#define HELIX_LENGTH
+
 template < typename P, typename S = typename P::ScoreType >
 class Zuker : public Fold
 {
@@ -11,7 +13,13 @@ class Zuker : public Fold
     private:
         enum TBType
         {
+#ifdef HELIX_LENGTH
+            N_HAIRPIN_LOOP, N_INTERNAL_LOOP, N_MULTI_LOOP,
+            E_HELIX, E_TERMINAL, 
+            C_TERMINAL, C_HELIX, C_HELIX_E,
+#else
             C_HAIRPIN_LOOP, C_INTERNAL_LOOP, C_MULTI_LOOP,
+#endif
             M_PAIRED, M_BIFURCATION, M_UNPAIRED,
             M1_PAIRED, M1_UNPAIRED,
             F_START, F_UNPAIRED, F_BIFURCATION
@@ -35,4 +43,8 @@ class Zuker : public Fold
         std::vector<ScoreType> Fv_;
         TriMatrix<TB> Ct_, Mt_, M1t_;
         std::vector<TB> Ft_;
+#ifdef HELIX_LENGTH
+        TriMatrix<ScoreType> Nv_, Ev_;
+        TriMatrix<TB> Nt_, Et_;
+#endif
 };

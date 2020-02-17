@@ -30,6 +30,13 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 
 auto
 MixedNearestNeighbor::
+score_helix(size_t i, size_t j, size_t m) const -> ScoreType
+{
+    return turner_.score_helix(i, j, m) + positional_.score_helix(i, j, m);
+}
+
+auto
+MixedNearestNeighbor::
 score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
     return turner_.score_multi_loop(i, j) + positional_.score_multi_loop(i, j);
@@ -85,6 +92,14 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
 {
     turner_.count_single_loop(i, j, k, l, v);
     positional_.count_single_loop(i, j, k, l, v);
+}
+
+void
+MixedNearestNeighbor::
+count_helix(size_t i, size_t j, size_t m, ScoreType v)
+{
+    turner_.count_helix(i, j, m, v);
+    positional_.count_helix(i, j, m, v);
 }
 
 void

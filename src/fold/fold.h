@@ -14,6 +14,7 @@ class Fold
         {
             size_t min_hairpin;
             size_t max_internal;
+            size_t max_helix;
             std::string stru;
             bool use_penalty;
             std::string ref;
@@ -25,6 +26,7 @@ class Fold
             Options() : 
                 min_hairpin(3),
                 max_internal(30),
+                max_helix(30),
                 use_penalty(false)
             {    
             }
@@ -38,6 +40,12 @@ class Fold
             Options& max_internal_loop_length(size_t s)
             {
                 this->max_internal = s;
+                return *this;
+            }
+
+            Options& max_helix_hength(size_t s)
+            {
+                this->max_helix = s;
                 return *this;
             }
 
