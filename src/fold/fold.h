@@ -43,7 +43,7 @@ class Fold
                 return *this;
             }
 
-            Options& max_helix_hength(size_t s)
+            Options& max_helix_length(size_t s)
             {
                 this->max_helix = s;
                 return *this;

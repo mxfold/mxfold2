@@ -17,7 +17,7 @@ from .fold.mix import MixedFold
 from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
-from .loss import F1Loss, PiecewiseLoss, StructuredLoss
+from .loss import F1Loss, PiecewiseLoss, StructuredLoss, StructuredLossWithTurner
 
 
 class Train:
@@ -179,6 +179,11 @@ class Train:
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+        if loss_func == 'hinge_mix':
+            return StructuredLossWithTurner(model, verbose=self.verbose,
+                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
+                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
         elif loss_func == 'piecewise':
             return PiecewiseLoss(model, verbose=self.verbose, label_smoothing=args.label_smoothing, gamma=args.gamma,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, weak_label_weight=args.weak_label_weight)
@@ -294,10 +299,12 @@ class Train:
                             help='the weight for L2 regularization (default: 0)')
         gparser.add_argument('--weak-label-weight', type=float, default=1.,
                             help='the weight for weak label data (default: 1)')
+        gparser.add_argument('--score-loss-weight', type=float, default=1.,
+                            help='the weight for score loss for hinge_mix loss (default: 1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'piecewise', 'f1'), default='hinge',
-                            help="loss fuction ('hinge', 'piecewise', 'f1') ")
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'piecewise', 'f1'), default='hinge',
+                            help="loss fuction ('hinge', 'hinge_mix', 'piecewise', 'f1') ")
         gparser.add_argument('--label-smoothing', type=float, default=0.0,
                             help='the label smoothing for piecewise loss (default: 0.0)')
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
