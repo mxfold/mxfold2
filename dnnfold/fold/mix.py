@@ -38,7 +38,8 @@ class MixedFold(AbstractFold):
             preds.append(pred)
             pairs.append(pair)
 
-        ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss)
+        device = next(iter(param[0]['positional'].values())).device
+        ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss, device=device)
         if return_param:
             return ss, preds, pairs, param
         else:

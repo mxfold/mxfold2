@@ -3,16 +3,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .. import interface
-from .fold import AbstractNeuralFold
-from .layers import SinkhornLayer
+from .fold import AbstractFold
+from .layers import SinkhornLayer, NeuralNet
 
 
-class NussinovFold(AbstractNeuralFold):
+class NussinovFold(AbstractFold):
     def __init__(self, model_type='N', **kwargs):
-        super(NussinovFold, self).__init__(**kwargs,
-            predict=interface.predict_nussinov,
-            n_out_paired_layers=1, n_out_unpaired_layers=1)
+        super(NussinovFold, self).__init__(predict=interface.predict_nussinov)
 
+        self.net = NeuralNet(**kwargs,
+            n_out_paired_layers=1, n_out_unpaired_layers=1)
         self.model_type = model_type
         if self.model_type=='S':
             self.gamma = kwargs['gamma']
@@ -22,7 +22,7 @@ class NussinovFold(AbstractNeuralFold):
 
 
     def make_param(self, seq):
-        score_paired, score_unpaired = super(NussinovFold, self).make_param(seq)
+        score_paired, score_unpaired = self.net(seq)
         B, N, _ = score_unpaired.shape
 
         if self.model_type == 'N':

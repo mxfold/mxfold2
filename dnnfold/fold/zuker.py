@@ -3,12 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .. import interface
-from .fold import AbstractNeuralFold
-from .layers import LengthLayer
+from .fold import AbstractFold
+from .layers import LengthLayer, NeuralNet
 
 
-class ZukerFold(AbstractNeuralFold):
+class ZukerFold(AbstractFold):
     def __init__(self, model_type="M", **kwargs):
+        super(ZukerFold, self).__init__(predict=interface.predict_zuker)
+
         if model_type == "S":
             n_out_paired_layers = 1
             n_out_unpaired_layers = 1
@@ -21,12 +23,10 @@ class ZukerFold(AbstractNeuralFold):
         else:
             raise("not implemented")
 
-        super(ZukerFold, self).__init__(**kwargs,
-            predict=interface.predict_zuker, 
+        self.model_type = model_type
+        self.net = NeuralNet(**kwargs, 
             n_out_paired_layers=n_out_paired_layers,
             n_out_unpaired_layers=n_out_unpaired_layers)
-
-        self.model_type = model_type
 
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': LengthLayer(31),
@@ -41,7 +41,7 @@ class ZukerFold(AbstractNeuralFold):
 
     def make_param(self, seq):
         device = next(self.parameters()).device
-        score_paired, score_unpaired = super(ZukerFold, self).make_param(seq)
+        score_paired, score_unpaired = self.net(seq)
         B, N, _ = score_unpaired.shape
 
         def unpair_interval(su):
