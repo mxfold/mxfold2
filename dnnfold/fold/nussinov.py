@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractNeuralFold
-from .layers import Sinkhorn
+from .layers import SinkhornLayer
 
 
 class NussinovFold(AbstractNeuralFold):
@@ -16,7 +16,7 @@ class NussinovFold(AbstractNeuralFold):
         self.model_type = model_type
         if self.model_type=='S':
             self.gamma = kwargs['gamma']
-            self.sinkhorn = Sinkhorn(n_iter=kwargs['sinkhorn'], 
+            self.sinkhorn = SinkhornLayer(n_iter=kwargs['sinkhorn'], 
                                     tau=kwargs['sinkhorn_tau'], 
                                     do_sampling=kwargs['gumbel_sinkhorn'])
 
@@ -34,8 +34,6 @@ class NussinovFold(AbstractNeuralFold):
             score_paired = score_paired.view(B, N, N)
             score_unpaired = score_unpaired.view(B, N)
             score_paired, score_unpaired = self.sinkhorn(score_paired, score_unpaired)
-            #print(torch.min(score_paired), torch.max(score_paired))
-            #print(score_paired[0, 1:, 1:])
             return [ {  'score_paired': score_paired[i] * self.gamma * 2,
                         'score_unpaired': score_unpaired[i]
                     } for i in range(B) ]

@@ -132,9 +132,16 @@ class PairedLayer(nn.Module):
     def forward(self, x):
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
+        x_u = torch.triu(x.view(B*C, N, N), diagonal=1).view(B, C, N, N)
+        x_l = torch.tril(x.view(B*C, N, N), diagonal=-1).view(B, C, N, N)
+        x = torch.cat((x_u, x_l), dim=0).view(B*2, C, N, N)
         for conv in self.conv:
             x_a = conv(x)
-            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
+            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
+        x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
+        x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=1)
+        x_l = torch.tril(x_u.view(B, -1, N, N), diagonal=-1)
+        x = x_u + x_l # (B, n_out, N, N)
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
         x = self.fc(x)
         return x.view(B, N, N, -1) # (B, N, N, n_out)
@@ -212,9 +219,9 @@ class LengthLayer(nn.Module):
         return x.reshape((self.n_in,) if isinstance(self.n_in, int) else self.n_in)
 
 
-class Sinkhorn(nn.Module):
+class SinkhornLayer(nn.Module):
     def __init__(self, n_iter=64, tau=1., eps=1e-5, do_sampling=True):
-        super(Sinkhorn, self).__init__()
+        super(SinkhornLayer, self).__init__()
         self.n_iter = n_iter
         self.tau = tau
         self.eps = eps
@@ -248,17 +255,23 @@ class Sinkhorn(nn.Module):
 
     def forward(self, x_paired, x_unpaired):
         if self.n_iter > 0:
-            x_paired = x_paired.clamp_max(50.)
-            x_unpaired = x_unpaired.clamp_max(50.)
+            x_paired = x_paired.clamp_max(50.) # for numerical stability
+            x_unpaired = x_unpaired.clamp_max(50.) # for numerical stability
             x_paired[:, :1, :1] = torch.exp(x_paired[:, :1, :1])
             x_unpaired[:, :1] = torch.exp(x_unpaired[:, :1])
-            w_u = torch.triu(x_paired[:, 1:, 1:], diagonal=1)
-            w_l = torch.tril(x_paired[:, 1:, 1:], diagonal=-1)
+            w = x_paired[:, 1:, 1:]
+            w_u = torch.triu(w, diagonal=1)
+            w_l = w_u.transpose(1, 2) # torch.tril(w, diagonal=-1)
             w = w_u + w_l + torch.diag_embed(x_unpaired[:, 1:])
-            w = (w + w.transpose(1, 2)) / 2
             if self.do_sampling:
-                w = w + self.gumbel_sampling(w.shape).to(w.device)
+                r = self.gumbel_sampling(w.shape).to(w.device)
+                r = torch.triu(r, diagonal=0)
+                r = (r + r.transpose(1, 2)) / 2
+                w = w + r
             w = torch.exp(self.sinkhorn_logsumexp(w/self.tau))
             x_unpaired[:, 1:] = torch.diagonal(w, dim1=1, dim2=2)
-            x_paired[:, 1:, 1:] = torch.triu(w, diagonal=1) + torch.tril(w, diagonal=-1)
+            w_u = torch.triu(w, diagonal=1)
+            w_l = w_u.transpose(1, 2)
+            w = w_u + w_l
+            x_paired[:, 1:, 1:] = w
         return x_paired, x_unpaired
