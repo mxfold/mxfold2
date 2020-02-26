@@ -62,6 +62,7 @@ class Predict:
                 return RNAFold(param_turner2004), {}
 
         config = {
+            'max_helix_length': args.max_helix_length,
             'embed_size' : args.embed_size,
             'num_filters': args.num_filters if args.num_filters is not None else (96,),
             'filter_size': args.filter_size if args.filter_size is not None else (5,),
@@ -156,6 +157,8 @@ class Predict:
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS'), default='Turner', 
                             help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS')")
+        gparser.add_argument('--max-helix-length', type=int, default=30, 
+                        help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',

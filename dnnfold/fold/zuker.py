@@ -8,7 +8,7 @@ from .layers import LengthLayer, NeuralNet
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, model_type="M", **kwargs):
+    def __init__(self, model_type="M", max_helix_length=30, **kwargs):
         super(ZukerFold, self).__init__(predict=interface.predict_zuker)
 
         if model_type == "S":
@@ -24,6 +24,7 @@ class ZukerFold(AbstractFold):
             raise("not implemented")
 
         self.model_type = model_type
+        self.max_helix_length = max_helix_length
         self.net = NeuralNet(**kwargs, 
             n_out_paired_layers=n_out_paired_layers,
             n_out_unpaired_layers=n_out_unpaired_layers)
@@ -37,6 +38,10 @@ class ZukerFold(AbstractFold):
             'score_internal_asymmetry': LengthLayer(29),
             'score_helix_length': LengthLayer(31)
         })
+
+
+    def forward(self, seq, **kwargs):
+        return super(ZukerFold, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
     def make_param(self, seq):

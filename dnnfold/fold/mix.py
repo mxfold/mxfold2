@@ -5,10 +5,11 @@ from .rnafold import RNAFold
 from .zuker import ZukerFold
 
 class MixedFold(AbstractFold):
-    def __init__(self, init_param=None, model_type='M', **kwargs):
+    def __init__(self, init_param=None, model_type='M', max_helix_length=30, **kwargs):
         super(MixedFold, self).__init__(interface.predict_mxfold)
         self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(model_type=model_type, **kwargs)
+        self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
+        self.max_helix_length = max_helix_length
 
 
     def forward(self, seq, return_param=False, param=None,
@@ -28,6 +29,7 @@ class MixedFold(AbstractFold):
             with torch.no_grad():
                 v, pred, pair = interface.predict_mxfold(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            max_helix_length=self.max_helix_length,
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,

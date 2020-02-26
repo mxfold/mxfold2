@@ -29,7 +29,7 @@ class AbstractFold(nn.Module):
 
 
     def forward(self, seq, return_param=False, param=None,
-            max_internal_length=30, constraint=None, reference=None,
+            max_internal_length=30, max_helix_length=30, constraint=None, reference=None,
             loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0):
         param = self.make_param(seq) if param is None else param # reuse param or not
         ss = []
@@ -40,6 +40,7 @@ class AbstractFold(nn.Module):
             with torch.no_grad():
                 v, pred, pair = self.predict(seq[i], self.clear_count(param_on_cpu),
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            max_helix_length=max_helix_length,
                             constraint=constraint[i] if constraint is not None else '', 
                             reference=reference[i] if reference is not None else '', 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,

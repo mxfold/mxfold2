@@ -119,22 +119,29 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 
                 /////
                 bool updated=false;
-                // isolated base pair
-                updated |= update_max(Cv_[i][j], Nv_[i][j] + param_->score_helix(i, j, 1), Ct_[i][j], TBType::C_TERMINAL);
-                // helix (2~max_helix)
-                unsigned int m;
-                ScoreType lp = ScoreType(0.);
-                for (m=2; m<=opts.max_helix; m++)
+                if (opts.max_helix>0)
                 {
-                    if (i+(m-1)>=j-(m-1) || !allow_paired[i+(m-1)][j-(m-1)]) break;
-                    lp += loss_paired[i+(m-2)][j-(m-2)];
-                    auto s = Nv_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
-                    updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX, m);
+                    // isolated base pair
+                    updated |= update_max(Cv_[i][j], Nv_[i][j] + param_->score_helix(i, j, 1), Ct_[i][j], TBType::C_TERMINAL);
+                    // helix (2~max_helix)
+                    unsigned int m;
+                    ScoreType lp = ScoreType(0.);
+                    for (m=2; m<=opts.max_helix; m++)
+                    {
+                        if (i+(m-1)>=j-(m-1) || !allow_paired[i+(m-1)][j-(m-1)]) break;
+                        lp += loss_paired[i+(m-2)][j-(m-2)];
+                        auto s = Nv_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
+                        updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX, m);
+                    }
+                    if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
+                    {
+                        auto s = Ev_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
+                        updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX_E, m);
+                    }
                 }
-                if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
+                else
                 {
-                    auto s = Ev_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
-                    updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX_E, m);
+                    updated |= update_max(Cv_[i][j], Ev_[i][j], Ct_[i][j], TBType::C_HELIX_E, 1);
                 }
 
                 if (updated)
