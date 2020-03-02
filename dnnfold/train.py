@@ -134,6 +134,9 @@ class Train:
         if args.model == 'Zuker':
             model = ZukerFold(model_type='M', **config)
 
+        elif args.model == 'ZukerC':
+            model = ZukerFold(model_type='C', **config)
+
         elif args.model == 'ZukerL':
             model = ZukerFold(model_type="L", **config)
 
@@ -151,6 +154,10 @@ class Train:
         elif args.model == 'Mix':
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, **config)
+
+        elif args.model == 'MixC':
+            from . import param_turner2004
+            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
         else:
             raise('not implemented')
@@ -318,8 +325,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'Mix', 'Nussinov', 'NussinovS')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Nussinov', 'NussinovS'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Nussinov', 'NussinovS')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

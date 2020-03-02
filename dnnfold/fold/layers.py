@@ -102,10 +102,11 @@ class Transform2D(nn.Module):
 
 
 class PairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0, resnet=True):
+    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0, exclude_diag=True, resnet=True):
         super(PairedLayer, self).__init__()
 
         self.resnet = resnet        
+        self.exclude_diag = exclude_diag
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
@@ -132,16 +133,17 @@ class PairedLayer(nn.Module):
 
 
     def forward(self, x):
+        diag = 1 if self.exclude_diag else 0
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
-        x_u = torch.triu(x.view(B*C, N, N), diagonal=1).view(B, C, N, N)
+        x_u = torch.triu(x.view(B*C, N, N), diagonal=diag).view(B, C, N, N)
         x_l = torch.tril(x.view(B*C, N, N), diagonal=-1).view(B, C, N, N)
         x = torch.cat((x_u, x_l), dim=0).view(B*2, C, N, N)
         for conv in self.conv:
             x_a = conv(x)
             x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
         x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
-        x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=1)
+        x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
         x_l = torch.tril(x_u.view(B, -1, N, N), diagonal=-1)
         x = x_u + x_l # (B, n_out, N, N)
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
@@ -288,7 +290,7 @@ class NeuralNet(nn.Module):
             no_split_lr=False, pair_join='cat',
             num_paired_filters=(), paired_filter_size=(),
             num_hidden_units=(32,), dropout_rate=0.0, fc_dropout_rate=0.0, 
-            n_out_paired_layers=0, n_out_unpaired_layers=0, **kwargs):
+            exclude_diag=True, n_out_paired_layers=0, n_out_unpaired_layers=0, **kwargs):
 
         super(NeuralNet, self).__init__()
 
@@ -316,10 +318,14 @@ class NeuralNet(nn.Module):
 
             self.fc_paired = PairedLayer(n_in_paired, n_out_paired_layers,
                                     filters=num_paired_filters, ksize=paired_filter_size,
+                                    exclude_diag=exclude_diag,
                                     fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
-            self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
-                                    filters=num_paired_filters, ksize=paired_filter_size,
-                                    fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
+            if n_out_unpaired_layers > 0:
+                self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
+                                        filters=num_paired_filters, ksize=paired_filter_size,
+                                        fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
+            else:
+                self.fc_unpaired = None
 
         else:
             n_in_paired = n_in // 2 if not self.no_split_lr else n_in
@@ -343,7 +349,10 @@ class NeuralNet(nn.Module):
             x_lr = self.transform2d(x_l, x_r)
 
             score_paired = self.fc_paired(x_lr)
-            score_unpaired = self.fc_unpaired(x)
+            if self.fc_unpaired is not None:
+                score_unpaired = self.fc_unpaired(x)
+            else:
+                score_unpaired = None
 
             return score_paired, score_unpaired
 

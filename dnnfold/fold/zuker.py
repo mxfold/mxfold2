@@ -11,6 +11,7 @@ class ZukerFold(AbstractFold):
     def __init__(self, model_type="M", max_helix_length=30, **kwargs):
         super(ZukerFold, self).__init__(predict=interface.predict_zuker)
 
+        exclude_diag = True
         if model_type == "S":
             n_out_paired_layers = 1
             n_out_unpaired_layers = 1
@@ -20,6 +21,10 @@ class ZukerFold(AbstractFold):
         elif model_type == "L":
             n_out_paired_layers = 5
             n_out_unpaired_layers = 4
+        elif model_type == "C":
+            n_out_paired_layers = 3
+            n_out_unpaired_layers = 0
+            exclude_diag = False
         else:
             raise("not implemented")
 
@@ -27,7 +32,8 @@ class ZukerFold(AbstractFold):
         self.max_helix_length = max_helix_length
         self.net = NeuralNet(**kwargs, 
             n_out_paired_layers=n_out_paired_layers,
-            n_out_unpaired_layers=n_out_unpaired_layers)
+            n_out_unpaired_layers=n_out_unpaired_layers,
+            exclude_diag=exclude_diag)
 
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': LengthLayer(31),
@@ -47,7 +53,7 @@ class ZukerFold(AbstractFold):
     def make_param(self, seq):
         device = next(self.parameters()).device
         score_paired, score_unpaired = self.net(seq)
-        B, N, _ = score_unpaired.shape
+        B, N, _, _ = score_paired.shape
 
         def unpair_interval(su):
             su = su.view(B, 1, N)
@@ -92,6 +98,19 @@ class ZukerFold(AbstractFold):
             score_base_internal = unpair_interval(score_unpaired[:, :, 1])
             score_base_multi = unpair_interval(score_unpaired[:, :, 2])
             score_base_external = unpair_interval(score_unpaired[:, :, 3])
+
+        elif self.model_type == 'C':
+            score_basepair = torch.zeros((B, N, N), device=device)
+            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+            score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
+            score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
 
         else:
             raise("not implemented")
