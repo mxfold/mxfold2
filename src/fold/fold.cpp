@@ -56,12 +56,19 @@ make_constraint(const std::string& seq, std::vector<u_int32_t> stru, u_int32_t m
         }
     }
 
+    std::vector<bool> pk(L+1, false);
+    for (auto i=1; i<=L; i++)
+        if (stru[i] > 0 && stru[i] <= L) // paired
+            for (auto k=i+1; k<stru[i]; k++)
+                if (/*stru[k] > 0 &&*/ stru[k] <= L && stru[k] > stru[i]) // paired & pk
+                    pk[i] = pk[stru[i]] = pk[k] = pk[stru[k]] = true;
+
     std::vector<std::vector<bool>> allow_paired(L+1, std::vector<bool>(L+1, false));
     std::vector<std::vector<bool>> allow_unpaired(L+1, std::vector<bool>(L+1, false));
     for (auto i=L; i>=1; i--)
     {
         allow_unpaired[i][i-1] = true; // the empty string is alway allowed to be unpaired
-        allow_unpaired[i][i] = stru[i]==Options::ANY || stru[i]==Options::UNPAIRED;
+        allow_unpaired[i][i] = stru[i]==Options::ANY || stru[i]==Options::UNPAIRED || pk[i];
         bool bp_l = stru[i]==Options::ANY || stru[i]==Options::PAIRED_L || stru[i]==Options::PAIRED_LR;
         for (auto j=i+1; j<=L; j++)
         {
