@@ -25,7 +25,7 @@ class FastaDataset(Dataset):
             # join all sequence lines to one.
             seq = "".join(s.strip() for s in faiter.__next__())
 
-            yield (headerStr, seq, '', torch.tensor([]))
+            yield (headerStr, seq, torch.tensor([]))
 
 
 class BPseqDataset(Dataset):
@@ -68,14 +68,8 @@ class BPseqDataset(Dataset):
         
         if structure_is_known:
             seq = ''.join(s)
-            pair = [self.unpaired] * len(seq)
-            for i, j in enumerate(p):
-                if j > 0 and i < j:
-                    pair[i-1] = '('
-                    pair[j-1] = ')'
-            pair = ''.join(pair)
-            return (filename, seq, pair, torch.tensor(p))
+            return (filename, seq, torch.tensor(p))
         else:
             seq = ''.join(s)
             p.pop(0)
-            return (filename, seq, '', torch.tensor(p))
+            return (filename, seq, torch.tensor(p))

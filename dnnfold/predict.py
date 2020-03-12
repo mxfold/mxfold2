@@ -26,7 +26,7 @@ class Predict:
         res_fn = open(result, 'w') if result is not None else None
         self.model.eval()
         with torch.no_grad():
-            for headers, seqs, _, refs in self.test_loader:
+            for headers, seqs, refs in self.test_loader:
                 start = time.time()
                 scs, preds, bps = self.model(seqs)
                 elapsed_time = time.time() - start

@@ -12,12 +12,20 @@ class Fold
     public:
         struct Options
         {
+            enum {
+                UNPAIRED  =  0u, // 'x'
+                ANY       = -1u, // '.'
+                PAIRED_L  = -2u, // '<'
+                PAIRED_R  = -3u, // '>'
+                PAIRED_LR = -4u, // '|'
+            };
+
             size_t min_hairpin;
             size_t max_internal;
             size_t max_helix;
-            std::string stru;
+            std::vector<u_int32_t> stru;
             bool use_penalty;
-            std::string ref;
+            std::vector<u_int32_t> ref;
             float pos_paired;
             float neg_paired;
             float pos_unpaired;
@@ -49,13 +57,13 @@ class Fold
                 return *this;
             }
 
-            Options& constraints(const std::string& s)
+            Options& constraints(const std::vector<u_int32_t>& s)
             {
                 this->stru = s;
                 return *this;
             }
 
-            Options& penalty(const std::string& ref, float pos_paired=0, float neg_paired=0, float pos_unpaired=0, float neg_unpaired=0)
+            Options& penalty(const std::vector<u_int32_t>& ref, float pos_paired=0, float neg_paired=0, float pos_unpaired=0, float neg_unpaired=0)
             {
                 this->use_penalty = pos_paired!=0 || neg_paired!=0 || pos_unpaired!=0 || neg_unpaired!=0;
                 this->ref = ref;
@@ -72,8 +80,8 @@ class Fold
         static auto parse_paren(const std::string& paren) 
             -> std::vector<u_int32_t>;
         static auto make_paren(const std::vector<u_int32_t>& p) -> std::string;
-        static auto make_constraint(const std::string& seq, std::string stru, u_int32_t max_bp, bool canonical_only=true)
+        static auto make_constraint(const std::string& seq, std::vector<u_int32_t> stru, u_int32_t max_bp, bool canonical_only=true)
             -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
-        static auto make_penalty(size_t L, bool use_penalty, const std::string& ref, float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired) 
+        static auto make_penalty(size_t L, bool use_penalty, const std::vector<u_int32_t>& ref, float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired) 
             -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>, float>;
 };

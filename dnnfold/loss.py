@@ -17,11 +17,11 @@ class StructuredLoss(nn.Module):
         self.verbose = verbose
 
 
-    def forward(self, seq, structure, pairs, fname=None):
-        pred, pred_s, _, param = self.model(seq, return_param=True, reference=structure,
+    def forward(self, seq, pairs, fname=None):
+        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
-        ref, ref_s, _ = self.model(seq, param=param, constraint=structure, max_internal_length=None)
+        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         if self.verbose:
@@ -34,7 +34,6 @@ class StructuredLoss(nn.Module):
             print(fname)
             print(loss.item(), pred.item(), ref.item())
             print(seq)
-            print(structure)
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
@@ -70,13 +69,13 @@ class StructuredLossWithTurner(nn.Module):
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
 
-    def forward(self, seq, structure, pairs, fname=None):
-        pred, pred_s, _, param = self.model(seq, return_param=True, reference=structure,
+    def forward(self, seq, pairs, fname=None):
+        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
-        ref, ref_s, _ = self.model(seq, param=param, constraint=structure, max_internal_length=None)
+        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, max_internal_length=None)
         with torch.no_grad():
-            ref2, ref2_s, _ = self.turner(seq, constraint=structure, max_internal_length=None)
+            ref2, ref2_s, _ = self.turner(seq, constraint=pairs, max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         loss += self.sl_weight * (ref-ref2) * (ref-ref2) / l
@@ -90,7 +89,6 @@ class StructuredLossWithTurner(nn.Module):
             print(fname)
             print(loss.item(), pred.item(), ref.item())
             print(seq)
-            print(structure)
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
@@ -119,7 +117,7 @@ class PiecewiseLoss(nn.Module):
         self.loss_fn = nn.BCELoss(reduction='sum')
 
 
-    def forward(self, seq, structure, pairs, fname=None): # BCELoss with 'sum' reduction
+    def forward(self, seq, pairs, fname=None): # BCELoss with 'sum' reduction
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
         for k in range(len(seq)):
@@ -129,9 +127,9 @@ class PiecewiseLoss(nn.Module):
             # print(score_unpaired[score_unpaired>0.5].shape)
             # print(score_paired[1:, 1:])
             # print(pred_bp)
-            if len(structure[k]) > 0:
-                ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[structure[k]], max_internal_length=None)
-                loss[k] += self.loss_known_structure(seq[k], structure[k], score_paired, score_unpaired, pred_bp[k], ref_bp[0])
+            if pairs[k].ndim==1: #len(structure[k]) > 0:
+                ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[pairs[k]], max_internal_length=None)
+                loss[k] += self.loss_known_structure(seq[k], score_paired, score_unpaired, pred_bp[k], ref_bp[0])
             else:
                 loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, score_unpaired, pred_bp[k]) * self.weak_label_weight
 
@@ -142,7 +140,7 @@ class PiecewiseLoss(nn.Module):
         return loss
 
 
-    def loss_known_structure(self, seq, structure, score_paired, score_unpaired, pred_bp, ref_bp):
+    def loss_known_structure(self, seq, score_paired, score_unpaired, pred_bp, ref_bp):
         pred_paired = torch.zeros_like(score_paired, dtype=torch.bool)
         pred_unpaired = torch.zeros_like(score_unpaired, dtype=torch.bool)
         for i, j in enumerate(pred_bp):
@@ -241,7 +239,7 @@ class F1Loss(nn.Module):
         self.verbose = verbose
 
 
-    def forward(self, seq, structure, pairs, fname=None): # BCELoss with 'sum' reduction
+    def forward(self, seq, pairs, fname=None): # BCELoss with 'sum' reduction
         pred_sc, pred_s, pred_bp, param = self.model(seq, return_param=True)
         loss = torch.zeros((len(param),), device=param[0]['score_paired'].device)
         for k in range(len(seq)):
@@ -251,8 +249,8 @@ class F1Loss(nn.Module):
             # print(score_unpaired[score_unpaired>0.5].shape)
             # print(score_paired[1:, 1:])
             # print(pred_bp)
-            if len(structure[k]) > 0:
-                ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[structure[k]], max_internal_length=None)
+            if pairs[k].ndim==1:  #len(structure[k]) > 0:
+                ref_sc, ref_s, ref_bp = self.model([seq[k]], param=[param[k]], constraint=[pairs[k]], max_internal_length=None)
                 loss[k] += self.loss_known_structure(seq[k], score_paired, score_unpaired, pred_bp[k], ref_bp[0])
             else:
                 loss[k] += self.loss_unknown_structure(seq[k], pairs[k], score_paired, score_unpaired, pred_bp[k]) * self.weak_label_weight

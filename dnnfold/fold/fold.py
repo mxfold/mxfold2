@@ -41,8 +41,8 @@ class AbstractFold(nn.Module):
                 v, pred, pair = self.predict(seq[i], self.clear_count(param_on_cpu),
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             max_helix_length=max_helix_length,
-                            constraint=constraint[i] if constraint is not None else '', 
-                            reference=reference[i] if reference is not None else '', 
+                            constraint=constraint[i].tolist() if constraint is not None else None, 
+                            reference=reference[i].tolist() if reference is not None else None, 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
             if torch.is_grad_enabled():

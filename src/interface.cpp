@@ -11,19 +11,59 @@
 
 namespace py = pybind11;
 
+static
+std::vector<u_int32_t> 
+convert_constraints(py::list constraint)
+{
+    std::vector<u_int32_t> ret(constraint.size(), Fold::Options::ANY);
+    for (auto i=0; i!=constraint.size(); i++)
+    {
+        if (py::isinstance<py::str>(constraint[i]))
+        {
+            std::string c = py::cast<py::str>(constraint[i]);
+            if (c=="x")
+                ret[i] = Fold::Options::UNPAIRED;
+            else if (c=="<")
+                ret[i] = Fold::Options::PAIRED_L;
+            else if (c==">")
+                ret[i] = Fold::Options::PAIRED_R;
+            else if (c=="|")
+                ret[i] = Fold::Options::PAIRED_LR;
+            /* else  if (c==".") 
+                ret[i] = Fold::Options::ANY; */
+        }
+        else if (py::isinstance<py::int_>(constraint[i]))
+        {
+            ret[i] = py::cast<py::int_>(constraint[i]);
+        }
+    }
+    return ret;
+}
+
 template < class ParamClass >
 auto predict_zuker(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
-            std::string constraint, std::string reference, 
+            py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
     typename Zuker<ParamClass>::Options options;
     options.min_hairpin_loop_length(min_hairpin)
         .max_internal_loop_length(max_internal)
-        .max_helix_length(max_helix)
-        .constraints(constraint)
-        .penalty(reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-    
+        .max_helix_length(max_helix);
+    if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+    {
+        auto c = convert_constraints(py::cast<py::list>(constraint));
+        options.constraints(c);
+    }
+    if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+    {
+        auto r = py::cast<py::list>(reference);
+        std::vector<u_int32_t> c(r.size());
+        std::transform(std::begin(r), std::end(r), std::begin(c),
+                    [](auto x) -> u_int32_t { return py::cast<py::int_>(x); });
+        options.penalty(c, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+    }
+        
     auto param = std::make_unique<ParamClass>(seq, pa);
     Zuker<ParamClass> f(std::move(param));
     f.compute_viterbi(seq, options);
@@ -35,14 +75,25 @@ auto predict_zuker(const std::string& seq, py::object pa,
 template < class ParamClass >
 auto predict_nussinov(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
-            std::string constraint, std::string reference, 
+            py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
     typename Nussinov<ParamClass>::Options options;
-    options.min_hairpin_loop_length(min_hairpin)
-        .constraints(constraint)
-        .penalty(reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-    
+    options.min_hairpin_loop_length(min_hairpin);
+    if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+    {
+        auto c = convert_constraints(py::cast<py::list>(constraint));
+        options.constraints(c);
+    }
+    if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+    {
+        auto r = py::cast<py::list>(reference);
+        std::vector<u_int32_t> c(r.size());
+        std::transform(std::begin(r), std::end(r), std::begin(c),
+                    [](auto x) -> u_int32_t { return py::cast<py::int_>(x); });
+        options.penalty(c, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+    }
+
     auto param = std::make_unique<ParamClass>(seq, pa);
     Nussinov<ParamClass> f(std::move(param));
     f.compute_viterbi(seq, options);
@@ -64,7 +115,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
-        "constraint"_a=""s, 
+        "constraint"_a=py::none(), 
         "reference"_a=""s, 
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
@@ -78,8 +129,8 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
-        "constraint"_a=""s, 
-        "reference"_a=""s, 
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
         "loss_pos_unpaired"_a=0.0, 
@@ -92,8 +143,8 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
-        "constraint"_a=""s, 
-        "reference"_a=""s, 
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
         "loss_pos_unpaired"_a=0.0,
@@ -106,8 +157,8 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
-        "constraint"_a=""s, 
-        "reference"_a=""s, 
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
         "loss_pos_unpaired"_a=0.0, 
