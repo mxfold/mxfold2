@@ -34,7 +34,8 @@ convert_constraints(py::list constraint)
         }
         else if (py::isinstance<py::int_>(constraint[i]))
         {
-            ret[i] = py::cast<py::int_>(constraint[i]);
+            auto v = py::cast<py::int_>(constraint[i]);
+            if (v>=0) ret[i] = v;
         }
     }
     return ret;
@@ -60,10 +61,10 @@ auto predict_zuker(const std::string& seq, py::object pa,
         auto r = py::cast<py::list>(reference);
         std::vector<u_int32_t> c(r.size());
         std::transform(std::begin(r), std::end(r), std::begin(c),
-                    [](auto x) -> u_int32_t { return py::cast<py::int_>(x); });
+                    [](auto x) -> u_int32_t { return std::max<int>(0, py::cast<py::int_>(x)); });
         options.penalty(c, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
     }
-        
+
     auto param = std::make_unique<ParamClass>(seq, pa);
     Zuker<ParamClass> f(std::move(param));
     f.compute_viterbi(seq, options);
