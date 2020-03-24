@@ -24,8 +24,8 @@ compute_viterbi(const std::string& seq, Options opts /*= Options()*/) -> ScoreTy
     Dv_.clear(); Dv_.resize(L+1, NEG_INF);
     Dt_.clear(); Dt_.resize(L+1);
 
-    const auto [allow_paired, allow_unpaired] = make_constraint(seq, opts.stru, opts.min_hairpin);
-    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_paired, opts.neg_paired, opts.pos_unpaired, opts.neg_unpaired);
+    const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
+    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
 
     std::vector<std::vector<u_int32_t>> split_point_l(L+1);
 
@@ -142,7 +142,7 @@ traceback_viterbi(const std::string& seq, Options opts /*= Options()*/) -> std::
 {
     const auto L = Dt_.size()-1;
     std::vector<u_int32_t> pair(L+1, 0);
-    const auto [loss_paired, loss_unpaired, loss_const] = make_penalty(L, opts.use_penalty, opts.ref, opts.pos_paired, opts.neg_paired, opts.pos_unpaired, opts.neg_unpaired);
+    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Dt_[1][L], 1, L);
     auto e = 0.;

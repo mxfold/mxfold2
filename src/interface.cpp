@@ -12,7 +12,7 @@
 namespace py = pybind11;
 
 static
-std::vector<u_int32_t> 
+auto
 convert_constraints(py::list constraint)
 {
     std::vector<u_int32_t> ret(constraint.size(), Fold::Options::ANY);
@@ -35,10 +35,47 @@ convert_constraints(py::list constraint)
         else if (py::isinstance<py::int_>(constraint[i]))
         {
             auto v = py::cast<py::int_>(constraint[i]);
-            if (v>=0) ret[i] = v;
+            if (static_cast<int>(v)>=0) ret[i] = v;
         }
     }
     return ret;
+}
+
+static
+auto
+convert_pairs(py::list pairs)
+{
+    std::vector<std::pair<u_int32_t, u_int32_t>> ret;
+    for (auto pair: pairs)
+    {
+        if (py::isinstance<py::list>(pair))
+        {
+            auto p = py::cast<py::list>(pair);
+            if (p.size()==2)
+            {
+                auto p0 = py::cast<py::int_>(p[0]);
+                auto p1 = py::cast<py::int_>(p[1]);
+                ret.emplace_back(p0, p1);
+            }
+        }
+    }
+    return ret;
+}
+
+static
+auto
+convert_reference(py::list reference)
+{
+
+    auto r = py::cast<py::list>(reference);
+    if (r.size()>0 && py::isinstance<py::int_>(r[0]))
+    {
+        std::vector<u_int32_t> c(r.size());
+        std::transform(std::begin(r), std::end(r), std::begin(c),
+                    [](auto x) -> u_int32_t { return py::cast<py::int_>(x); });
+        return c;
+    }
+    return std::vector<u_int32_t>();
 }
 
 template < class ParamClass >
@@ -53,16 +90,23 @@ auto predict_zuker(const std::string& seq, py::object pa,
         .max_helix_length(max_helix);
     if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
     {
-        auto c = convert_constraints(py::cast<py::list>(constraint));
-        options.constraints(c);
+        auto c = py::cast<py::list>(constraint);
+        auto c1 = convert_constraints(c);
+        if (c1.size()>0)
+            options.constraints(c1);
+        auto c2 = convert_pairs(c);
+        if (c2.size()>0)
+            options.constraints(c2);
     }
     if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
     {
         auto r = py::cast<py::list>(reference);
-        std::vector<u_int32_t> c(r.size());
-        std::transform(std::begin(r), std::end(r), std::begin(c),
-                    [](auto x) -> u_int32_t { return std::max<int>(0, py::cast<py::int_>(x)); });
-        options.penalty(c, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        auto r1 = convert_reference(r);
+        if (r1.size() > 0)
+            options.penalty(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        auto r2 = convert_pairs(r);
+        if (r2.size() > 0)
+            options.penalty(r2, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
     }
 
     auto param = std::make_unique<ParamClass>(seq, pa);
@@ -83,16 +127,23 @@ auto predict_nussinov(const std::string& seq, py::object pa,
     options.min_hairpin_loop_length(min_hairpin);
     if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
     {
-        auto c = convert_constraints(py::cast<py::list>(constraint));
-        options.constraints(c);
+        auto c = py::cast<py::list>(constraint);
+        auto c1 = convert_constraints(c);
+        if (c1.size()>0)
+            options.constraints(c1);
+        auto c2 = convert_pairs(c);
+        if (c2.size()>0)
+            options.constraints(c2);
     }
     if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
     {
         auto r = py::cast<py::list>(reference);
-        std::vector<u_int32_t> c(r.size());
-        std::transform(std::begin(r), std::end(r), std::begin(c),
-                    [](auto x) -> u_int32_t { return py::cast<py::int_>(x); });
-        options.penalty(c, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        auto r1 = convert_reference(r);
+        if (r1.size() > 0)
+            options.penalty(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        auto r2 = convert_pairs(r);
+        if (r2.size() > 0)
+            options.penalty(r2, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
     }
 
     auto param = std::make_unique<ParamClass>(seq, pa);
@@ -117,7 +168,7 @@ PYBIND11_MODULE(interface, m)
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
         "constraint"_a=py::none(), 
-        "reference"_a=""s, 
+        "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
         "loss_pos_unpaired"_a=0.0, 

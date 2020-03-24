@@ -29,9 +29,8 @@ class FastaDataset(Dataset):
 
 
 class BPseqDataset(Dataset):
-    def __init__(self, bpseq_list, unpaired='.'):
+    def __init__(self, bpseq_list):
         self.data = []
-        self.unpaired = unpaired
         with open(bpseq_list) as f:
             for l in f:
                 self.data.append(self.read(l.rstrip('\n')))
@@ -54,8 +53,9 @@ class BPseqDataset(Dataset):
                         if not structure_is_known:
                             raise('invalid format: {}'.format(filename))
                         idx, c, pair = l
+                        idx, pair = int(idx), int(pair)
                         s.append(c)
-                        p.append(int(pair))
+                        p.append(pair)
                     elif len(l) == 4:
                         structure_is_known = False
                         idx, c, nll_unpaired, nll_paired = l
@@ -73,3 +73,45 @@ class BPseqDataset(Dataset):
             seq = ''.join(s)
             p.pop(0)
             return (filename, seq, torch.tensor(p))
+
+
+class PDBDataset(Dataset):
+    def __init__(self, pdb_list):
+        self.data = []
+        with open(pdb_list) as f:
+            for l in f:
+                l = l.rstrip('\n').split()
+                if len(l) == 2:
+                    self.data.append(self.read(l[0], l[1]))
+
+    def fasta_iter(self, fasta_name):
+        fh = open(fasta_name)
+        faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
+
+        for header in faiter:
+            # drop the ">"
+            headerStr = header.__next__()[1:].strip()
+
+            # join all sequence lines to one.
+            seq = "".join(s.strip() for s in faiter.__next__())
+
+            yield (headerStr, seq)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+    def read(self, seq_filename, label_filename):
+        it = self.fasta_iter(seq_filename)
+        h, seq = next(it)
+
+        p = []
+        with open(label_filename) as f:
+            for l in f:
+                l = l.rstrip('\n').split()
+                if len(l) == 2 and l[0].isdecimal() and l[1].isdecimal():
+                    p.append([int(l[0]), int(l[1])])
+
+        return (h, seq, torch.tensor(p))

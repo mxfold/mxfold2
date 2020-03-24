@@ -120,7 +120,7 @@ class Predict:
     def run(self, args):
         try:
             test_dataset = FastaDataset(args.input)
-        except RuntimeError:
+        except FileNotFoundError:
             test_dataset = BPseqDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
