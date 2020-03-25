@@ -223,13 +223,14 @@ class Train:
         if args.log_dir is not None:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
-        try:
-            train_dataset = BPseqDataset(args.input)
-        except FileNotFoundError:
+        train_dataset = BPseqDataset(args.input)
+        if len(train_dataset)==0:
             train_dataset = PDBDataset(args.input)
         self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
+            if len(test_dataset)==0:
+                test_dataset = PDBDataset(args.test_input)
             self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:

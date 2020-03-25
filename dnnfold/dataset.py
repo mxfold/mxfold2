@@ -6,7 +6,10 @@ import math
 class FastaDataset(Dataset):
     def __init__(self, fasta):
         it = self.fasta_iter(fasta)
-        self.data = list(it)
+        try:
+            self.data = list(it)
+        except RuntimeError:
+            self.data = []
 
     def __len__(self):
         return len(self.data)
@@ -31,9 +34,12 @@ class FastaDataset(Dataset):
 class BPseqDataset(Dataset):
     def __init__(self, bpseq_list):
         self.data = []
-        with open(bpseq_list) as f:
-            for l in f:
-                self.data.append(self.read(l.rstrip('\n')))
+        try:
+            with open(bpseq_list) as f:
+                for l in f:
+                    self.data.append(self.read(l.rstrip('\n')))
+        except:
+            pass
 
     def __len__(self):
         return len(self.data)

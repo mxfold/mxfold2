@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset
+from .dataset import BPseqDataset, FastaDataset, PDBDataset
 from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
@@ -47,7 +47,7 @@ class Predict:
                             f.write('# {} (s={:.1f}, {:.5f}s)\n'.format(header, sc, elapsed_time))
                             for i in range(1, len(bp)):
                                 f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
-                    if res_fn is not None and len(ref) == len(bp):
+                    if res_fn is not None:
                         x = compare_bpseq(ref, bp)
                         x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
@@ -118,12 +118,11 @@ class Predict:
 
 
     def run(self, args):
-        try:
-            test_dataset = FastaDataset(args.input)
-        except FileNotFoundError:
-            test_dataset = BPseqDataset(args.input)
+        test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
+        if len(test_dataset) == 0:
+            test_dataset = PDBDataset(args.input)
         self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:

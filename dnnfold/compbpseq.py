@@ -1,5 +1,6 @@
 import re
 import math
+import torch
 
 def read_bpseq(file):
     with open(file) as f:
@@ -20,20 +21,29 @@ def read_bpseq(file):
     return (seq, p, name, sc, t)
 
 def compare_bpseq(ref, pred):
-    assert(len(ref) == len(pred))
     L = len(ref) - 1
     tp = fp = fn = 0
-    for i, (j1, j2) in enumerate(zip(ref, pred)):
-        if j1 > 0 and i < j1: # pos
-            if j1 == j2:
-                tp += 1
+    if (len(ref)>0 and isinstance(ref[0], list) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
+        if isinstance(ref, torch.Tensor):
+            ref = ref.tolist()
+        ref = {(min(i, j), max(i, j)) for i, j in ref}
+        pred = {(i, j) for i, j in enumerate(pred) if i < j}
+        tp = len(ref & pred)
+        fp = len(pred - ref)
+        fn = len(ref - pred)
+    else:
+        assert(len(ref) == len(pred))
+        for i, (j1, j2) in enumerate(zip(ref, pred)):
+            if j1 > 0 and i < j1: # pos
+                if j1 == j2:
+                    tp += 1
+                elif j2 > 0 and i < j2:
+                    fp += 1
+                    fn += 1
+                else:
+                    fn += 1
             elif j2 > 0 and i < j2:
                 fp += 1
-                fn += 1
-            else:
-                fn += 1
-        elif j2 > 0 and i < j2:
-            fp += 1
     tn = L * (L - 1) // 2 - tp - fp - fn
     return (tp, tn, fp, fn)
 
