@@ -34,12 +34,13 @@ class FastaDataset(Dataset):
 class BPseqDataset(Dataset):
     def __init__(self, bpseq_list):
         self.data = []
-        try:
-            with open(bpseq_list) as f:
-                for l in f:
-                    self.data.append(self.read(l.rstrip('\n')))
-        except:
-            pass
+        with open(bpseq_list) as f:
+            for l in f:
+                l = l.rstrip('\n').split()
+                if len(l)==1:
+                    self.data.append(self.read(l[0]))
+                elif len(l)==2:
+                    self.data.append(self.read_pdb(l[0], l[1]))
 
     def __len__(self):
         return len(self.data)
@@ -80,16 +81,6 @@ class BPseqDataset(Dataset):
             p.pop(0)
             return (filename, seq, torch.tensor(p))
 
-
-class PDBDataset(Dataset):
-    def __init__(self, pdb_list):
-        self.data = []
-        with open(pdb_list) as f:
-            for l in f:
-                l = l.rstrip('\n').split()
-                if len(l) == 2:
-                    self.data.append(self.read(l[0], l[1]))
-
     def fasta_iter(self, fasta_name):
         fh = open(fasta_name)
         faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
@@ -103,13 +94,7 @@ class PDBDataset(Dataset):
 
             yield (headerStr, seq)
 
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data[idx]
-
-    def read(self, seq_filename, label_filename):
+    def read_pdb(self, seq_filename, label_filename):
         it = self.fasta_iter(seq_filename)
         h, seq = next(it)
 

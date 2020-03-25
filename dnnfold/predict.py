@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset, PDBDataset
+from .dataset import BPseqDataset, FastaDataset
 from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
@@ -121,8 +121,6 @@ class Predict:
         test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
-        if len(test_dataset) == 0:
-            test_dataset = PDBDataset(args.input)
         self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:

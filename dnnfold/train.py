@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from .dataset import BPseqDataset, PDBDataset
+from .dataset import BPseqDataset
 from .fold.mix import MixedFold
 from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
@@ -224,13 +224,9 @@ class Train:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)
-        if len(train_dataset)==0:
-            train_dataset = PDBDataset(args.input)
         self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
-            if len(test_dataset)==0:
-                test_dataset = PDBDataset(args.test_input)
             self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:
