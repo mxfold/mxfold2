@@ -23,7 +23,7 @@ def read_bpseq(file):
 def compare_bpseq(ref, pred):
     L = len(ref) - 1
     tp = fp = fn = 0
-    if (len(ref)>0 and isinstance(ref[0], list) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
+    if ((len(ref)>0 and isinstance(ref[0], list)) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
         if isinstance(ref, torch.Tensor):
             ref = ref.tolist()
         ref = {(min(i, j), max(i, j)) for i, j in ref}
