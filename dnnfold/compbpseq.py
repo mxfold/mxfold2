@@ -20,10 +20,19 @@ def read_bpseq(file):
     seq = ''.join(s)
     return (seq, p, name, sc, t)
 
+def read_pdb(file):
+    p = []
+    with open(file) as f:
+        for l in f:
+            l = l.rstrip('\n').split()
+            if len(l) == 2 and l[0].isdecimal() and l[1].isdecimal():
+                p.append([int(l[0]), int(l[1])])
+    return p
+
 def compare_bpseq(ref, pred):
     L = len(ref) - 1
     tp = fp = fn = 0
-    if (len(ref)>0 and isinstance(ref[0], list) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
+    if ((len(ref)>0 and isinstance(ref[0], list)) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
         if isinstance(ref, torch.Tensor):
             ref = ref.tolist()
         ref = {(min(i, j), max(i, j)) for i, j in ref}
@@ -60,8 +69,12 @@ if __name__ == '__main__':
     parser = ArgumentParser(description='calculate SEN, PPV, F, MCC for the predicted RNA secondary structure', add_help=True)
     parser.add_argument('ref', type=str, help='BPSEQ-formatted file with the refernece structure')
     parser.add_argument('pred', type=str, help='BPSEQ-formatted file with the predicted structure')
+    parser.add_argument('--pdb', action='store_true', help='use pdb labels for ref')
     args = parser.parse_args()
-    seq, ref, _, _, _ = read_bpseq(args.ref)
+    if args.pdb:
+        ref = read_pdb(args.ref)
+    else:
+        seq, ref, _, _, _ = read_bpseq(args.ref)
     seq, pred, name, sc, t = read_bpseq(args.pred)
     x = compare_bpseq(ref, pred)
     x = [name, len(seq), t, sc] + list(x) + list(accuracy(*x))
