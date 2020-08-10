@@ -55,7 +55,7 @@ class Predict:
 
     def build_model(self, args):
         if args.model == 'Turner':
-            if args.param is not '':
+            if args.param != '':
                 return RNAFold(), {}
             else:
                 from . import param_turner2004
@@ -128,8 +128,8 @@ class Predict:
             random.seed(args.seed)
 
         self.model, _ = self.build_model(args)
-        if args.param is not '':
-            p = torch.load(args.param)
+        if args.param != '':
+            p = torch.load(args.param, map_location='cpu')
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             self.model.load_state_dict(p)
