@@ -1,8 +1,7 @@
-import argparse
-import math
 import os
 import random
 import time
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -11,9 +10,9 @@ from torch.utils.data import DataLoader
 
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
+from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
-from .fold.mix import MixedFold
 
 
 class Predict:
@@ -108,7 +107,7 @@ class Predict:
         return model, config
 
 
-    def run(self, args):
+    def run(self, args, conf=None):
         test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
@@ -120,7 +119,10 @@ class Predict:
 
         self.model, _ = self.build_model(args)
         if args.param != '':
-            p = torch.load(args.param, map_location='cpu')
+            param = Path(args.param)
+            if not param.exists() and conf is not None:
+                param = Path(conf).parent / param
+            p = torch.load(param, map_location='cpu')
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             self.model.load_state_dict(p)
@@ -190,4 +192,4 @@ class Predict:
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
 
-        subparser.set_defaults(func = lambda args: Predict().run(args))
+        subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))

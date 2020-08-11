@@ -1,7 +1,7 @@
 import os
 import random
 import time
-from argparse import ArgumentParser
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -201,7 +201,7 @@ class Train:
                     f.write('{}\n{}\n'.format(k, v))
 
 
-    def run(self, args):
+    def run(self, args, conf=None):
         self.disable_progress_bar = args.disable_progress_bar
         self.verbose = args.verbose
         self.writer = None
@@ -224,7 +224,10 @@ class Train:
         config.update({ 'model': args.model, 'param': args.param })
         
         if args.init_param != '':
-            p = torch.load(args.init_param)
+            init_param = Path(init_param)
+            if not init_param.exists() and conf is not None:
+                init_param = Path(conf) / init_param
+            p = torch.load(init_param)
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             self.model.load_state_dict(p)
@@ -258,9 +261,9 @@ class Train:
         subparser = parser.add_parser('train', help='training')
         # input
         subparser.add_argument('input', type=str,
-                            help='Training data of BPSEQ-formatted file')
+                            help='Training data of the list of BPSEQ-formatted files')
         subparser.add_argument('--test-input', type=str,
-                            help='Test data of BPSEQ-formatted file')
+                            help='Test data of the list of BPSEQ-formatted files')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
@@ -346,4 +349,4 @@ class Train:
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
 
-        subparser.set_defaults(func = lambda args: Train().run(args))
+        subparser.set_defaults(func = lambda args, conf: Train().run(args, conf))
