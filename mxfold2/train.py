@@ -224,7 +224,7 @@ class Train:
         config.update({ 'model': args.model, 'param': args.param })
         
         if args.init_param != '':
-            init_param = Path(init_param)
+            init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:
                 init_param = Path(conf) / init_param
             p = torch.load(init_param)

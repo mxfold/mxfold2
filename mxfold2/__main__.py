@@ -14,7 +14,7 @@ def main(args=None):
         fromfile_prefix_chars='@',
         add_help=True)
     subparser = parser.add_subparsers(title='Sub-commands')
-    parser.set_defaults(func = lambda args: parser.print_help())
+    parser.set_defaults(func = lambda args, conf: parser.print_help())
     Train.add_args(subparser)
     Predict.add_args(subparser)
     # ShowParam.add_args(subparser)
