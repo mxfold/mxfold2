@@ -5,6 +5,9 @@ description = "RNA secondary structure prediction using deep neural networks wit
 authors = ["Kengo Sato <satoken@bio.keio.ac.jp>"]
 license = "MIT"
 build = "build.py"
+packages = [
+    { include = "src" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.7"

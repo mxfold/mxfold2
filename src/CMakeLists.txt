@@ -4,16 +4,16 @@ set(CMAKE_CXX_STANDARD 17)
 
 add_subdirectory(pybind11)
 pybind11_add_module(interface
-    src/interface.cpp 
-    src/param/turner.cpp src/param/turner.h 
-    src/param/positional.cpp src/param/positional.h 
-    src/param/bpscore.cpp src/param/bpscore.h     
-    src/param/mix.cpp src/param/mix.h
-    src/param/util.h
-    src/fold/fold.cpp src/fold/fold.h 
-    src/fold/zuker.cpp src/fold/zuker.h 
-    src/fold/nussinov.cpp src/fold/nussinov.h 
-    src/fold/trimatrix.h )
+    interface.cpp 
+    param/turner.cpp param/turner.h 
+    param/positional.cpp param/positional.h 
+    param/bpscore.cpp param/bpscore.h     
+    param/mix.cpp param/mix.h
+    param/util.h
+    fold/fold.cpp fold/fold.h 
+    fold/zuker.cpp fold/zuker.h 
+    fold/nussinov.cpp fold/nussinov.h 
+    fold/trimatrix.h )
 target_compile_features(interface PUBLIC cxx_std_17)
 #target_link_libraries(mxfold2)
 
