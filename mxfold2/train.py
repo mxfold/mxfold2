@@ -14,10 +14,9 @@ from tqdm import tqdm
 
 from .dataset import BPseqDataset
 from .fold.mix import MixedFold
-from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
-from .loss import F1Loss, PiecewiseLoss, StructuredLoss, StructuredLossWithTurner
+from .loss import StructuredLoss, StructuredLossWithTurner
 
 
 class Train:
@@ -143,14 +142,6 @@ class Train:
         elif args.model == 'ZukerS':
             model = ZukerFold(model_type="S", **config)
 
-        elif args.model == 'Nussinov':
-            model = NussinovFold(model_type='N', **config)
-
-        elif args.model == 'NussinovS':
-            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn,
-                            'sinkhorn_tau': args.sinkhorn_tau})
-            model = NussinovFold(model_type='S', gumbel_sinkhorn=args.gumbel_sinkhorn, **config)
-
         elif args.model == 'Mix':
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, **config)
@@ -192,12 +183,6 @@ class Train:
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
-        elif loss_func == 'piecewise':
-            return PiecewiseLoss(model, verbose=self.verbose, label_smoothing=args.label_smoothing, gamma=args.gamma,
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight, weak_label_weight=args.weak_label_weight)
-        elif loss_func == 'f1':
-            return F1Loss(model, verbose=self.verbose, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight, weak_label_weight=args.weak_label_weight)
         else:
             raise('not implemented')
 
@@ -238,7 +223,7 @@ class Train:
         self.model, config = self.build_model(args)
         config.update({ 'model': args.model, 'param': args.param })
         
-        if args.init_param is not '':
+        if args.init_param != '':
             p = torch.load(args.init_param)
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
@@ -305,16 +290,12 @@ class Train:
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--weak-label-weight', type=float, default=1.,
-                            help='the weight for weak label data (default: 1)')
         gparser.add_argument('--score-loss-weight', type=float, default=1.,
                             help='the weight for score loss for hinge_mix loss (default: 1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'piecewise', 'f1'), default='hinge',
-                            help="loss fuction ('hinge', 'hinge_mix', 'piecewise', 'f1') ")
-        gparser.add_argument('--label-smoothing', type=float, default=0.0,
-                            help='the label smoothing for piecewise loss (default: 0.0)')
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix'), default='hinge',
+                            help="loss fuction ('hinge', 'hinge_mix') ")
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
@@ -325,8 +306,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Nussinov', 'NussinovS'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Nussinov', 'NussinovS')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
@@ -364,13 +345,5 @@ class Train:
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
-        gparser.add_argument('--gamma', type=float, default=5,
-                        help='the weight of basepair scores in NussinovS model (default: 5)')
-        gparser.add_argument('--sinkhorn', type=int, default=64,
-                        help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
-        gparser.add_argument('--gumbel-sinkhorn', action='store_true',
-                        help='perform Gumbel sampling for secondary structures')
-        gparser.add_argument('--sinkhorn-tau', type=float, default=1,
-                        help='set the temparature of Sinkhorn')
 
         subparser.set_defaults(func = lambda args: Train().run(args))

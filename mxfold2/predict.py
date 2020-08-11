@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
-from .fold.nussinov import NussinovFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .fold.mix import MixedFold
@@ -95,14 +94,6 @@ class Predict:
         elif args.model == 'ZukerS':
             model = ZukerFold(model_type='S', **config)
 
-        elif args.model == 'Nussinov':
-            model = NussinovFold(**config)
-
-        elif args.model == 'NussinovS':
-            config.update({ 'gamma': args.gamma, 'sinkhorn': args.sinkhorn,
-                            'sinkhorn_tau': args.sinkhorn_tau})
-            model = NussinovFold(model_type='S', gumbel_sinkhorn=args.gumbel_sinkhorn, **config)
-
         elif args.model == 'Mix':
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, **config)
@@ -159,8 +150,8 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Nussinov', 'NussinovS'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Nussinov', 'NussinovS')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
@@ -198,13 +189,5 @@ class Predict:
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
-        gparser.add_argument('--gamma', type=float, default=5,
-                        help='the weight of basepair scores in NussinovS model (default: 5)')
-        gparser.add_argument('--sinkhorn', type=int, default=64,
-                        help='the maximum numger of iteration for Shinkforn normalization in NussinovS model (default: 64)')
-        gparser.add_argument('--gumbel-sinkhorn', action='store_true',
-                        help='perform Gumbel sampling for secondary structures')
-        gparser.add_argument('--sinkhorn-tau', type=float, default=1,
-                        help='set the temparature of Sinkhorn')
 
         subparser.set_defaults(func = lambda args: Predict().run(args))

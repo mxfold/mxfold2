@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "dnnfold"
+name = "mxfold2"
 version = "0.1.0"
-description = "RNA secondary structure prediction by deep neural networks"
+description = "RNA secondary structure prediction using deep neural networks with thermodynamic integrations"
 authors = ["Kengo Sato <satoken@bio.keio.ac.jp>"]
 license = "MIT"
 build = "build.py"

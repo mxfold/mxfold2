@@ -223,64 +223,6 @@ class LengthLayer(nn.Module):
         return x.reshape((self.n_in,) if isinstance(self.n_in, int) else self.n_in)
 
 
-class SinkhornLayer(nn.Module):
-    def __init__(self, n_iter=64, tau=1., eps=1e-5, do_sampling=True):
-        super(SinkhornLayer, self).__init__()
-        self.n_iter = n_iter
-        self.tau = tau
-        self.eps = eps
-        self.do_sampling = do_sampling
-        if do_sampling:
-            self.uniform = torch.distributions.uniform.Uniform(1e-5, 1)
-
-
-    def sinkhorn(self, A):
-        """
-        Sinkhorn iterations calculate doubly stochastic matrices
-
-        :param A: (n_batches, d, d) tensor
-        :param n_iter: Number of iterations.
-        """
-        for i in range(self.n_iter):
-            A /= A.sum(dim=1, keepdim=True)
-            A /= A.sum(dim=2, keepdim=True)
-        return A
-
-    def sinkhorn_logsumexp(self, A):
-        for i in range(self.n_iter):
-            A = A - torch.logsumexp(A, dim=1, keepdim=True)
-            A = A - torch.logsumexp(A, dim=2, keepdim=True)
-        return A
-
-
-    def gumbel_sampling(self, shape):
-        return -torch.log(-torch.log(self.uniform.sample(shape)))
-
-
-    def forward(self, x_paired, x_unpaired):
-        if self.n_iter > 0:
-            x_paired = x_paired.clamp_max(50.) # for numerical stability
-            x_unpaired = x_unpaired.clamp_max(50.) # for numerical stability
-            x_paired[:, :1, :1] = torch.exp(x_paired[:, :1, :1])
-            x_unpaired[:, :1] = torch.exp(x_unpaired[:, :1])
-            w = x_paired[:, 1:, 1:]
-            w_u = torch.triu(w, diagonal=1)
-            w_l = w_u.transpose(1, 2) # torch.tril(w, diagonal=-1)
-            w = w_u + w_l + torch.diag_embed(x_unpaired[:, 1:])
-            if self.do_sampling:
-                r = self.gumbel_sampling(w.shape).to(w.device)
-                r = torch.triu(r, diagonal=0)
-                r = (r + r.transpose(1, 2)) / 2
-                w = w + r
-            w = torch.exp(self.sinkhorn_logsumexp(w/self.tau))
-            x_unpaired[:, 1:] = torch.diagonal(w, dim1=1, dim2=2)
-            w_u = torch.triu(w, diagonal=1)
-            w_l = w_u.transpose(1, 2)
-            w = w_u + w_l
-            x_paired[:, 1:, 1:] = w
-        return x_paired, x_unpaired
-
-
 class NeuralNet(nn.Module):
     def __init__(self, embed_size=0,
             num_filters=(96,), filter_size=(5,), dilation=0, pool_size=(1,), 

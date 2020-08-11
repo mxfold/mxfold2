@@ -9,7 +9,7 @@ ext_modules = [
     # ),
     # An extension with a custom <project_root>/src/ext2/CMakeLists.txt:
     # CMakeExtension(f"my_pkg.ext2", sourcedir="src/ext2"),
-    CMakeExtension("dnnfold.interface", sourcedir=".")
+    CMakeExtension("mxfold2.interface", sourcedir=".")
 ]
 
 
