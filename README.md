@@ -3,7 +3,7 @@ RNA secondary structure prediction using deep learning with thermodynamic integr
 
 ## Installation
 
-## System requirements
+### System requirements
 * python (>=3.6)
 * pytorch (>=1.3)
 * C++17 compatible compiler (tested on Apple clang version 12.0.0 and GCC version 7.4.0) (optional)
