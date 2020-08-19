@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
@@ -17,6 +16,11 @@ from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .loss import StructuredLoss, StructuredLossWithTurner
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    pass
 
 
 class Train:
@@ -205,7 +209,7 @@ class Train:
         self.disable_progress_bar = args.disable_progress_bar
         self.verbose = args.verbose
         self.writer = None
-        if args.log_dir is not None:
+        if args.log_dir is not None and 'SummaryWriter' in globals():
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)

@@ -163,3 +163,4 @@ data
 experiments
 .DS_Store
 poetry.lock
+models
