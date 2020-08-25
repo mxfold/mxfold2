@@ -57,7 +57,7 @@ You can specify a lot of model's hyper-parameters. See ``mxfold2 train --help``.
 
 ## Web server
 
-Comming soon.
+A web server is working at http://www.dna.bio.keio.ac.jp/mxfold2/.
 
 
 ## References
