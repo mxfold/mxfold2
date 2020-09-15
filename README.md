@@ -1,5 +1,5 @@
 # MXfold2
-RNA secondary structure prediction using deep learning with thermodynamic integrations  
+RNA secondary structure prediction using deep learning with thermodynamic integration
 
 ## Installation
 
@@ -62,4 +62,4 @@ A web server is working at http://www.dna.bio.keio.ac.jp/mxfold2/.
 
 ## References
 
-* Sato, K., Akiyama, M., Sakakibara, Y.: RNA secondary structure prediction using deep learning with thermodynamic integrations,  [preprint](https://www.biorxiv.org/content/10.1101/2020.08.10.244442v1).
+* Sato, K., Akiyama, M., Sakakibara, Y.: RNA secondary structure prediction using deep learning with thermodynamic integrations,  [preprint](https://doi.org/10.1101/2020.08.10.244442).
