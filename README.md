@@ -62,5 +62,4 @@ A web server is working at http://www.dna.bio.keio.ac.jp/mxfold2/.
 
 ## References
 
-* Sato, K., Akiyama, M., Sakakibara, Y.: RNA secondary structure prediction using deep learning with thermodynamic integrations,  [preprint](https://doi.org/10.1101/2020.08.10.244442).
 * Sato, K., Akiyama, M., Sakakibara, Y.: RNA secondary structure prediction using deep learning with thermodynamic integration. *Nat Commun* **12**, 941 (2021). https://doi.org/10.1038/s41467-021-21194-4
