@@ -6,6 +6,7 @@
 		"context": "..",
 		"dockerfile": "Dockerfile",
 		"args": {
+			"CUDA_VARIANT": "10.2-cudnn8-devel",
 			"INSTALL_NODE": "true",
 			"NODE_VERSION": "lts/*"
 		}
@@ -41,6 +42,8 @@
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "python --version",
 	"postCreateCommand": "git submodule update --init --recursive && poetry config virtualenvs.in-project true && poetry install",
+
+	"runArgs": ["--gpus", "all"],
 
 	// Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode"
