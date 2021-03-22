@@ -60,7 +60,11 @@ class BPseqDataset(Dataset):
                         if not structure_is_known:
                             raise('invalid format: {}'.format(filename))
                         idx, c, pair = l
-                        idx, pair = int(idx), int(pair)
+                        pos = 'x.<>|'.find(pair)
+                        if pos >= 0:
+                            idx, pair = int(idx), -pos
+                        else:
+                            idx, pair = int(idx), int(pair)
                         s.append(c)
                         p.append(pair)
                     elif len(l) == 4:

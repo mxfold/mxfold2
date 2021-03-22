@@ -20,13 +20,16 @@ class Predict:
         self.test_loader = None
 
 
-    def predict(self, output_bpseq=None, result=None):
+    def predict(self, output_bpseq=None, result=None, use_constraint=False):
         res_fn = open(result, 'w') if result is not None else None
         self.model.eval()
         with torch.no_grad():
             for headers, seqs, refs in self.test_loader:
                 start = time.time()
-                scs, preds, bps = self.model(seqs)
+                if use_constraint:
+                    scs, preds, bps = self.model(seqs, constraint=refs)
+                else:
+                    scs, preds, bps = self.model(seqs)
                 elapsed_time = time.time() - start
                 for header, seq, ref, sc, pred, bp in zip(headers, seqs, refs, scs, preds, bps):
                     if output_bpseq is None:
@@ -130,7 +133,7 @@ class Predict:
         if args.gpu >= 0:
             self.model.to(torch.device("cuda", args.gpu))
 
-        self.predict(output_bpseq=args.bpseq, result=args.result)
+        self.predict(output_bpseq=args.bpseq, result=args.result, use_constraint=args.use_constraint)
 
 
     @classmethod
@@ -146,6 +149,7 @@ class Predict:
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
+        subparser.add_argument('--use-constraint', default=False, action='store_true')
         subparser.add_argument('--result', type=str, default=None,
                             help='output the prediction accuracy if reference structures are given')
         subparser.add_argument('--bpseq', type=str, default=None,
