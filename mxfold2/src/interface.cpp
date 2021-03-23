@@ -35,7 +35,16 @@ convert_constraints(py::list constraint)
         else if (py::isinstance<py::int_>(constraint[i]))
         {
             auto v = py::cast<py::int_>(constraint[i]);
-            if (static_cast<int>(v)>=0) ret[i] = v;
+            switch (static_cast<int>(v)) {
+                case  0: ret[i] = Fold::Options::UNPAIRED; break;
+                case -1: ret[i] = Fold::Options::ANY; break;
+                case -2: ret[i] = Fold::Options::PAIRED_L; break;
+                case -3: ret[i] = Fold::Options::PAIRED_R; break;
+                case -4: ret[i] = Fold::Options::PAIRED_LR; break;
+                default: 
+                    if (static_cast<int>(v)>=0) ret[i] = v;
+                    break;
+            }
         }
     }
     return ret;
