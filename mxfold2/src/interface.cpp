@@ -127,6 +127,50 @@ auto predict_zuker(const std::string& seq, py::object pa,
 }
 
 template < class ParamClass >
+auto partfunc_zuker(const std::string& seq, py::object pa, 
+            int min_hairpin, int max_internal, int max_helix,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
+{
+    typename Zuker<ParamClass>::Options options;
+    options.min_hairpin_loop_length(min_hairpin)
+        .max_internal_loop_length(max_internal)
+        .max_helix_length(max_helix);
+    if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+    {
+        auto c = py::cast<py::list>(constraint);
+        auto c1 = convert_constraints(c);
+        if (c1.size()>0)
+            options.constraints(c1);
+        auto c2 = convert_pairs(c);
+        if (c2.size()>0)
+            options.constraints(c2);
+    }
+    if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+    {
+        auto r = py::cast<py::list>(reference);
+        auto r1 = convert_reference(r);
+        if (r1.size() > 0)
+            options.penalty(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        auto r2 = convert_pairs(r);
+        if (r2.size() > 0)
+            options.penalty(r2, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+    }
+
+    auto param = std::make_unique<ParamClass>(seq, pa);
+    Zuker<ParamClass> f(std::move(param));
+    auto ret = f.compute_inside(seq, options);
+    f.compute_outside(seq, options);
+    auto bpp = f.compute_basepairing_probabilities(seq, options);
+    py::array_t<float> bpp_a({bpp.size(), bpp[0].size()});
+    auto bpp_a2 = bpp_a.mutable_unchecked<2>();
+    for (auto i=0; i<bpp.size(); i++)
+        for (auto j=0; j<bpp[i].size(); j++)
+            bpp_a2(i, j) = bpp[i][j];
+    return std::make_pair(ret, bpp_a);
+}
+
+template < class ParamClass >
 auto predict_nussinov(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
             py::object constraint, py::object reference, 
@@ -167,9 +211,9 @@ PYBIND11_MODULE(interface, m)
 {
     using namespace std::literals::string_literals;
     using namespace pybind11::literals;
+    m.doc() = "module for RNA secondary predicton with DNN";
 
     auto predict_turner = &predict_zuker<TurnerNearestNeighbor>;
-    m.doc() = "module for RNA secondary predicton with DNN";
     m.def("predict_turner", predict_turner, 
         "predict RNA secondary structure with Turner Model", 
         "seq"_a, "param"_a, 
@@ -223,5 +267,47 @@ PYBIND11_MODULE(interface, m)
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
         "loss_pos_unpaired"_a=0.0, 
+        "loss_neg_unpaired"_a=0.0);
+
+    auto partfunc_turner = &partfunc_zuker<TurnerNearestNeighbor>;
+    m.def("partfunc_turner", partfunc_turner, 
+        "Partition function with Turner Model", 
+        "seq"_a, "param"_a, 
+        "min_hairpin_length"_a=3, 
+        "max_internal_length"_a=30, 
+        "max_helix_length"_a=30,
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
+        "loss_pos_paired"_a=0.0, 
+        "loss_neg_paired"_a=0.0,
+        "loss_pos_unpaired"_a=0.0, 
+        "loss_neg_unpaired"_a=0.0);
+
+    auto partfunc_zuker_positional = &partfunc_zuker<PositionalNearestNeighbor>;
+    m.def("partfunc_zuker", partfunc_zuker_positional, 
+        "Partition function with positional nearest neighbor model", 
+        "seq"_a, "param"_a, 
+        "min_hairpin_length"_a=3, 
+        "max_internal_length"_a=30, 
+        "max_helix_length"_a=30,
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
+        "loss_pos_paired"_a=0.0, 
+        "loss_neg_paired"_a=0.0,
+        "loss_pos_unpaired"_a=0.0, 
+        "loss_neg_unpaired"_a=0.0);
+
+    auto partfunc_zuker_mixed = &partfunc_zuker<MixedNearestNeighbor>;
+    m.def("partfunc_mxfold", partfunc_zuker_mixed, 
+        "Partition function with mixed nearest neighbor model", 
+        "seq"_a, "param"_a, 
+        "min_hairpin_length"_a=3, 
+        "max_internal_length"_a=30, 
+        "max_helix_length"_a=30,
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
+        "loss_pos_paired"_a=0.0, 
+        "loss_neg_paired"_a=0.0,
+        "loss_pos_unpaired"_a=0.0,
         "loss_neg_unpaired"_a=0.0);
 }

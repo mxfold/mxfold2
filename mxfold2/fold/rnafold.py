@@ -8,7 +8,7 @@ from .fold import AbstractFold
 
 class RNAFold(AbstractFold):
     def __init__(self, init_param=None):
-        super(RNAFold, self).__init__(interface.predict_turner)
+        super(RNAFold, self).__init__(interface.predict_turner, interface.partfunc_turner)
         if init_param is None:
             self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))

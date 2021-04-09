@@ -3,6 +3,7 @@
 #include "fold.h"
 
 #define HELIX_LENGTH
+#define SIMPLE_SPARSIFICATION
 
 template < typename P, typename S = typename P::ScoreType >
 class Zuker : public Fold
@@ -31,6 +32,9 @@ class Zuker : public Fold
         auto compute_viterbi(const std::string& seq, Options opt = Options()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
         auto traceback_viterbi(const std::string& seq, Options opt = Options()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
+        auto compute_inside(const std::string& seq, Options opt = Options()) -> ScoreType;
+        void compute_outside(const std::string& seq, Options opt = Options());
+        auto compute_basepairing_probabilities(const std::string& seq, Options opt = Options()) -> std::vector<std::vector<float>>;
         const P& param_model() const { return *param_; }
 
     private:
@@ -43,8 +47,14 @@ class Zuker : public Fold
         std::vector<ScoreType> Fv_;
         TriMatrix<TB> Ct_, Mt_, M1t_;
         std::vector<TB> Ft_;
+        TriMatrix<ScoreType> Ci_, Mi_, M1i_; 
+        std::vector<ScoreType> Fi_;
+        TriMatrix<ScoreType> Co_, Mo_, M1o_; 
+        std::vector<ScoreType> Fo_;
 #ifdef HELIX_LENGTH
         TriMatrix<ScoreType> Nv_, Ev_;
         TriMatrix<TB> Nt_, Et_;
+        TriMatrix<ScoreType> Ni_, Ei_;
+        TriMatrix<ScoreType> No_, Eo_;
 #endif
 };
