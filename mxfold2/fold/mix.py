@@ -19,6 +19,8 @@ class MixedFold(AbstractFold):
         ss = []
         preds = []
         pairs = []
+        pfs = []
+        bpps = []
         for i in range(len(seq)):
             param_on_cpu = { 
                 'turner': {k: v.to("cpu") for k, v in param[i]['turner'].items() },
@@ -42,6 +44,8 @@ class MixedFold(AbstractFold):
                                 reference=reference[i].tolist() if reference is not None else None, 
                                 loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                                 loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                    pfs.append(pf)
+                    bpps.append(bpp)
             if torch.is_grad_enabled():
                 v = self.calculate_differentiable_score(v, param[i]['positional'], param_on_cpu['positional'])
             ss.append(v)
@@ -53,7 +57,7 @@ class MixedFold(AbstractFold):
         if return_param:
             return ss, preds, pairs, param
         elif return_partfunc:
-            return ss, preds, pairs, pf, bpp
+            return ss, preds, pairs, pfs, bpps
         else:
             return ss, preds, pairs
 

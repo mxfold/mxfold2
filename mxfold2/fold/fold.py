@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .layers import NeuralNet
-
 class AbstractFold(nn.Module):
     def __init__(self, predict, partfunc):
         super(AbstractFold, self).__init__()
@@ -36,6 +34,8 @@ class AbstractFold(nn.Module):
         ss = []
         preds = []
         pairs = []
+        pfs = []
+        bpps = []
         for i in range(len(seq)):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
             param_on_cpu = self.clear_count(param_on_cpu)
@@ -55,6 +55,8 @@ class AbstractFold(nn.Module):
                                 reference=reference[i].tolist() if reference is not None else None, 
                                 loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                                 loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                    pfs.append(pf)
+                    bpps.append(bpp)
             if torch.is_grad_enabled():
                 v = self.calculate_differentiable_score(v, param[i], param_on_cpu)
             ss.append(v)
@@ -66,6 +68,6 @@ class AbstractFold(nn.Module):
         if return_param:
             return ss, preds, pairs, param
         elif return_partfunc:
-            return ss, preds, pairs, pf, bpp
+            return ss, preds, pairs, pfs, bpps
         else:
             return ss, preds, pairs

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import numpy as np
 
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
@@ -20,38 +21,52 @@ class Predict:
         self.test_loader = None
 
 
-    def predict(self, output_bpseq=None, result=None, use_constraint=False):
+    def predict(self, output_bpseq=None, output_bpp=None, result=None, use_constraint=False):
         res_fn = open(result, 'w') if result is not None else None
         self.model.eval()
         with torch.no_grad():
             for headers, seqs, refs in self.test_loader:
                 start = time.time()
-                if use_constraint:
-                    scs, preds, bps = self.model(seqs, constraint=refs)
+                if output_bpp is None:
+                    if use_constraint:
+                        scs, preds, bps = self.model(seqs, constraint=refs)
+                    else:
+                        scs, preds, bps = self.model(seqs)
+                    pfs = bpps = [None] * len(preds)
                 else:
-                    scs, preds, bps = self.model(seqs)
+                    if use_constraint:
+                        scs, preds, bps, pfs, bpps = self.model(seqs, return_partfunc=True, constraint=refs)
+                    else:
+                        scs, preds, bps, pfs, bpps = self.model(seqs, return_partfunc=True, )
                 elapsed_time = time.time() - start
-                for header, seq, ref, sc, pred, bp in zip(headers, seqs, refs, scs, preds, bps):
+                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs, scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
                         print('>'+header)
                         print(seq)
-                        print(pred, "({:.1f})".format(sc))
+                        print(pred, f'({sc:.1f})')
                     elif output_bpseq == "stdout":
-                        print('# {} (s={:.1f}, {:.5f}s)'.format(header, sc, elapsed_time))
+                        print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)')
                         for i in range(1, len(bp)):
-                            print('{}\t{}\t{}'.format(i, seq[i-1], bp[i]))
+                            print(f'{i}\t{seq[i-1]}\t{bp[i]}')
                     else:
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
                         fn = os.path.join(output_bpseq, fn+".bpseq")
                         with open(fn, "w") as f:
-                            f.write('# {} (s={:.1f}, {:.5f}s)\n'.format(header, sc, elapsed_time))
+                            print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)', file=f)
                             for i in range(1, len(bp)):
-                                f.write('{}\t{}\t{}\n'.format(i, seq[i-1], bp[i]))
+                                print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
                     if res_fn is not None:
                         x = compare_bpseq(ref, bp)
                         x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
+                    if output_bpp is not None:
+                        bpp = np.triu(bpp)
+                        bpp = bpp + bpp.T
+                        fn = os.path.basename(header)
+                        fn = os.path.splitext(fn)[0] 
+                        fn = os.path.join(output_bpp, fn+".bpp")
+                        np.savetxt(fn, bpp, fmt='%.5f')
 
 
     def build_model(self, args):
@@ -133,7 +148,7 @@ class Predict:
         if args.gpu >= 0:
             self.model.to(torch.device("cuda", args.gpu))
 
-        self.predict(output_bpseq=args.bpseq, result=args.result, use_constraint=args.use_constraint)
+        self.predict(output_bpseq=args.bpseq, output_bpp=args.bpp, result=args.result, use_constraint=args.use_constraint)
 
 
     @classmethod
@@ -154,6 +169,8 @@ class Predict:
                             help='output the prediction accuracy if reference structures are given')
         subparser.add_argument('--bpseq', type=str, default=None,
                             help='output the prediction with BPSEQ format to the specified directory')
+        subparser.add_argument('--bpp', type=str, default=None,
+                            help='output the base-pairing probability matrix to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
