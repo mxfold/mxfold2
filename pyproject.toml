@@ -15,13 +15,13 @@ torch = "^1.4"
 torchvision = "^0"
 tqdm = "^4.40"
 wheel = "^0.35.1"
+pybind11 = "^2.6.2"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.5.3"
 jupyter = "^1.0.0"
 pandas = "^1.1.0"
 tensorboard = "^2.3.0"
-setuptools_cpp = "^0.1.0"
 
 [tool.poetry.scripts]
 mxfold2 = "mxfold2.__main__:main"

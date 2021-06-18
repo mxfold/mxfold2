@@ -1,23 +1,29 @@
 from typing import Any, Dict
 
-from setuptools_cpp import CMakeExtension, ExtensionBuilder, Pybind11Extension
+from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 ext_modules = [
-    # A basic pybind11 extension in <project_root>/src/ext1:
-    # Pybind11Extension(
-    #     "my_pkg.ext1", ["src/ext1/ext1.cpp"], include_dirs=["src/ext1/include"]
-    # ),
-    # An extension with a custom <project_root>/src/ext2/CMakeLists.txt:
-    # CMakeExtension(f"my_pkg.ext2", sourcedir="src/ext2"),
-    CMakeExtension("mxfold2.interface", sourcedir="mxfold2/src")
+    Pybind11Extension('mxfold2.interface',
+        [
+            "mxfold2/src/interface.cpp",
+            "mxfold2/src/param/turner.cpp",  #param/turner.h 
+            "mxfold2/src/param/positional.cpp", #param/positional.h 
+            "mxfold2/src/param/bpscore.cpp", #param/bpscore.h     
+            "mxfold2/src/param/mix.cpp", #param/mix.h
+            #"mxfold2/src/param/util.h"
+            "mxfold2/src/fold/fold.cpp", #fold/fold.h 
+            "mxfold2/src/fold/zuker.cpp", #fold/zuker.h 
+            "mxfold2/src/fold/nussinov.cpp", #fold/nussinov.h 
+            #"mxfold2/src/fold/trimatrix.h
+        ]
+    )
 ]
-
 
 def build(setup_kwargs: Dict[str, Any]) -> None:
     setup_kwargs.update(
         {
             "ext_modules": ext_modules,
-            "cmdclass": dict(build_ext=ExtensionBuilder),
+            "cmdclass": {"build_ext": build_ext},
             "zip_safe": False,
         }
     )
