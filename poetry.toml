@@ -1,0 +1,3 @@
+[virtualenvs]
+create = false
+path = "/home/slab/satoken/.pyenv/versions/miniconda3-latest/envs/mxfold2"

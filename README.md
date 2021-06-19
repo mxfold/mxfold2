@@ -7,7 +7,6 @@ RNA secondary structure prediction using deep learning with thermodynamic integr
 * python (>=3.7)
 * pytorch (>=1.4)
 * C++17 compatible compiler (tested on Apple clang version 12.0.0 and GCC version 7.4.0) (optional)
-* cmake (>=3.10) (optional)
 
 ### Install from wheel
 
@@ -21,7 +20,7 @@ You can build and install from the source distribution downloaded from [the rele
 
     % pip3 install mxfold2-0.1.1.tar.gz
 
-To build MXfold2 from the source distribution, you need a C++17 compatible compiler and cmake.
+To build MXfold2 from the source distribution, you need a C++17 compatible compiler.
 
 ## Prediction
 
