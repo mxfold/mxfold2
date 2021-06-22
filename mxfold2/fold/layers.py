@@ -1,12 +1,22 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
 from .embedding import OneHotEmbedding, SparseEmbedding
 from .transformer import TransformerLayer
 
+
 class CNNLayer(nn.Module):
-    def __init__(self, n_in, num_filters=(128,), filter_size=(7,), pool_size=(1,), dilation=1, dropout_rate=0.0, resnet=False):
+    def __init__(self, n_in: int, 
+        num_filters: tuple[int, ...] = (128,), 
+        filter_size: tuple[int, ...] = (7,), 
+        pool_size: tuple[int, ...] = (1,), 
+        dilation: int = 1, dropout_rate: float = 0.0, resnet: bool = False) -> None:
         super(CNNLayer, self).__init__()
         self.resnet = resnet
         self.net = nn.ModuleList()
@@ -21,7 +31,7 @@ class CNNLayer(nn.Module):
             n_in = n_out
 
 
-    def forward(self, x): # (B=1, 4, N)
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # (B=1, 4, N)
         for net in self.net:
             x_a = net(x)
             x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
@@ -29,9 +39,13 @@ class CNNLayer(nn.Module):
 
 
 class CNNLSTMEncoder(nn.Module):
-    def __init__(self, n_in, 
-            num_filters=(256,), filter_size=(7,), pool_size=(1,), dilation=0,
-            num_lstm_layers=0, num_lstm_units=0, num_att=0, dropout_rate=0.0, resnet=True):
+    def __init__(self, n_in: int, 
+            num_filters: tuple[int, ...] = (256,), 
+            filter_size: tuple[int, ...] = (7,), 
+            pool_size: tuple[int, ...] = (1,), 
+            dilation: int = 0,
+            num_lstm_layers: int = 0, num_lstm_units: int = 0, 
+            num_att: int = 0, dropout_rate: float = 0.0, resnet: bool = True) -> None:
 
         super(CNNLSTMEncoder, self).__init__()
         self.resnet = resnet
@@ -60,7 +74,7 @@ class CNNLSTMEncoder(nn.Module):
             self.att = nn.MultiheadAttention(self.n_out, num_att, dropout=dropout_rate)
 
 
-    def forward(self, x): # (B, n_in, N)
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # (B, n_in, N)
         if self.conv is not None:
             x = self.conv(x) # (B, C, N)
         x = torch.transpose(x, 1, 2) # (B, N, C)
@@ -81,12 +95,12 @@ class CNNLSTMEncoder(nn.Module):
 
 
 class Transform2D(nn.Module):
-    def __init__(self, join='cat', context_length=0):
+    def __init__(self, join: str = 'cat', context_length: int = 0):
         super(Transform2D, self).__init__()
         self.join = join
 
 
-    def forward(self, x_l, x_r):
+    def forward(self, x_l: torch.Tensor, x_r: torch.Tensor) -> torch.Tensor:
         assert(x_l.shape == x_r.shape)
         B, N, C = x_l.shape
         x_l = x_l.view(B, N, 1, C).expand(B, N, N, C)
@@ -97,12 +111,19 @@ class Transform2D(nn.Module):
             x = x_l + x_r # (B, N, N, C)
         elif self.join=='mul':
             x = x_l * x_r # (B, N, N, C)
+        else:
+            raise(RuntimeError('not implemented'))
 
         return x
 
 
 class PairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0, exclude_diag=True, resnet=True):
+    def __init__(self, n_in: int, n_out: int = 1, 
+            filters: tuple[int, ...] = (), 
+            ksize: tuple[int, ...] = (), 
+            fc_layers: tuple[int, ...] = (), 
+            dropout_rate: float = 0.0, 
+            exclude_diag: bool = True, resnet: bool = True) -> None:
         super(PairedLayer, self).__init__()
 
         self.resnet = resnet        
@@ -132,7 +153,7 @@ class PairedLayer(nn.Module):
         self.fc = nn.Sequential(*fc)
 
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         diag = 1 if self.exclude_diag else 0
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
@@ -152,7 +173,11 @@ class PairedLayer(nn.Module):
 
 
 class UnpairedLayer(nn.Module):
-    def __init__(self, n_in, n_out=1, filters=(), ksize=(), fc_layers=(), dropout_rate=0.0, resnet=True):
+    def __init__(self, n_in: int, n_out: int = 1, 
+        filters: tuple[int, ...] = (), 
+        ksize: tuple[int, ...] = (), 
+        fc_layers: tuple[int, ...] = (), 
+        dropout_rate: float = 0.0, resnet: bool = True) -> None:
         super(UnpairedLayer, self).__init__()
 
         self.resnet = resnet
@@ -181,8 +206,8 @@ class UnpairedLayer(nn.Module):
         self.fc = nn.Sequential(*fc)
 
 
-    def forward(self, x, x_base=None):
-        B, N, C = x.shape
+    def forward(self, x: torch.Tensor, x_base: torch.Tensor = None) -> torch.Tensor:
+        B, N, _ = x.shape
         x = x.transpose(1, 2) # (B, n_in, N)
         for conv in self.conv:
             x_a = conv(x)
@@ -193,7 +218,8 @@ class UnpairedLayer(nn.Module):
 
 
 class LengthLayer(nn.Module):
-    def __init__(self, n_in, layers=(), dropout_rate=0.5):
+    def __init__(self, n_in: int | tuple[int, int], 
+            layers: tuple[int, ...] = (), dropout_rate: float = 0.5) -> None:
         super(LengthLayer, self).__init__()
         self.n_in = n_in
         n = n_in if isinstance(n_in, int) else np.prod(n_in)
@@ -213,7 +239,7 @@ class LengthLayer(nn.Module):
             self.x = torch.from_numpy(x.astype(np.float32)).reshape(n, n)
 
 
-    def forward(self, x): 
+    def forward(self, x: torch.Tensor) -> torch.Tensor: 
         return self.net(x)
 
 
@@ -224,15 +250,22 @@ class LengthLayer(nn.Module):
 
 
 class NeuralNet(nn.Module):
-    def __init__(self, embed_size=0,
-            num_filters=(96,), filter_size=(5,), dilation=0, pool_size=(1,), 
-            num_lstm_layers=0, num_lstm_units=0, num_att=0, 
-            num_transformer_layers=0, num_transformer_hidden_units=2048,
-            num_transformer_att=8,
-            no_split_lr=False, pair_join='cat',
-            num_paired_filters=(), paired_filter_size=(),
-            num_hidden_units=(32,), dropout_rate=0.0, fc_dropout_rate=0.0, 
-            exclude_diag=True, n_out_paired_layers=0, n_out_unpaired_layers=0, **kwargs):
+    def __init__(self, embed_size: int = 0,
+            num_filters: tuple[int, ...] = (96,), 
+            filter_size: tuple[int, ...] = (5,), 
+            dilation: int = 0, 
+            pool_size: tuple[int, ...] = (1,), 
+            num_lstm_layers: int = 0, num_lstm_units: int = 0, num_att: int = 0, 
+            num_transformer_layers: int = 0, num_transformer_hidden_units: int = 2048,
+            num_transformer_att: int = 8,
+            no_split_lr: bool = False, pair_join: str = 'cat',
+            num_paired_filters: tuple[int, ...] = (), 
+            paired_filter_size: tuple[int, ...] = (),
+            num_hidden_units: tuple[int, ...] = (32,), 
+            dropout_rate: float =0.0, fc_dropout_rate: float = 0.0, 
+            exclude_diag: bool = True, 
+            n_out_paired_layers: int = 0, n_out_unpaired_layers: int = 0, 
+            **kwargs: dict[str, Any]) -> None:
 
         super(NeuralNet, self).__init__()
 
@@ -275,8 +308,9 @@ class NeuralNet(nn.Module):
             self.linear = nn.Linear(n_in, n_out_unpaired_layers)
 
 
-    def forward(self, seq):
+    def forward(self, seq: list[str]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         device = next(self.parameters()).device
+        x: torch.Tensor
         x = self.embedding(['0' + s for s in seq]).to(device) # (B, 4, N)
         x = self.encoder(x)
 
@@ -288,8 +322,10 @@ class NeuralNet(nn.Module):
         x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)] # reverse the last axis
 
         if self.pair_join != 'bilinear':
-            x_lr = self.transform2d(x_l, x_r)
+            x_lr: torch.Tensor = self.transform2d(x_l, x_r)
 
+            score_paired: torch.Tensor
+            score_unpaired: torch.Tensor | None
             score_paired = self.fc_paired(x_lr)
             if self.fc_unpaired is not None:
                 score_unpaired = self.fc_unpaired(x)

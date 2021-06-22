@@ -1,8 +1,13 @@
-import re
+from __future__ import annotations
+
 import math
+import re
+from typing import Optional
+
 import torch
 
-def read_bpseq(file):
+
+def read_bpseq(file: str) -> tuple[str, list[int], Optional[str], Optional[float], Optional[float]]:
     with open(file) as f:
         p = [0]
         s = ['']
@@ -20,16 +25,16 @@ def read_bpseq(file):
     seq = ''.join(s)
     return (seq, p, name, sc, t)
 
-def read_pdb(file):
+def read_pdb(file: str) -> list[tuple[int, int]]:
     p = []
     with open(file) as f:
         for l in f:
             l = l.rstrip('\n').split()
             if len(l) == 2 and l[0].isdecimal() and l[1].isdecimal():
-                p.append([int(l[0]), int(l[1])])
+                p.append((int(l[0]), int(l[1])))
     return p
 
-def compare_bpseq(ref, pred):
+def compare_bpseq(ref, pred) -> tuple[int, int, int, int]:
     L = len(ref) - 1
     tp = fp = fn = 0
     if ((len(ref)>0 and isinstance(ref[0], list)) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
@@ -56,7 +61,7 @@ def compare_bpseq(ref, pred):
     tn = L * (L - 1) // 2 - tp - fp - fn
     return (tp, tn, fp, fn)
 
-def accuracy(tp, tn, fp, fn):
+def accuracy(tp: int, tn: int, fp: int, fn: int) -> tuple[float, float, float, float]:
     sen = tp / (tp + fn) if tp+fn > 0. else 0.
     ppv = tp / (tp + fp) if tp+fp > 0. else 0.
     fval = 2 * sen * ppv / (sen + ppv) if sen+ppv > 0. else 0.

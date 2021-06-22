@@ -1,15 +1,22 @@
+from __future__ import annotations
+
+from typing import Any, Callable, Optional, cast 
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 class AbstractFold(nn.Module):
-    def __init__(self, predict, partfunc):
+    def __init__(self, 
+            predict: Callable[..., tuple[float, str, list[int]]], 
+            partfunc: Callable[..., tuple[float, np.ndarray]]) -> None:
         super(AbstractFold, self).__init__()
         self.predict = predict
         self.partfunc = partfunc
 
 
-    def clear_count(self, param):
+    def clear_count(self, param: dict[str, Any]) -> dict[str, Any]:
         param_count = {}
         for n, p in param.items():
             if n.startswith("score_"):
@@ -18,24 +25,34 @@ class AbstractFold(nn.Module):
         return param
 
 
-    def calculate_differentiable_score(self, v, param, count):
+    def calculate_differentiable_score(self, v: float, param: 
+                dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
         s = 0
         for n, p in param.items():
             if n.startswith("score_"):
                 s += torch.sum(p * count["count_"+n[6:]].to(p.device))
-        s += v - s.item()
+        s += -cast(torch.Tensor, s).item() + v
         return s
 
+    def make_param(self, seq) -> list[dict[str, Any]]:
+        raise(RuntimeError('not implemented'))
 
-    def forward(self, seq, return_param=False, param=None, return_partfunc=False,
-            max_internal_length=30, max_helix_length=30, constraint=None, reference=None,
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0):
+
+    def forward(self, seq: list[str], 
+            return_param: bool = False,
+            param: Optional[list[dict[str, Any]]] = None, 
+            return_partfunc: bool = False,
+            max_internal_length: int = 30, max_helix_length: int = 30, 
+            constraint: Optional[list[torch.Tensor]] = None, 
+            reference: Optional[list[torch.Tensor]] = None,
+            loss_pos_paired: float = 0.0, loss_neg_paired: float = 0.0, 
+            loss_pos_unpaired: float = 0.0, loss_neg_unpaired: float = 0.0): # -> tuple[torch.Tensor, list[str], list[list[int]]] | tuple[torch.Tensor, list[str], list[list[int]], Any] | tuple[torch.Tensor, list[str], list[list[int]], list[torch.Tensor], list[np.ndarray]]:
         param = self.make_param(seq) if param is None else param # reuse param or not
         ss = []
-        preds = []
-        pairs = []
-        pfs = []
-        bpps = []
+        preds: list[str] = []
+        pairs: list[list[int]] = []
+        pfs: list[float] = []
+        bpps: list[np.ndarray] = []
         for i in range(len(seq)):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
             param_on_cpu = self.clear_count(param_on_cpu)

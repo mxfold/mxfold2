@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,6 +46,6 @@ class RNAFold(AbstractFold):
                     setattr(self, n, nn.Parameter(torch.tensor(getattr(init_param, n))))
 
 
-    def make_param(self, seq):
+    def make_param(self, seq: list[str]) -> list[dict[str, Any]]:
         param = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
         return [ param for s in seq ]

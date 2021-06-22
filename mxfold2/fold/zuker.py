@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any, Optional, cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +12,7 @@ from .layers import LengthLayer, NeuralNet
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, model_type="M", max_helix_length=30, **kwargs):
+    def __init__(self, model_type: str = "M", max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
         super(ZukerFold, self).__init__(interface.predict_zuker, interface.partfunc_zuker)
 
         exclude_diag = True
@@ -26,7 +30,7 @@ class ZukerFold(AbstractFold):
             n_out_unpaired_layers = 0
             exclude_diag = False
         else:
-            raise("not implemented")
+            raise(RuntimeError("not implemented"))
 
         self.model_type = model_type
         self.max_helix_length = max_helix_length
@@ -46,16 +50,18 @@ class ZukerFold(AbstractFold):
         })
 
 
-    def forward(self, seq, **kwargs):
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
         return super(ZukerFold, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
-    def make_param(self, seq):
+    def make_param(self, seq: list[str]) -> list[dict[str, Any]]:
         device = next(self.parameters()).device
+        score_paired: torch.Tensor
+        score_unpaired: Optional[torch.Tensor]
         score_paired, score_unpaired = self.net(seq)
         B, N, _, _ = score_paired.shape
 
-        def unpair_interval(su):
+        def unpair_interval(su: torch.Tensor) -> torch.Tensor:
             su = su.view(B, 1, N)
             su = torch.bmm(torch.ones(B, N, 1).to(device), su)
             su = torch.bmm(torch.triu(su), torch.triu(torch.ones_like(su)))
@@ -63,6 +69,7 @@ class ZukerFold(AbstractFold):
 
         if self.model_type == "S":
             score_basepair = score_paired[:, :, :, 0] # (B, N, N)
+            assert(score_unpaired is not None)
             score_unpaired = unpair_interval(score_unpaired)
             score_helix_stacking = torch.zeros((B, N, N), device=device)
             score_mismatch_external = score_helix_stacking
@@ -81,6 +88,7 @@ class ZukerFold(AbstractFold):
             score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
+            assert(score_unpaired is not None)
             score_unpaired = unpair_interval(score_unpaired)
             score_base_hairpin = score_unpaired
             score_base_internal = score_unpaired
@@ -94,6 +102,7 @@ class ZukerFold(AbstractFold):
             score_mismatch_internal = score_paired[:, :, :, 2] # (B, N, N)
             score_mismatch_multi = score_paired[:, :, :, 3] # (B, N, N)
             score_mismatch_hairpin = score_paired[:, :, :, 4] # (B, N, N)
+            assert(score_unpaired is not None)
             score_base_hairpin = unpair_interval(score_unpaired[:, :, 0])
             score_base_internal = unpair_interval(score_unpaired[:, :, 1])
             score_base_multi = unpair_interval(score_unpaired[:, :, 2])
@@ -113,7 +122,7 @@ class ZukerFold(AbstractFold):
             score_base_external = score_unpaired
 
         else:
-            raise("not implemented")
+            raise(RuntimeError("not implemented"))
 
         param = [ { 
             'score_basepair': score_basepair[i],
@@ -126,13 +135,13 @@ class ZukerFold(AbstractFold):
             'score_base_internal': score_base_internal[i],
             'score_base_multi': score_base_multi[i],
             'score_base_external': score_base_external[i],
-            'score_hairpin_length': self.fc_length['score_hairpin_length'].make_param(),
-            'score_bulge_length': self.fc_length['score_bulge_length'].make_param(),
-            'score_internal_length': self.fc_length['score_internal_length'].make_param(),
-            'score_internal_explicit': self.fc_length['score_internal_explicit'].make_param(),
-            'score_internal_symmetry': self.fc_length['score_internal_symmetry'].make_param(),
-            'score_internal_asymmetry': self.fc_length['score_internal_asymmetry'].make_param(),
-            'score_helix_length': self.fc_length['score_helix_length'].make_param()
+            'score_hairpin_length': cast(LengthLayer, self.fc_length['score_hairpin_length']).make_param(),
+            'score_bulge_length': cast(LengthLayer, self.fc_length['score_bulge_length']).make_param(),
+            'score_internal_length': cast(LengthLayer, self.fc_length['score_internal_length']).make_param(),
+            'score_internal_explicit': cast(LengthLayer, self.fc_length['score_internal_explicit']).make_param(),
+            'score_internal_symmetry': cast(LengthLayer, self.fc_length['score_internal_symmetry']).make_param(),
+            'score_internal_asymmetry': cast(LengthLayer, self.fc_length['score_internal_asymmetry']).make_param(),
+            'score_helix_length': cast(LengthLayer, self.fc_length['score_helix_length']).make_param()
         } for i in range(B) ]
 
         return param

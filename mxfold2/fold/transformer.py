@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,14 +9,14 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 
 class TransformerLayer(nn.Module):
-    def __init__(self, n_in, n_head, n_hidden, n_layers, dropout=0.5):
+    def __init__(self, n_in: int, n_head: int, n_hidden: int, n_layers: int, dropout: float = 0.5) ->None:
         super(TransformerLayer, self).__init__()
         self.pos_encoder = PositionalEncoding(n_in, dropout, max_len=1000)
         encoder_layers = TransformerEncoderLayer(n_in, n_head, n_hidden, dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layers, n_layers, nn.LayerNorm(n_in))
         self.n_in = self.n_out = n_in
 
-    def forward(self, x): # (B, C, N)
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # (B, C, N)
         x = x.permute(2, 0, 1) # (N, B, C)
         x = x * math.sqrt(self.n_in)
         x = self.pos_encoder(x)
@@ -22,7 +25,9 @@ class TransformerLayer(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
+    pe: torch.Tensor
+
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000) -> None:
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -34,6 +39,6 @@ class PositionalEncoding(nn.Module):
         pe = pe.unsqueeze(0).transpose(0, 1)
         self.register_buffer('pe', pe)
 
-    def forward(self, x): # (N, B, C)
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # (N, B, C)
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)

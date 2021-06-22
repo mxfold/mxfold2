@@ -1,17 +1,22 @@
+from __future__ import annotations
+
 import os
 import random
 import time
+from argparse import Namespace
 from pathlib import Path
+from typing import Any, Optional, cast
 
-import numpy as np
+#import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+#import torch.nn as nn
+#import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
+from .fold.fold import AbstractFold
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
@@ -24,17 +29,25 @@ except ImportError:
 
 
 class Train:
-    step = 0
+    step: int = 0
+    train_loader: Optional[DataLoader]
+    test_loader: Optional[DataLoader]
+    verbose: bool
+    optimizer: optim.Optimizer
+    model: AbstractFold
+    loss_fn: StructuredLoss | StructuredLossWithTurner
+    disable_progress_bar: bool
+    writer: Optional[SummaryWriter]
 
     def __init__(self):
         self.train_loader = None
         self.test_loader = None
 
 
-    def train(self, epoch):
+    def train(self, epoch: int) -> None:
         self.model.train()
         n_dataset = len(self.train_loader.dataset)
-        loss_total, num = 0, 0
+        loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
@@ -48,11 +61,13 @@ class Train:
                 loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
                 loss_total += loss.item()
                 num += n_batch
-                if loss.item() > 0.:
+                if float(loss.item()) > 0.:
                     loss.backward()
                     if self.verbose:
                         for n, p in self.model.named_parameters():
-                            print(n, torch.min(p).item(), torch.max(p).item(), torch.min(p.grad).item(), torch.max(p.grad).item())
+                            print(n, torch.min(p).item(), torch.max(p).item(), 
+                                torch.min(cast(torch.Tensor, p.grad)).item(), 
+                                torch.max(cast(torch.Tensor, p.grad)).item())
                     self.optimizer.step()
 
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -71,7 +86,7 @@ class Train:
         print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def test(self, epoch):
+    def test(self, epoch: int) -> None:
         self.model.eval()
         n_dataset = len(self.test_loader.dataset)
         loss_total, num = 0, 0
@@ -100,7 +115,7 @@ class Train:
         }, filename)
 
 
-    def resume_checkpoint(self, filename):
+    def resume_checkpoint(self, filename: str) -> int:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -108,7 +123,7 @@ class Train:
         return epoch
 
 
-    def build_model(self, args):
+    def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
             return RNAFold(), {}
 
@@ -155,12 +170,12 @@ class Train:
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
         else:
-            raise('not implemented')
+            raise(RuntimeError('not implemented'))
 
         return model, config
 
 
-    def build_optimizer(self, optimizer, model, lr, l2_weight):
+    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float) -> optim.Optimizer:
         if optimizer == 'Adam':
             return optim.Adam(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
         elif optimizer =='AdamW':
@@ -173,10 +188,10 @@ class Train:
         elif optimizer == 'ASGD':
             return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
         else:
-            raise('not implemented')
+            raise(RuntimeError('not implemented'))
 
 
-    def build_loss_function(self, loss_func, model, args):
+    def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> StructuredLoss | StructuredLossWithTurner:
         if loss_func == 'hinge':
             return StructuredLoss(model, verbose=self.verbose,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
@@ -188,10 +203,10 @@ class Train:
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
         else:
-            raise('not implemented')
+            raise(RuntimeError('not implemented'))
 
 
-    def save_config(self, file, config):
+    def save_config(self, file: str, config: dict[str, Any]) -> None:
         with open(file, 'w') as f:
             for k, v in config.items():
                 k = '--' + k.replace('_', '-')
@@ -205,7 +220,7 @@ class Train:
                     f.write('{}\n{}\n'.format(k, v))
 
 
-    def run(self, args, conf=None):
+    def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         self.disable_progress_bar = args.disable_progress_bar
         self.verbose = args.verbose
         self.writer = None
@@ -257,7 +272,7 @@ class Train:
         if args.save_config is not None:
             self.save_config(args.save_config, config)
 
-        return self.model
+        #return self.model
 
 
     @classmethod

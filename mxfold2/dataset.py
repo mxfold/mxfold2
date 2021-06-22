@@ -1,23 +1,29 @@
-from itertools import groupby
-from torch.utils.data import Dataset
-import torch
-import math
+from __future__ import annotations
 
-class FastaDataset(Dataset):
-    def __init__(self, fasta):
+import math
+from itertools import groupby
+from typing import Generator
+
+import torch
+from torch.utils.data import Dataset
+
+
+class FastaDataset(Dataset[tuple[str, str, torch.Tensor]]):
+    def __init__(self, fasta: str) -> None:
+        super(Dataset, self).__init__()
         it = self.fasta_iter(fasta)
         try:
             self.data = list(it)
         except RuntimeError:
             self.data = []
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> tuple[str, str, torch.Tensor]:
         return self.data[idx]
 
-    def fasta_iter(self, fasta_name):
+    def fasta_iter(self, fasta_name: str) -> Generator[tuple[str, str, torch.Tensor], None, None]:
         fh = open(fasta_name)
         faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
 
@@ -31,8 +37,9 @@ class FastaDataset(Dataset):
             yield (headerStr, seq, torch.tensor([]))
 
 
-class BPseqDataset(Dataset):
-    def __init__(self, bpseq_list):
+class BPseqDataset(Dataset[tuple[str, str, torch.Tensor]]):
+    def __init__(self, bpseq_list: str) -> None:
+        super(Dataset, self).__init__()
         self.data = []
         with open(bpseq_list) as f:
             for l in f:
@@ -42,23 +49,23 @@ class BPseqDataset(Dataset):
                 elif len(l)==2:
                     self.data.append(self.read_pdb(l[0], l[1]))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> tuple[str, str, torch.Tensor]:
         return self.data[idx]
 
-    def read(self, filename):
+    def read(self, filename: str) -> tuple[str, str, torch.Tensor]:
         with open(filename) as f:
             structure_is_known = True
-            p = [0]
+            p: list[int | list[float]] = [0]
             s = ['']
             for l in f:
                 if not l.startswith('#'):
                     l = l.rstrip('\n').split()
                     if len(l) == 3:
                         if not structure_is_known:
-                            raise('invalid format: {}'.format(filename))
+                            raise(RuntimeError('invalid format: {}'.format(filename)))
                         idx, c, pair = l
                         pos = 'x.<>|'.find(pair)
                         if pos >= 0:
@@ -75,7 +82,7 @@ class BPseqDataset(Dataset):
                         nll_paired = math.nan if nll_paired=='-' else float(nll_paired)
                         p.append([nll_unpaired, nll_paired])
                     else:
-                        raise('invalid format: {}'.format(filename))
+                        raise(RuntimeError('invalid format: {}'.format(filename)))
         
         if structure_is_known:
             seq = ''.join(s)
@@ -85,7 +92,7 @@ class BPseqDataset(Dataset):
             p.pop(0)
             return (filename, seq, torch.tensor(p))
 
-    def fasta_iter(self, fasta_name):
+    def fasta_iter(self, fasta_name: str) -> Generator[tuple[str, str], None, None]:
         fh = open(fasta_name)
         faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
 
@@ -98,7 +105,7 @@ class BPseqDataset(Dataset):
 
             yield (headerStr, seq)
 
-    def read_pdb(self, seq_filename, label_filename):
+    def read_pdb(self, seq_filename: str, label_filename: str) -> tuple[str, str, torch.Tensor]:
         it = self.fasta_iter(seq_filename)
         h, seq = next(it)
 

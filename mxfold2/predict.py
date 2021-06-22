@@ -1,27 +1,38 @@
+from __future__ import annotations
+
 import os
 import random
 import time
+from argparse import Namespace
 from pathlib import Path
+from typing import Any, Optional
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
 import numpy as np
+import torch
+#import torch.nn as nn
+#import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
+from .fold.fold import AbstractFold
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 
 
 class Predict:
+    model: AbstractFold
+    test_loader: Optional[DataLoader]
+    
     def __init__(self):
         self.test_loader = None
 
 
-    def predict(self, output_bpseq=None, output_bpp=None, result=None, use_constraint=False):
+    def predict(self, output_bpseq: Optional[str] = None, 
+                output_bpp: Optional[str] = None, 
+                result: Optional[str] = None, 
+                use_constraint: bool = False) -> None:
         res_fn = open(result, 'w') if result is not None else None
         self.model.eval()
         with torch.no_grad():
@@ -69,7 +80,7 @@ class Predict:
                         np.savetxt(fn, bpp, fmt='%.5f')
 
 
-    def build_model(self, args):
+    def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
             if args.param != '':
                 return RNAFold(), {}
@@ -120,12 +131,12 @@ class Predict:
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
         else:
-            raise('not implemented')
+            raise(RuntimeError('not implemented'))
 
         return model, config
 
 
-    def run(self, args, conf=None):
+    def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
