@@ -1,3 +1,0 @@
-[submodule "src/pybind11"]
-	path = mxfold2/src/pybind11
-	url = https://github.com/pybind/pybind11.git
