@@ -90,6 +90,7 @@ convert_reference(py::list reference)
 template < class ParamClass >
 auto predict_zuker(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
             py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
@@ -97,6 +98,10 @@ auto predict_zuker(const std::string& seq, py::object pa,
     options.min_hairpin_loop_length(min_hairpin)
         .max_internal_loop_length(max_internal)
         .max_helix_length(max_helix);
+
+    for (auto i=0; i!=allowed_pairs.size(); i+=2)
+        options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+
     if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
     {
         auto c = py::cast<py::list>(constraint);
@@ -129,6 +134,7 @@ auto predict_zuker(const std::string& seq, py::object pa,
 template < class ParamClass >
 auto partfunc_zuker(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
             py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
@@ -136,6 +142,10 @@ auto partfunc_zuker(const std::string& seq, py::object pa,
     options.min_hairpin_loop_length(min_hairpin)
         .max_internal_loop_length(max_internal)
         .max_helix_length(max_helix);
+
+    for (auto i=0; i!=allowed_pairs.size(); i+=2)
+        options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+
     if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
     {
         auto c = py::cast<py::list>(constraint);
@@ -173,11 +183,16 @@ auto partfunc_zuker(const std::string& seq, py::object pa,
 template < class ParamClass >
 auto predict_nussinov(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
             py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
 {
     typename Nussinov<ParamClass>::Options options;
     options.min_hairpin_loop_length(min_hairpin);
+
+    for (auto i=0; i!=allowed_pairs.size(); i+=2)
+        options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+
     if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
     {
         auto c = py::cast<py::list>(constraint);
@@ -220,6 +235,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
@@ -234,6 +250,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
@@ -248,6 +265,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
@@ -262,6 +280,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
@@ -276,6 +295,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
@@ -290,6 +310,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 
@@ -304,6 +325,7 @@ PYBIND11_MODULE(interface, m)
         "min_hairpin_length"_a=3, 
         "max_internal_length"_a=30, 
         "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
         "constraint"_a=py::none(), 
         "reference"_a=py::none(), 
         "loss_pos_paired"_a=0.0, 

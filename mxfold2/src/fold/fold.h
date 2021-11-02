@@ -32,12 +32,14 @@ class Fold
             float neg_paired;
             float pos_unpaired;
             float neg_unpaired;
+            std::vector<std::vector<bool>> allowed_pairs_;
 
             Options() : 
                 min_hairpin(3),
                 max_internal(30),
                 max_helix(30),
-                use_penalty(false)
+                use_penalty(false),
+                allowed_pairs_(256, std::vector<bool>(256, false))
             {    
             }
 
@@ -94,14 +96,20 @@ class Fold
                 return *this;
             }
 
+            Options& set_allowed_pair(char x, char y)
+            {
+                allowed_pairs_[x][y] = allowed_pairs_[y][x] = true;
+                return *this;
+            }
+
             auto make_constraint(const std::string& seq, bool canonical_only=true)
                 -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
             auto make_penalty(size_t L)
                 -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>, float>;
+            bool allow_paired(char x, char y);
         };
 
     public:
-        static bool allow_paired(char x, char y);
         static auto parse_paren(const std::string& paren) 
             -> std::vector<u_int32_t>;
         static auto make_paren(const std::vector<u_int32_t>& p) -> std::string;

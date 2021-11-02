@@ -8,18 +8,6 @@
 #include "fold.h"
 
 //static
-bool
-Fold::
-allow_paired(char x, char y)
-{
-    x = std::tolower(x);
-    y = std::tolower(y);
-    return (x=='a' && y=='u') || (x=='u' && y=='a') || 
-        (x=='c' && y=='g') || (x=='g' && y=='c') ||
-        (x=='g' && y=='u') || (x=='u' && y=='g');
-}
-
-//static
 auto
 Fold::
 make_paren(const std::vector<u_int32_t>& p) -> std::string
@@ -31,6 +19,15 @@ make_paren(const std::vector<u_int32_t>& p) -> std::string
             s[i-1] = p[i]>i ? '(' : ')';
     }
     return s;
+}
+
+bool
+Fold::Options::
+allow_paired(char x, char y)
+{
+    x = std::tolower(x);
+    y = std::tolower(y);
+    return allowed_pairs_[x][y];
 }
 
 auto
@@ -46,7 +43,7 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/)
 
     for (auto i=L; i>=1; i--)
         if (stru[i] > 0 && stru[i] <= L) // paired
-            if ( (canonical_only && !Fold::allow_paired(seq[i-1], seq[stru[i]-1])) || // delete non-canonical base-pairs
+            if ( (canonical_only && !this->allow_paired(seq[i-1], seq[stru[i]-1])) || // delete non-canonical base-pairs
                     (stru[i] - i <= min_hairpin) ) // delete very short hairpin
                 stru[i] = stru[stru[i]] = Options::UNPAIRED;
 
@@ -61,7 +58,7 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/)
     for (auto p: stru2) 
     {
         const auto [p1, p2] = std::minmax(p.first, p.second);
-        if (p2-p1 > min_hairpin && (!canonical_only || Fold::allow_paired(seq[p1-1], seq[p2-1])))
+        if (p2-p1 > min_hairpin && (!canonical_only || this->allow_paired(seq[p1-1], seq[p2-1])))
         {
             cnt[p1]++;
             cnt[p2]++;
@@ -80,13 +77,13 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/)
     for (auto p: stru2)
     {
         const auto [p1, p2] = std::minmax(p.first, p.second);
-        if (p2-p1 > min_hairpin && (!canonical_only || Fold::allow_paired(seq[p1-1], seq[p2-1])))
+        if (p2-p1 > min_hairpin && (!canonical_only || this->allow_paired(seq[p1-1], seq[p2-1])))
         {
             for (auto q: stru2)
             {
                 if (p==q) continue;
                 const auto [q1, q2] = std::minmax(q.first, q.second);
-                if (q2-q1 > min_hairpin && (!canonical_only || Fold::allow_paired(seq[q1-1], seq[q2-1])))
+                if (q2-q1 > min_hairpin && (!canonical_only || this->allow_paired(seq[q1-1], seq[q2-1])))
                     if (p1 < q1 && q1 < p2 && p2 < q2)
                         pk[p1] = pk[p2] = pk[q1] = pk[q2] = true;
             }
@@ -108,7 +105,7 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/)
             bool bp_r = stru[j]==Options::ANY || stru[j]==Options::PAIRED_R || stru[j]==Options::PAIRED_LR;
             allow_paired[i][j] = allow_paired[i][j] && ((bp_l && bp_r) || stru[i]==j);
             if (canonical_only)
-                allow_paired[i][j] = allow_paired[i][j] && Fold::allow_paired(seq[i-1], seq[j-1]);
+                allow_paired[i][j] = allow_paired[i][j] && this->allow_paired(seq[i-1], seq[j-1]);
             allow_unpaired[i][j] = allow_unpaired[i][j-1] && allow_unpaired[j][j];
         }
     }
@@ -116,7 +113,7 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/)
     for (auto p: stru2)
     {
         const auto [p1, p2] = std::minmax(p.first, p.second);
-        if (p2-p1 > min_hairpin && (!canonical_only || Fold::allow_paired(seq[p1-1], seq[p2-1])))
+        if (p2-p1 > min_hairpin && (!canonical_only || this->allow_paired(seq[p1-1], seq[p2-1])))
             allow_paired[p1][p2] = true;
     }
 

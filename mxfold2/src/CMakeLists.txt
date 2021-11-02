@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 project(mxfold2 CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-add_subdirectory(pybind11)
+#add_subdirectory(pybind11)
+find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(interface
     interface.cpp 
     param/turner.cpp param/turner.h 
