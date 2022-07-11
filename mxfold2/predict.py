@@ -19,6 +19,7 @@ from .fold.fold import AbstractFold
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
+from .fold.linearfold import LinearFold
 
 
 class Predict:
@@ -87,6 +88,9 @@ class Predict:
             else:
                 from . import param_turner2004
                 return RNAFold(param_turner2004), {}
+        
+        if args.model == 'LinearFold':
+            return LinearFold(), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -184,8 +188,8 @@ class Predict:
                             help='output the base-pairing probability matrix to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

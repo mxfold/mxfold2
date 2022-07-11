@@ -8,6 +8,7 @@
 #include "param/positional.h"
 #include "param/bpscore.h"
 #include "param/mix.h"
+#include "fold/linearfold/LinearFold.h"
 
 namespace py = pybind11;
 
@@ -222,6 +223,50 @@ auto predict_nussinov(const std::string& seq, py::object pa,
     return std::make_tuple(e, s, p);
 }
 
+template < class ParamClass >
+auto predict_linearfold(const std::string& seq, py::object pa, 
+            int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
+{
+#if 0
+    typename Zuker<ParamClass>::Options options;
+    options.min_hairpin_loop_length(min_hairpin)
+        .max_internal_loop_length(max_internal)
+        .max_helix_length(max_helix);
+
+    for (auto i=0; i!=allowed_pairs.size(); i+=2)
+        options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+
+    if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+    {
+        auto c = py::cast<py::list>(constraint);
+        auto c1 = convert_constraints(c);
+        if (c1.size()>0)
+            options.constraints(c1);
+        auto c2 = convert_pairs(c);
+        if (c2.size()>0)
+            options.constraints(c2);
+    }
+    if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+    {
+        auto r = py::cast<py::list>(reference);
+        auto r1 = convert_reference(r);
+        if (r1.size() > 0)
+            options.penalty(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        auto r2 = convert_pairs(r);
+        if (r2.size() > 0)
+            options.penalty(r2, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+    }
+#endif
+    //auto param = std::make_unique<ParamClass>(seq, pa);
+    LinearFold::BeamCKYParser f;
+    auto r = f.parse(seq, NULL);
+    std::vector p(seq.size(), 0);
+    return std::make_tuple(r.score, r.structure, p);
+}
+
 PYBIND11_MODULE(interface, m)
 {
     using namespace std::literals::string_literals;
@@ -331,5 +376,20 @@ PYBIND11_MODULE(interface, m)
         "loss_pos_paired"_a=0.0, 
         "loss_neg_paired"_a=0.0,
         "loss_pos_unpaired"_a=0.0,
+        "loss_neg_unpaired"_a=0.0);
+
+    auto predict_linearfold_ = &predict_linearfold<TurnerNearestNeighbor>;
+    m.def("predict_linearfold", predict_linearfold_, 
+        "predict RNA secondary structure with LinearFold-C Model", 
+        "seq"_a, "param"_a=py::none(), 
+        "min_hairpin_length"_a=3, 
+        "max_internal_length"_a=30, 
+        "max_helix_length"_a=30,
+        "allowed_pairs"_a="aucggu",
+        "constraint"_a=py::none(), 
+        "reference"_a=py::none(), 
+        "loss_pos_paired"_a=0.0, 
+        "loss_neg_paired"_a=0.0,
+        "loss_pos_unpaired"_a=0.0, 
         "loss_neg_unpaired"_a=0.0);
 }
