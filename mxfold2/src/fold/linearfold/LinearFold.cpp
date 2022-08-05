@@ -27,8 +27,7 @@
 
 #define SPECIAL_HP
 using namespace std;
-
-namespace LinearFold {
+using namespace LinearFold;
 
 bool cmp(const std::tuple<value_type, int, int>& a, const std::tuple<value_type, int, int>& b) 
 { 
@@ -65,6 +64,228 @@ void window_fill(std::set<std::pair<int,int> >& window_visited, const int i, con
         sort(sorted_keys.begin(), sorted_keys.end(), comparefunc);    
     }
 #endif
+
+std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
+{
+    std::vector<u_int32_t> bp(seq.size()+1, 0);
+    stack<tuple<int, int, State>> stk;
+    stk.push(make_tuple(0, seq_length-1, bestC[seq_length-1]));
+
+    // verbose stuff
+    double total_energy = .0;
+
+    while ( !stk.empty() ) {
+        tuple<int, int, State> top = stk.top();
+        int i = get<0>(top), j = get<1>(top);
+        State& state = get<2>(top);
+        stk.pop();
+
+        int nuci = nucs[i], nucj = nucs[j];
+        int nuci1 = (i + 1) < seq_length ? nucs[i + 1] : -1;
+        int nucj_1 = (j - 1) > -1 ? nucs[j - 1] : -1;
+        int nuci_1 = (i-1>-1) ? nucs[i-1] : -1;
+        int nucj1 = (j+1) < seq_length ? nucs[j+1] : -1;
+        int k, p, q;
+
+        switch (state.manner) {
+            case MANNER_H:
+                // this state should not be traced
+                break;
+            case MANNER_HAIRPIN:
+                {
+                    bp[i+1] = j+1;
+                    bp[j+1] = i+1;
+
+#ifdef lv
+                    int tetra_hex_tri = -1;
+#ifdef SPECIAL_HP
+                    if (j-i-1 == 4) // 6:tetra
+                        tetra_hex_tri = if_tetraloops[i];
+                    else if (j-i-1 == 6) // 8:hexa
+                        tetra_hex_tri = if_hexaloops[i];
+                    else if (j-i-1 == 3) // 5:tri
+                        tetra_hex_tri = if_triloops[i];
+#endif
+                    value_type newscore = - v_score_hairpin(i, j, nuci, nuci1, nucj_1, nucj, tetra_hex_tri);
+#else
+                    value_type newscore = score_hairpin(i, j, nuci, nuci1, nucj_1, nucj);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_SINGLE:
+                {
+                    bp[i+1] = j+1;
+                    bp[j+1] = i+1;
+                    p = i + state.trace.paddings.l1;
+                    q = j - state.trace.paddings.l2;
+                    stk.push(make_tuple(p, q, bestP[q][p]));
+
+                    int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
+#ifdef lv
+                    value_type newscore = -v_score_single(i,j,p,q, nuci, nuci1, nucj_1, nucj,
+                                                        nucp_1, nucp, nucq, nucq1);
+#else
+                    value_type newscore = score_single(i,j,p,q, (p-i-1)+(j-q-1), nuci, nuci1, nucj_1, nucj,
+                                                        nucp_1, nucp, nucq, nucq1);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_HELIX:
+                {
+                    bp[i+1] = j+1;
+                    bp[j+1] = i+1;
+                    stk.push(make_tuple(i+1, j-1, bestP[j-1][i+1]));
+
+                    p = i + 1;
+                    q = j - 1;
+                    int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
+#ifdef lv
+                    value_type newscore = -v_score_single(i,j,p,q, nuci, nuci1, nucj_1, nucj,
+                                                        nucp_1, nucp, nucq, nucq1);
+#else
+                    value_type newscore = score_helix(nuci, nuci1, nucj_1, nucj);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_MULTI: 
+                {
+                    p = i + state.trace.paddings.l1;
+                    q = j - state.trace.paddings.l2;
+                    stk.push(make_tuple(p, q, bestM2[q][p]));
+#ifdef lv
+                    value_type newscore = - v_score_multi_unpaired(i+1, p-1) -
+                        v_score_multi_unpaired(q+1, j-1);
+#else
+                    value_type newscore = score_multi_unpaired(i+1, p-1) +
+                        score_multi_unpaired(q+1, j-1);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_MULTI_eq_MULTI_plus_U:
+                {
+                    p = i + state.trace.paddings.l1;
+                    q = j - state.trace.paddings.l2;
+                    stk.push(make_tuple(p, q, bestM2[q][p]));
+#ifdef lv
+                    value_type newscore = - v_score_multi_unpaired(q, j - 1);
+#else
+                    value_type newscore = score_multi_unpaired(q, j - 1);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_P_eq_MULTI:
+                {
+                    bp[i+1] = j+1;
+                    bp[j+1] = i+1;
+                    stk.push(make_tuple(i, j, bestMulti[j][i]));
+
+#ifdef lv
+                    value_type newscore = - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
+#else
+                    value_type newscore = score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_M2_eq_M_plus_P:
+                {
+                    k = state.trace.split;
+                    stk.push(make_tuple(i, k, bestM[k][i]));
+                    stk.push(make_tuple(k+1, j, bestP[j][k+1]));
+
+                    int nuck = nucs[k];
+                    int nuck1 = (k + 1) < seq_length ? nucs[k + 1] : -1;
+#ifdef lv
+                    value_type M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
+#else
+                    value_type M1_score = score_M1(k+1, j, j, nuck, nuck1, nucj, nucj1, seq_length);
+#endif
+                    total_energy += M1_score;
+                }
+                break;
+            case MANNER_M_eq_M2:
+                stk.push(make_tuple(i, j, bestM2[j][i]));
+                break;
+            case MANNER_M_eq_M_plus_U:
+                {
+                    stk.push(make_tuple(i, j-1, bestM[j-1][i]));
+#ifdef lv
+                    value_type newscore = - v_score_multi_unpaired(j, j);
+#else
+                    value_type newscore = score_multi_unpaired(j, j);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_M_eq_P:
+                {
+                    stk.push(make_tuple(i, j, bestP[j][i]));
+#ifdef lv
+                    value_type newscore = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
+#else
+                    value_type newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_C_eq_C_plus_U:
+                {
+                    k = j - 1;
+                    if (k != -1)
+                        stk.push(make_tuple(0, k, bestC[k]));
+#ifdef lv
+                    value_type newscore = -v_score_external_unpaired(j, j);
+#else
+                    value_type newscore = score_external_unpaired(j, j);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            case MANNER_C_eq_C_plus_P:
+                {
+                    k = state.trace.split;
+                    if (k != -1) {
+                        stk.push(make_tuple(0, k, bestC[k]));
+                        stk.push(make_tuple(k+1, j, bestP[j][k+1]));
+                    }
+                    else {
+                        stk.push(make_tuple(i, j, bestP[j][i]));
+                    }
+
+                    int nuck = k > -1 ? nucs[k] : -1;
+                    int nuck1 = nucs[k+1], nucj = nucs[j];
+#ifdef lv
+                    value_type newscore = - v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
+#else
+                    value_type newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
+#endif
+                    total_energy += newscore;
+                }
+                break;
+            default:  // MANNER_NONE or other cases
+#if 0
+                if (use_constraints){
+                    printf("We can't find a valid structure for this sequence and constraint.\n");
+                    printf("There are two minor restrictions in our real system:\n");
+                    printf("the length of an interior loop is bounded by 30nt \n");
+                    printf("(a standard limit found in most existing RNA folding software such as CONTRAfold)\n");
+                    printf("so is the leftmost (50-end) unpaired segment of a multiloop (new constraint).\n");
+                    exit(1);
+                } 
+                printf("wrong manner at %d, %d: manner %d\n", i, j, state.manner); fflush(stdout);
+#endif
+                assert(false);
+                
+        }
+    }
+
+    return bp;
+}
 
 void BeamCKYParser::get_parentheses(char* result, const string& seq) {
     memset(result, '.', seq_length);
@@ -1952,8 +2173,6 @@ BeamCKYParser::BeamCKYParser(int beam_size,
     }
 
 }
-
-}; // namespace LinearFold
 
 // -------------------------------------------------------------
 

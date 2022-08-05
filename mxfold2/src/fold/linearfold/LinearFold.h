@@ -120,6 +120,7 @@ public:
 
     DecoderResult parse(const std::string& seq, const std::vector<int>* cons);
     void outside(std::vector<int> next_pair[]); //for zuker subopt
+    std::vector<uint32_t> traceback(const std::string& seq);
 
 private:
     void get_parentheses(char* result, const std::string& seq);

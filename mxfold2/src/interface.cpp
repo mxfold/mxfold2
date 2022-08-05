@@ -263,7 +263,15 @@ auto predict_linearfold(const std::string& seq, py::object pa,
     //auto param = std::make_unique<ParamClass>(seq, pa);
     LinearFold::BeamCKYParser f;
     auto r = f.parse(seq, NULL);
-    std::vector p(seq.size(), 0);
+    auto p = f.traceback(seq);
+
+    // Fold::make_paren()
+    std::string s(p.size()-1, '.');
+    for (size_t i=1; i!=p.size(); ++i)
+    {
+        if (p[i] != 0)
+            s[i-1] = p[i]>i ? '(' : ')';
+    }
     return std::make_tuple(r.score, r.structure, p);
 }
 
