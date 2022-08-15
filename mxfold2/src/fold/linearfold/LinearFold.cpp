@@ -17,10 +17,13 @@
 #include <string>
 #include <map>
 #include <set>
+#include <cmath>
 
 #include "LinearFold.h"
 #include "Utils/utility.h"
+#ifdef lv
 #include "Utils/utility_v.h"
+#endif
 #if 0
 #include "LinearFoldEval.cpp" // adding eval mode
 #endif
@@ -29,6 +32,7 @@
 using namespace std;
 using namespace LinearFold;
 
+#if 0
 bool cmp(const std::tuple<value_type, int, int>& a, const std::tuple<value_type, int, int>& b) 
 { 
     if (std::get<0>(a) != std::get<0>(b))
@@ -50,29 +54,32 @@ void window_fill(std::set<std::pair<int,int> >& window_visited, const int i, con
     }
     return;
 }
-
-#ifdef lv
-    bool comparefunc(std::pair<int,State> a, std::pair<int,State> b) {
-        return a.first > b.first;
-    }
-
-    void BeamCKYParser::sort_keys(std::unordered_map<int, State> &map, std::vector<std::pair<int,State>> &sorted_keys) {
-        sorted_keys.clear();
-        for(auto &kv : map) {
-            sorted_keys.push_back(kv);
-        }
-        sort(sorted_keys.begin(), sorted_keys.end(), comparefunc);    
-    }
 #endif
 
-std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
+#if defined(lv) || defined(FOR_MXFOLD2)
+bool comparefunc(std::pair<int,State> a, std::pair<int,State> b) {
+    return a.first > b.first;
+}
+
+template < typename P, typename S >
+void BeamCKYParser<P,S>::sort_keys(std::unordered_map<int, State> &map, std::vector<std::pair<int,State>> &sorted_keys) {
+    sorted_keys.clear();
+    for(auto &kv : map) {
+        sorted_keys.push_back(kv);
+    }
+    sort(sorted_keys.begin(), sorted_keys.end(), comparefunc);    
+}
+#endif
+
+template < typename P, typename S >
+auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>
 {
     std::vector<u_int32_t> bp(seq.size()+1, 0);
     stack<tuple<int, int, State>> stk;
     stk.push(make_tuple(0, seq_length-1, bestC[seq_length-1]));
 
     // verbose stuff
-    double total_energy = .0;
+    value_type total_energy = .0;
 
     while ( !stk.empty() ) {
         tuple<int, int, State> top = stk.top();
@@ -80,11 +87,13 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
         State& state = get<2>(top);
         stk.pop();
 
+#ifndef FOR_MXFOLD2
         int nuci = nucs[i], nucj = nucs[j];
         int nuci1 = (i + 1) < seq_length ? nucs[i + 1] : -1;
         int nucj_1 = (j - 1) > -1 ? nucs[j - 1] : -1;
         int nuci_1 = (i-1>-1) ? nucs[i-1] : -1;
         int nucj1 = (j+1) < seq_length ? nucs[j+1] : -1;
+#endif
         int k, p, q;
 
         switch (state.manner) {
@@ -96,7 +105,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     bp[i+1] = j+1;
                     bp[j+1] = i+1;
 
-#ifdef lv
+#if defined(FOR_MXFOLD2)
+                    value_type newscore = param_->score_hairpin(i+1, j+1) + loss_paired(ref, i, j);
+#elif defined(lv)
                     int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
                     if (j-i-1 == 4) // 6:tetra
@@ -120,7 +131,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     p = i + state.trace.paddings.l1;
                     q = j - state.trace.paddings.l2;
                     stk.push(make_tuple(p, q, bestP[q][p]));
-
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + loss_paired(ref, i, j);
+#else
                     int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
 #ifdef lv
                     value_type newscore = -v_score_single(i,j,p,q, nuci, nuci1, nucj_1, nucj,
@@ -128,6 +141,7 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
 #else
                     value_type newscore = score_single(i,j,p,q, (p-i-1)+(j-q-1), nuci, nuci1, nucj_1, nucj,
                                                         nucp_1, nucp, nucq, nucq1);
+#endif
 #endif
                     total_energy += newscore;
                 }
@@ -140,12 +154,16 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
 
                     p = i + 1;
                     q = j - 1;
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + loss_paired(ref, i,  j);
+#else
                     int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
 #ifdef lv
                     value_type newscore = -v_score_single(i,j,p,q, nuci, nuci1, nucj_1, nucj,
                                                         nucp_1, nucp, nucq, nucq1);
 #else
                     value_type newscore = score_helix(nuci, nuci1, nucj_1, nucj);
+#endif
 #endif
                     total_energy += newscore;
                 }
@@ -155,7 +173,10 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     p = i + state.trace.paddings.l1;
                     q = j - state.trace.paddings.l2;
                     stk.push(make_tuple(p, q, bestM2[q][p]));
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_multi_unpaired((i+1)+1, (p-1)+1) +
+                        param_->score_multi_unpaired((q+1)+1, (j-1)+1);
+#elif defined(lv)
                     value_type newscore = - v_score_multi_unpaired(i+1, p-1) -
                         v_score_multi_unpaired(q+1, j-1);
 #else
@@ -170,7 +191,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     p = i + state.trace.paddings.l1;
                     q = j - state.trace.paddings.l2;
                     stk.push(make_tuple(p, q, bestM2[q][p]));
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_multi_unpaired(q+1, (j-1)+1);
+#elif defined(lv)
                     value_type newscore = - v_score_multi_unpaired(q, j - 1);
 #else
                     value_type newscore = score_multi_unpaired(q, j - 1);
@@ -183,8 +206,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     bp[i+1] = j+1;
                     bp[j+1] = i+1;
                     stk.push(make_tuple(i, j, bestMulti[j][i]));
-
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_multi_loop(i+1, j+1) + loss_paired(ref, i, j);
+#elif defined(lv)
                     value_type newscore = - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
 #else
                     value_type newscore = score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
@@ -197,13 +221,16 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     k = state.trace.split;
                     stk.push(make_tuple(i, k, bestM[k][i]));
                     stk.push(make_tuple(k+1, j, bestP[j][k+1]));
-
+#ifdef FOR_MXFOLD2
+                    value_type M1_score = param_->score_multi_paired((k+1)+1, j+1);
+#else
                     int nuck = nucs[k];
                     int nuck1 = (k + 1) < seq_length ? nucs[k + 1] : -1;
 #ifdef lv
-                    value_type M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
+                    value_type M1_score = - v_score_M1(k+1, j, j, nuck, nuck1, nucj, nucj1, seq_length);
 #else
                     value_type M1_score = score_M1(k+1, j, j, nuck, nuck1, nucj, nucj1, seq_length);
+#endif
 #endif
                     total_energy += M1_score;
                 }
@@ -214,7 +241,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
             case MANNER_M_eq_M_plus_U:
                 {
                     stk.push(make_tuple(i, j-1, bestM[j-1][i]));
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_multi_unpaired(j+1, j+1);
+#elif defined(lv)
                     value_type newscore = - v_score_multi_unpaired(j, j);
 #else
                     value_type newscore = score_multi_unpaired(j, j);
@@ -225,7 +254,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
             case MANNER_M_eq_P:
                 {
                     stk.push(make_tuple(i, j, bestP[j][i]));
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_multi_paired(i+1, j+1);
+#elif defined(lv)
                     value_type newscore = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
 #else
                     value_type newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
@@ -238,7 +269,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                     k = j - 1;
                     if (k != -1)
                         stk.push(make_tuple(0, k, bestC[k]));
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_external_unpaired(j+1, j+1);
+#elif defined(lv)
                     value_type newscore = -v_score_external_unpaired(j, j);
 #else
                     value_type newscore = score_external_unpaired(j, j);
@@ -259,7 +292,9 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
 
                     int nuck = k > -1 ? nucs[k] : -1;
                     int nuck1 = nucs[k+1], nucj = nucs[j];
-#ifdef lv
+#ifdef FOR_MXFOLD2
+                    value_type newscore = param_->score_external_paired((k+1)+1, j+1);
+#elif defined(lv)
                     value_type newscore = - v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
 #else
                     value_type newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
@@ -283,11 +318,14 @@ std::vector<uint32_t> BeamCKYParser::traceback(const string& seq)
                 
         }
     }
+    // std::cout << total_energy << std::endl;
 
-    return bp;
+    return std::make_pair(total_energy, bp);
 }
 
-void BeamCKYParser::get_parentheses(char* result, const string& seq) {
+#if 0
+template < typename P, typename S >
+void BeamCKYParser<P,S>::get_parentheses(char* result, const string& seq) {
     memset(result, '.', seq_length);
     result[seq_length] = 0;
 
@@ -484,6 +522,7 @@ void BeamCKYParser::get_parentheses(char* result, const string& seq) {
 
     return;
 }
+#endif
 
 unsigned long quickselect_partition(vector<pair<value_type, int>>& scores, unsigned long lower, unsigned long upper) {
     value_type pivot = scores[upper].first;
@@ -507,7 +546,8 @@ value_type quickselect(vector<pair<value_type, int>>& scores, unsigned long lowe
     else return quickselect(scores, split+1, upper, k - length);
 }
 
-value_type BeamCKYParser::beam_prune(std::unordered_map<int, State> &beamstep) {
+template < typename P, typename S >
+value_type BeamCKYParser<P,S>::beam_prune(std::unordered_map<int, State> &beamstep) {
     scores.clear();
     for (auto &item : beamstep) {
         int i = item.first;
@@ -528,7 +568,8 @@ value_type BeamCKYParser::beam_prune(std::unordered_map<int, State> &beamstep) {
     return threshold;
 }
 
-void BeamCKYParser::sortM(value_type threshold,
+template < typename P, typename S >
+void BeamCKYParser<P,S>::sortM(value_type threshold,
                           std::unordered_map<int, State> &beamstep,
                           std::vector<std::pair<value_type, int>> &sorted_stepM) {
     sorted_stepM.clear();
@@ -553,8 +594,10 @@ void BeamCKYParser::sortM(value_type threshold,
     sort(sorted_stepM.begin(), sorted_stepM.end(), std::greater<pair<value_type, int>>());
 }
 
+#if 0
 //subopt zuker inside, bestP_beta sorted, subopt zuker optimized version
-std::string BeamCKYParser::get_parentheses_inside_real_backtrace(int i, int j, State& state, map<tuple<BestTypes, int, int>, string>& global_visited_inside, set<pair<int,int> >& window_visited) {
+template < typename P, typename S >
+std::string BeamCKYParser<P,S>::get_parentheses_inside_real_backtrace(int i, int j, State& state, map<tuple<BestTypes, int, int>, string>& global_visited_inside, set<pair<int,int> >& window_visited) {
 
     Manner manner = state.manner;
     value_type score = state.score;
@@ -707,7 +750,8 @@ std::string BeamCKYParser::get_parentheses_inside_real_backtrace(int i, int j, S
 }
 
 //subopt zuker inside, sorted bestP_beta, the optimized opt zuker altorithm
-pair<string, string> BeamCKYParser::get_parentheses_outside_real_backtrace(int i, int j, State& state_beta, map<tuple<BestTypes, int, int>, pair<string, string>>& global_visited_outside, map<tuple<BestTypes, int, int>, string>& global_visited_inside, set<pair<int,int>>& window_visited) {
+template < typename P, typename S >
+pair<string, string> BeamCKYParser<P,S>::get_parentheses_outside_real_backtrace(int i, int j, State& state_beta, map<tuple<BestTypes, int, int>, pair<string, string>>& global_visited_outside, map<tuple<BestTypes, int, int>, string>& global_visited_inside, set<pair<int,int>>& window_visited) {
 
     Manner manner = state_beta.manner;
     if (manner == MANNER_SINGLE){
@@ -984,9 +1028,10 @@ pair<string, string> BeamCKYParser::get_parentheses_outside_real_backtrace(int i
         assert(false);
     }
 }
+#endif
 
-
-void BeamCKYParser::prepare(unsigned len) {
+template < typename P, typename S >
+void BeamCKYParser<P,S>::prepare(unsigned len) {
     seq_length = len;
 
     bestH.clear();
@@ -1022,11 +1067,20 @@ void BeamCKYParser::prepare(unsigned len) {
 }
 
 // lisiz, constraints
-bool BeamCKYParser::allow_paired(int i, int j, const vector<int>* cons, char nuci, char nucj) {
-    return ((*cons)[i] == -1 || (*cons)[i] == j) && ((*cons)[j] == -1 || (*cons)[j] == i) && _allowed_pairs[nuci][nucj];
+template < typename P, typename S >
+bool BeamCKYParser<P,S>::allow_paired(int i, int j, const vector<int>* cons, char nuci, char nucj) {
+    std::tie(i, j) = std::minmax(i, j);
+    return ((*cons)[i] == C_ANY || (*cons)[i] == C_PAIRED_L || (*cons)[i] == C_PAIRED_LR || (*cons)[i] == j) 
+        && ((*cons)[j] == C_ANY || (*cons)[j] == C_PAIRED_R || (*cons)[j] == C_PAIRED_LR || (*cons)[j] == i) 
+        && _allowed_pairs[nuci][nucj];
 }
 
-BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vector<int>* cons) {
+template < typename P, typename S >
+typename BeamCKYParser<P,S>::DecoderResult BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const vector<int>* ref) {
+
+    use_constraints = cons!=NULL;
+    std::vector<int> cons2;
+    if (use_constraints) cons2 = *cons;
 
     struct timeval parse_starttime, parse_endtime;
 
@@ -1042,19 +1096,21 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
     // lisiz, constraints
     if (use_constraints) {
         for (int i=0; i<seq_length; i++){
-            int cons_idx = (*cons)[i];
-            allow_unpaired_position[i] = cons_idx == -1 || cons_idx == -2;
-            if (cons_idx > -1){
+            int cons_idx = cons2[i];
+            allow_unpaired_position[i] = cons_idx == C_ANY || cons_idx == C_UNPAIRED;
+            if (cons_idx >= 0){
                 if (!_allowed_pairs[nucs[i]][nucs[cons_idx]]){
-                    printf("Constrains on non-classical base pairs (non AU, CG, GU pairs)\n");
-                    exit(1);
+                    //printf("Constrains on non-classical base pairs (non AU, CG, GU pairs)\n");
+                    //exit(1);
+                    cons2[i] = cons2[cons2[i]] = C_UNPAIRED;
+                    allow_unpaired_position[i] = true;
                 }
             }
         }
         int firstpair = seq_length;
         for (int i=seq_length-1; i>-1; i--){
             allow_unpaired_range[i] = firstpair;
-            if ((*cons)[i] >= 0)
+            if (!allow_unpaired_position[i])
                 firstpair = i;
         }
     }
@@ -1067,7 +1123,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 int next = -1;
                 for (int j = seq_length-1; j >=0; --j) {
                     next_pair[nuci][j] = next;
-                    if ((*cons)[j] > -2 && _allowed_pairs[nuci][nucs[j]]) next = j;
+                    if (cons2[j] != C_UNPAIRED && _allowed_pairs[nuci][nucs[j]]) next = j;
                 }
             }
         } else {
@@ -1082,6 +1138,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
         }
     }
 
+#ifndef FOR_MXFOLD2
 #ifdef SPECIAL_HP
 #ifdef lv
     v_init_tetra_hex_tri(seq, seq_length, if_tetraloops, if_hexaloops, if_triloops);
@@ -1090,9 +1147,13 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
         v_init_tetra_hex_tri(seq, seq_length, if_tetraloops, if_hexaloops, if_triloops);
 #endif
 #endif
+#endif
 
     // start CKY decoding
-#ifdef lv
+#ifdef FOR_MXFOLD2
+        if(seq_length > 0) bestC[0].set(param_->score_external_unpaired(0+1, 0+1), MANNER_C_eq_C_plus_U);
+        if(seq_length > 1) bestC[1].set(param_->score_external_unpaired(0+1, 1+1), MANNER_C_eq_C_plus_U);
+#elif defined(lv)
         if(seq_length > 0) bestC[0].set(- v_score_external_unpaired(0, 0), MANNER_C_eq_C_plus_U);
         if(seq_length > 1) bestC[1].set(- v_score_external_unpaired(0, 1), MANNER_C_eq_C_plus_U);
 #else
@@ -1119,16 +1180,28 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
 
             {
                 int jnext = next_pair[nucj][j];
-                if (no_sharp_turn) while (jnext - j < 4 && jnext != -1) jnext = next_pair[nucj][jnext];
+                if (min_hairpin_loop>0) while (jnext - j <= min_hairpin_loop && jnext != -1) jnext = next_pair[nucj][jnext];
 
                 // lisiz, constriants
                 if (use_constraints){
                     if (!allow_unpaired_position[j]){
-                        jnext = (*cons)[j] > j ? (*cons)[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
+                        switch (cons2[j]) {
+                            case C_UNPAIRED:
+                            case C_ANY:
+                                assert(!"never reach here");
+                                break;
+                            case C_PAIRED_L:
+                            case C_PAIRED_LR:
+                                break;
+                            case C_PAIRED_R:
+                            default: /* PAIRED */
+                                jnext = cons2[j] > j ? cons2[j] : -1; // lisiz: j must be left bracket, jump to the constrainted pair (j, j') directly
+                                break;
+                        }
                     }
                     if (jnext != -1){
                         int nucjnext = nucs[jnext];
-                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, cons, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
+                        if (jnext > allow_unpaired_range[j] || !allow_paired(j, jnext, &cons2, nucj, nucjnext))  // lisiz: avoid cross constrainted brackets or unallowed pairs
                             jnext = -1;
                     }
                 }
@@ -1138,20 +1211,21 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                     int nucjnext_1 = (jnext - 1) > -1 ? nucs[jnext - 1] : -1;
 
                     value_type newscore;
-
-#ifdef lv
-                        int tetra_hex_tri = -1;
+#ifdef FOR_MXFOLD2
+                    newscore = param_->score_hairpin(j+1, jnext+1) + loss_paired(ref, j, jnext);
+#elif defined(lv)
+                    int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
-                        if (jnext-j-1 == 4) // 6:tetra
-                            tetra_hex_tri = if_tetraloops[j];
-                        else if (jnext-j-1 == 6) // 8:hexa
-                            tetra_hex_tri = if_hexaloops[j];
-                        else if (jnext-j-1 == 3) // 5:tri
-                            tetra_hex_tri = if_triloops[j];
+                    if (jnext-j-1 == 4) // 6:tetra
+                        tetra_hex_tri = if_tetraloops[j];
+                    else if (jnext-j-1 == 6) // 8:hexa
+                        tetra_hex_tri = if_hexaloops[j];
+                    else if (jnext-j-1 == 3) // 5:tri
+                        tetra_hex_tri = if_triloops[j];
 #endif
-                        newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
+                    newscore = - v_score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext, tetra_hex_tri);
 #else
-                        newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
+                    newscore = score_hairpin(j, jnext, nucj, nucj1, nucjnext_1, nucjnext);
 #endif
                     // this candidate must be the best one at [j, jnext]
                     // so no need to check the score
@@ -1164,7 +1238,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 // for every state h in H[j]
                 //   1. extend h(i, j) to h(i, jnext)
                 //   2. generate p(i, j)
-#ifdef lv
+#if defined(lv) || defined(FOR_MXFOLD2)
                 sort_keys(beamstepH, keys);
                 for (auto &item : keys) {
 #else
@@ -1186,7 +1260,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                     // lisiz, constraints
                     if (jnext != -1 && use_constraints){
                         int nucjnext = nucs[jnext];
-                        if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, cons, nuci, nucjnext))
+                        if (jnext > allow_unpaired_range[i] || !allow_paired(i, jnext, &cons2, nuci, nucjnext))
                             continue;
                     }
 
@@ -1197,20 +1271,21 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
 
                         // 1. extend h(i, j) to h(i, jnext)
                         value_type newscore;
-
-#ifdef lv
-                            int tetra_hex_tri = -1;
+#ifdef FOR_MXFOLD2
+                        newscore = param_->score_hairpin(i+1, jnext+1);
+#elif defined(lv)
+                        int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
-                            if (jnext-i-1 == 4) // 6:tetra
-                                tetra_hex_tri = if_tetraloops[i];
-                            else if (jnext-i-1 == 6) // 8:hexa
-                                tetra_hex_tri = if_hexaloops[i];
-                            else if (jnext-i-1 == 3) // 5:tri
-                                tetra_hex_tri = if_triloops[i];
+                        if (jnext-i-1 == 4) // 6:tetra
+                            tetra_hex_tri = if_tetraloops[i];
+                        else if (jnext-i-1 == 6) // 8:hexa
+                            tetra_hex_tri = if_hexaloops[i];
+                        else if (jnext-i-1 == 3) // 5:tri
+                            tetra_hex_tri = if_triloops[i];
 #endif
-                            newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
+                        newscore = - v_score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext, tetra_hex_tri);
 #else
-                            newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
+                        newscore = score_hairpin(i, jnext, nuci, nuci1, nucjnext_1, nucjnext);
 #endif
                         // this candidate must be the best one at [i, jnext]
                         // so no need to check the score
@@ -1245,10 +1320,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 // lisiz, change the order because of the constraits
                 {
                     value_type newscore;
-#ifdef lv
-                        newscore = state.score - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
+#ifdef FOR_MXFOLD2
+                    newscore = state.score + param_->score_multi_loop(i+1, j+1) + loss_paired(ref, i, j);
+#elif defined(lv)
+                    newscore = state.score - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
 #else
-                        newscore = state.score + score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
+                    newscore = state.score + score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
 #endif
                     update_if_better(beamstepP[i], newscore, MANNER_P_eq_MULTI);
                     ++ nos_P;
@@ -1257,7 +1334,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 // lisiz cnstriants
                 if (jnext != -1 && use_constraints){
                     int nucjnext = nucs[jnext];
-                    if (jnext > allow_unpaired_range[j] || !allow_paired(i, jnext, cons, nuci, nucjnext))
+                    if (jnext > allow_unpaired_range[j] || !allow_paired(i, jnext, &cons2, nuci, nucjnext))
                         continue;
                 }
 
@@ -1265,14 +1342,16 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 {
                     char new_l1 = state.trace.paddings.l1;
                     int new_l2 = state.trace.paddings.l2 + jnext - j;
-                    // if (jnext != -1 && new_l1 + new_l2 <= SINGLE_MAX_LEN) {
+                    // if (jnext != -1 && new_l1 + new_l2 <= max_single_loop) {
                     if (jnext != -1) {
                         // 1. extend (i, j) to (i, jnext)
                         value_type newscore;
-#ifdef lv
-                            newscore = state.score - v_score_multi_unpaired(j, jnext - 1);
+#ifdef FOR_MXFOLD2
+                        newscore = state.score + param_->score_multi_unpaired(j+1, (jnext-1)+1);
+#elif defined(lv)
+                        newscore = state.score - v_score_multi_unpaired(j, jnext - 1);
 #else
-                            newscore = state.score + score_multi_unpaired(j, jnext - 1);
+                        newscore = state.score + score_multi_unpaired(j, jnext - 1);
 #endif
                         // this candidate must be the best one at [i, jnext]
                         // so no need to check the score
@@ -1302,7 +1381,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
             bool use_cube_pruning = false;
 #endif               
 
-#ifdef lv
+#if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepP, keys);
             for (auto &item : keys) {
 #else
@@ -1316,10 +1395,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 // 2. M = P
                 if(i > 0 && j < seq_length-1){
                     value_type newscore;
-#ifdef lv
-                        newscore = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
+#ifdef FOR_MXFOLD2
+                    newscore = param_->score_multi_paired(i+1, j+1) + state.score;
+#elif defined(lv)
+                    newscore = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #else
-                        newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
+                    newscore = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #endif
                     update_if_better(beamstepM[i], newscore, MANNER_M_eq_P);
                     ++ nos_M;
@@ -1331,10 +1412,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                     int k = i - 1;
                     if ( k > 0 && !bestM[k].empty()) {
                         value_type M1_score;
-#ifdef lv
-                            M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
+#ifdef FOR_MXFOLD2
+                        M1_score = param_->score_multi_paired(i+1, j+1) + state.score;
+#elif defined(lv)
+                        M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #else
-                            M1_score = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
+                        M1_score = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #endif
                         // candidate list
                         auto bestM2_iter = beamstepM2.find(i);
@@ -1370,22 +1453,27 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                         int nuck = nuci_1;
                         int nuck1 = nuci;
                         value_type newscore;
-#ifdef lv
-                            newscore = - v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length) +
-                                prefix_C.score + state.score;
+#ifdef FOR_MXFOLD2
+                        newscore = param_->score_external_paired((k+1)+1, j+1) +
+                            prefix_C.score + state.score;
+#elif defined(lv)
+                        newscore = - v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length) +
+                            prefix_C.score + state.score;
 #else
-                            newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length) +
-                                prefix_C.score + state.score;
+                        newscore = score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length) +
+                            prefix_C.score + state.score;
 #endif
                         update_if_better(beamstepC, newscore, MANNER_C_eq_C_plus_P, k);
                         ++ nos_C;
                       }
                     } else {
                         value_type newscore;
-#ifdef lv
-                            newscore = - v_score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length) + state.score;
+#ifdef FOR_MXFOLD2
+                        newscore = param_->score_external_paired(0+1, j+1) + state.score;
+#elif defined(lv)
+                        newscore = - v_score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length) + state.score;
 #else
-                            newscore = score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length) + state.score;
+                        newscore = score_external_paired(0, j, -1, nucs[0], nucj, nucj1, seq_length) + state.score;
 #endif
                         update_if_better(beamstepC, newscore, MANNER_C_eq_C_plus_P, -1);
                         ++ nos_C;
@@ -1397,12 +1485,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 // new state is of shape p..i..j..q
                 if (i >0 && j<seq_length-1) {
                     value_type precomputed;
-#ifdef lv
+#if defined(lv) || defined(FOR_MXFOLD2)
                         precomputed = 0;
 #else
                         precomputed = score_junction_B(j, i, nucj, nucj1, nuci_1, nuci);
 #endif
-                    for (int p = i - 1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                    for (int p = i - 1; p >= std::max(i - max_single_loop, 0); --p) {
                         int nucp = nucs[p];
                         int nucp1 = nucs[p + 1]; // hzhang: move here
                         int q = next_pair[nucp][j];
@@ -1412,19 +1500,19 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                             if (p < i-1 && !allow_unpaired_position[p+1]) // lisiz: if p+1 must be paired, break
                                 break;
                             if (!allow_unpaired_position[p]){             // lisiz: if p must be paired, p must be left bracket
-                                q = (*cons)[p];
+                                q = cons2[p];
                                 if (q < p) break;
                             }
                         }
 
-                        while (q != -1 && ((i - p) + (q - j) - 2 <= SINGLE_MAX_LEN)) {
+                        while (q != -1 && ((i - p) + (q - j) - 2 <= max_single_loop)) {
                             int nucq = nucs[q];
 
                             // lisiz constraints
                             if (use_constraints){
                                 if (q>j+1 && q > allow_unpaired_range[j])  // lisiz: if q-1 must be paired, break
                                     break;
-                                if (!allow_paired(p, q, cons, nucp, nucq)) // lisiz: if p q are )(, break
+                                if (!allow_paired(p, q, &cons2, nucp, nucq)) // lisiz: if p q are )(, break
                                     break;
                             }
 
@@ -1432,28 +1520,34 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                             if (p == i - 1 && q == j + 1) {
                                 // helix
                                 value_type newscore;
-#ifdef lv
-                                    newscore = -v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
-                                        + state.score;
-                                    // SHAPE for Vienna only
-                                    if (use_shape)
-                                        newscore += -(pseudo_energy_stack[p] + pseudo_energy_stack[i] + pseudo_energy_stack[j] + pseudo_energy_stack[q]);
+#ifdef FOR_MXFOLD2 
+                                newscore = param_->score_single_loop(p+1, q+1, i+1, j+1)
+                                    + state.score + loss_paired(ref, p, q);
+#elif defined(lv)
+                                newscore = -v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
+                                    + state.score;
+                                // SHAPE for Vienna only
+                                if (use_shape)
+                                    newscore += -(pseudo_energy_stack[p] + pseudo_energy_stack[i] + pseudo_energy_stack[j] + pseudo_energy_stack[q]);
 #else
-                                    newscore = score_helix(nucp, nucp1, nucq_1, nucq) + state.score;
+                                newscore = score_helix(nucp, nucp1, nucq_1, nucq) + state.score;
 #endif
                                 update_if_better(bestP[q][p], newscore, MANNER_HELIX);
                                 ++nos_P;
                             } else {
                                 // single branch
                                 value_type newscore;
-#ifdef lv
-                                    newscore = - v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
-                                        + state.score;
+#ifdef FOR_MXFOLD2
+                                newscore = param_->score_single_loop(p+1, q+1, i+1, j+1)
+                                    + state.score + loss_paired(ref, p, q);
+#elif defined(lv)
+                                newscore = - v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
+                                    + state.score;
 #else
-                                    newscore = score_junction_B(p, q, nucp, nucp1, nucq_1, nucq) +
-                                        precomputed +
-                                        score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1) +
-                                        state.score;
+                                newscore = score_junction_B(p, q, nucp, nucp1, nucq_1, nucq) +
+                                    precomputed +
+                                    score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1) +
+                                    state.score;
 #endif
                                 update_if_better(bestP[q][p], newscore, MANNER_SINGLE,
                                                  static_cast<char>(i - p),
@@ -1470,7 +1564,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 // 3. M2 = M + P with cube pruning
                 vector<int> valid_Ps;
                 vector<value_type> M1_scores;
-#ifdef lv
+#if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepP, keys);
             for (auto &item : keys) {
 #else
@@ -1486,10 +1580,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                     if (k > 0 && !bestM[k].empty()) {
                         assert(bestM[k].size() == sorted_bestM[k].size());
                         value_type M1_score;
-#ifdef lv
-                            M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
+#ifdef FOR_MXFOLD2
+                        M1_score = param_->score_multi_paired(i+1, j+1) + state.score;
+#elif defined(lv)
+                        M1_score = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #else
-                            M1_score = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
+                        M1_score = score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length) + state.score;
 #endif
                         auto bestM2_iter = beamstepM2.find(i);
 #ifndef is_candidate_list
@@ -1574,7 +1670,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
             // for every state in M2[j]
             //   1. multi-loop  (by extending M2 on the left)
             //   2. M = M2
-#ifdef lv
+#if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepM2, keys);
             for (auto &item : keys) {
 #else
@@ -1591,7 +1687,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
 
                 // 1. multi-loop
                 {
-                    for (int p = i-1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                    for (int p = i-1; p >= std::max(i - max_single_loop, 0); --p) {
                         int nucp = nucs[p];
                         int q = next_pair[nucp][j];
 
@@ -1599,26 +1695,29 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                             if (p < i - 1 && !allow_unpaired_position[p+1])
                                 break;
                             if (!allow_unpaired_position[p]){
-                                q = (*cons)[p];
+                                q = cons2[p];
                                 if (q < p) break;
                             }
                             if (q > j+1 && q > allow_unpaired_range[j])
                                 continue;
                             int nucq = nucs[q];
-                            if (!allow_paired(p, q, cons, nucp, nucq))
+                            if (!allow_paired(p, q, &cons2, nucp, nucq))
                                 continue;
                         }
 
-                        if (q != -1 && ((i - p - 1) <= SINGLE_MAX_LEN)) {
+                        if (q != -1 && ((i - p - 1) <= max_single_loop)) {
                             // the current shape is p..i M2 j ..q
 
                             value_type newscore;
-#ifdef lv
-                                newscore = - v_score_multi_unpaired(p+1, i-1) -
-                                    v_score_multi_unpaired(j+1, q-1) + state.score;
+#ifdef FOR_MXFOLD2
+                            newscore = param_->score_multi_unpaired((p+1)+1, (i-1)+1) +
+                                param_->score_multi_unpaired((j+1)+1, (q-1)+1) + state.score;
+#elif defined(lv)
+                            newscore = - v_score_multi_unpaired(p+1, i-1) -
+                                v_score_multi_unpaired(j+1, q-1) + state.score;
 #else
-                                newscore = score_multi_unpaired(p+1, i-1) +
-                                    score_multi_unpaired(j+1, q-1) + state.score;
+                            newscore = score_multi_unpaired(p+1, i-1) +
+                                score_multi_unpaired(j+1, q-1) + state.score;
 #endif
                             update_if_better(bestMulti[q][p], newscore, MANNER_MULTI,
                                              static_cast<char>(i - p),
@@ -1642,7 +1741,7 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
 
             // for every state in M[j]
             //   1. M = M + unpaired
-#ifdef lv
+#if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepM, keys);
             for (auto &item : keys) {
 #else
@@ -1654,10 +1753,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                     if (use_constraints && !allow_unpaired_position[j+1]) // if j+1 must be paired
                         continue;
                     value_type newscore;
-#ifdef lv
-                        newscore = - v_score_multi_unpaired(j + 1, j + 1) + state.score;
+#ifdef FOR_MXFOLD2
+                    newscore = param_->score_multi_unpaired((j+1)+1, (j+1)+1) + state.score;
+#elif defined(lv)
+                    newscore = - v_score_multi_unpaired(j + 1, j + 1) + state.score;
 #else
-                        newscore = score_multi_unpaired(j + 1, j + 1) + state.score;
+                    newscore = score_multi_unpaired(j + 1, j + 1) + state.score;
 #endif
                     update_if_better(bestM[j+1][i], newscore, MANNER_M_eq_M_plus_U);
                     ++ nos_M;
@@ -1672,10 +1773,12 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
                 if (use_constraints && !allow_unpaired_position[j+1])
                         continue;
                 value_type newscore;
-#ifdef lv
-                    newscore = -v_score_external_unpaired(j+1, j+1) + beamstepC.score;
+#ifdef FOR_MXFOLD2
+                newscore = param_->score_external_unpaired((j+1)+1, (j+1)+1) + beamstepC.score;
+#elif defined(lv)
+                newscore = -v_score_external_unpaired(j+1, j+1) + beamstepC.score;
 #else
-                    newscore = score_external_unpaired(j+1, j+1) + beamstepC.score;
+                newscore = score_external_unpaired(j+1, j+1) + beamstepC.score;
 #endif
                 update_if_better(bestC[j+1], newscore, MANNER_C_eq_C_plus_U);
                 ++ nos_C;
@@ -1686,21 +1789,26 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
 
     State& viterbi = bestC[seq_length-1];
 
+#if 0
     char result[seq_length+1];
     get_parentheses(result, seq);
+#endif
 
     gettimeofday(&parse_endtime, NULL);
     double parse_elapsed_time = parse_endtime.tv_sec - parse_starttime.tv_sec + (parse_endtime.tv_usec-parse_starttime.tv_usec)/1000000.0;
 
     unsigned long nos_tot = nos_H + nos_P + nos_M2 + nos_Multi + nos_M + nos_C;
+#if 0
     if (is_verbose) {
         printf("Parse Time: %f len: %d score %f #states %lu H %lu P %lu M2 %lu Multi %lu M %lu C %lu\n",
                parse_elapsed_time, seq_length, double(viterbi.score), nos_tot,
                nos_H, nos_P, nos_M2, nos_Multi, nos_M, nos_C);
     }
+#endif
 
     fflush(stdout);
 
+#if 0
     if (zuker){
 #ifdef lv
         double printscore = (viterbi.score / -100.0);
@@ -1810,10 +1918,15 @@ BeamCKYParser::DecoderResult BeamCKYParser::parse(const string& seq, const vecto
 #endif
         }
     }
-    return {string(result), viterbi.score, nos_tot, parse_elapsed_time};
+#endif
+    use_constraints = false;
+
+    return {/*string(result),*/ viterbi.score, nos_tot, parse_elapsed_time};
 }
 
-void BeamCKYParser::outside(vector<int> next_pair[]){
+#if 0
+template < typename P, typename S >
+void BeamCKYParser<P,S>::outside(vector<int> next_pair[]){
       
     struct timeval parse_starttime, parse_endtime;
 
@@ -1890,10 +2003,10 @@ void BeamCKYParser::outside(vector<int> next_pair[]){
 
                 // 1. multi-loop
                 {
-                    for (int p = i-1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                    for (int p = i-1; p >= std::max(i - max_single_loop, 0); --p) {
                         int nucp = nucs[p];
                         int q = next_pair[nucp][j];
-                        if (q != -1 && ((i - p - 1) <= SINGLE_MAX_LEN)) {
+                        if (q != -1 && ((i - p - 1) <= max_single_loop)) {
 #ifdef lv
                             if (bestMulti_beta[q][p].manner != 0){
                                 update_if_better(state, bestMulti_beta[q][p].score, MANNER_MULTI, static_cast<char>(i - p), q - j);
@@ -1930,12 +2043,12 @@ void BeamCKYParser::outside(vector<int> next_pair[]){
 #ifndef lv
                     value_type precomputed = score_junction_B(j, i, nucj, nucj1, nuci_1, nuci);
 #endif
-                    for (int p = i - 1; p >= std::max(i - SINGLE_MAX_LEN, 0); --p) {
+                    for (int p = i - 1; p >= std::max(i - max_single_loop, 0); --p) {
                         int nucp = nucs[p];
                         int nucp1 = nucs[p + 1]; 
                         int q = next_pair[nucp][j];
 
-                        while (q != -1 && ((i - p) + (q - j) - 2 <= SINGLE_MAX_LEN)) {
+                        while (q != -1 && ((i - p) + (q - j) - 2 <= max_single_loop)) {
                             int nucq = nucs[q];
                             int nucq_1 = nucs[q - 1];
 
@@ -2108,23 +2221,35 @@ void BeamCKYParser::outside(vector<int> next_pair[]){
 
     return;
 }
+#endif
 
-BeamCKYParser::BeamCKYParser(int beam_size,
-                             bool nosharpturn,
-                             bool verbose,
-                             bool constraints,
-                             bool zuker_subopt,
-                             float energy_delta,
-                             string shape_file_path,
-                             bool fasta)
-    : beam(beam_size), 
-      no_sharp_turn(nosharpturn), 
-      is_verbose(verbose),
-      use_constraints(constraints),
-      zuker(zuker_subopt),
-      zuker_energy_delta(energy_delta),
-      is_fasta(fasta){
-#ifdef lv
+template < typename P, typename S >
+BeamCKYParser<P,S>::BeamCKYParser(
+                             std::unique_ptr<P>&& p, 
+                             int beam_size /*=100*/,
+                             int min_hairpin_loop /*=3*/,
+                             int max_single_loop /*=30*/,
+                             value_type pos_paired /*=0.0*/,
+                             value_type neg_paired /*=0.0*/ //,
+                             //bool verbose,
+                             //bool constraints,
+                             //bool zuker_subopt,
+                             //float energy_delta,
+                             //string shape_file_path,
+                             //bool fasta
+                             )
+    : param_(std::move(p)),
+      beam(beam_size), 
+      min_hairpin_loop(min_hairpin_loop),
+      max_single_loop(max_single_loop),
+      loss_paired_(pos_paired, neg_paired),
+      is_verbose(false),
+      use_constraints(false)
+      //zuker(zuker_subopt),
+      //zuker_energy_delta(energy_delta),
+      //is_fasta(fasta)
+      {
+#if defined(lv) || defined(FOR_MXFOLD2)
         initialize();
 #else
         initialize();
@@ -2132,6 +2257,7 @@ BeamCKYParser::BeamCKYParser(int beam_size,
 #endif
 
     // SHAPE
+#if 0
     if (shape_file_path != ""){
 
         use_shape = true;
@@ -2171,8 +2297,12 @@ BeamCKYParser::BeamCKYParser(int beam_size,
         }
 
     }
-
+#endif
 }
+
+// instantiation
+#include "../../param/turner.h"
+template class BeamCKYParser<TurnerNearestNeighbor>;
 
 // -------------------------------------------------------------
 

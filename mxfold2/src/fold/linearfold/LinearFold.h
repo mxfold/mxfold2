@@ -14,20 +14,25 @@
 #include <limits>
 #include <vector>
 #include <unordered_map>
+#include "../fold.h"
 
 #define is_cube_pruning
 #define is_candidate_list
 
 #define MIN_CUBE_PRUNING_SIZE 20
+#define FOR_MXFOLD2
+//#define lv
 
 namespace LinearFold {
-#ifdef lv
-  typedef int value_type;
-#define VALUE_MIN std::numeric_limits<int>::lowest()
+
+#ifdef FOR_MXFOLD2
+    typedef float value_type;
+#elif defined(lv)
+    typedef int value_type;
 #else
-  typedef double value_type;
-  #define VALUE_MIN std::numeric_limits<double>::lowest()
+    typedef double value_type;
 #endif
+#define VALUE_MIN std::numeric_limits<value_type>::lowest()
 
 enum Manner {
   MANNER_NONE = 0,              // 0: empty
@@ -88,45 +93,68 @@ struct State {
 };
 
 
-class BeamCKYParser {
+// constraint
+enum {
+    C_ANY       = -1, // '.'
+    C_UNPAIRED  = -2, // 'x'
+    C_PAIRED_L  = -3, // '<'
+    C_PAIRED_R  = -4, // '>'
+    C_PAIRED_LR = -5, // '|'
+};
+
+template < typename P, typename S = typename P::ScoreType >
+class BeamCKYParser : public Fold {
 public:
+    std::unique_ptr<P> param_;
     int beam;
-    bool no_sharp_turn;
+    int min_hairpin_loop;
+    int max_single_loop;
+    std::pair<value_type, value_type> loss_paired_;
     bool is_verbose;
     bool use_constraints; // lisiz, add constraints
-    bool zuker;
-    int  window_size; //2 + 1 + 2 = 5 in total, 5*5 window size.
-    float zuker_energy_delta;
-    bool use_shape = false;
-    double m = 1.8;
-    double b = -0.6;
-    bool is_fasta = false;
+    //bool zuker;
+    //int  window_size; //2 + 1 + 2 = 5 in total, 5*5 window size.
+    //float zuker_energy_delta;
+    //bool use_shape = false;
+    //double m = 1.8;
+    //double b = -0.6;
+    //bool is_fasta = false;
 
     struct DecoderResult {
-        std::string structure;
+        //std::string structure;
         value_type score;
         unsigned long num_states;
         double time;
     };
 
-    BeamCKYParser(int beam_size=100,
-                  bool nosharpturn=true,
-                  bool is_verbose=false,
-                  bool is_constraints=false,
-                  bool zuker_subopt=false,
-                  float zuker_energy_delta=5.0,
-                  std::string shape_file_path="",
-                  bool is_fasta=false); // lisiz, add constraints
+    BeamCKYParser(
+                  std::unique_ptr<P>&& p, 
+                  int beam_size=100,
+                  int min_hairpin_loop=3,
+                  int max_single_loop=30,
+                  value_type pos_paired=0.0,
+                  value_type neg_paired=0.0 //,
+                  //bool is_verbose=false,
+                  //bool is_constraints=false,
+                  //bool zuker_subopt=false,
+                  //float zuker_energy_delta=5.0,
+                  //std::string shape_file_path="",
+                  //bool is_fasta=false
+                  ); // lisiz, add constraints
 
-    DecoderResult parse(const std::string& seq, const std::vector<int>* cons);
+    DecoderResult parse(const std::string& seq, const std::vector<int>* cons, const std::vector<int>* ref);
+#if 0
     void outside(std::vector<int> next_pair[]); //for zuker subopt
-    std::vector<uint32_t> traceback(const std::string& seq);
+#endif
+    auto traceback(const std::string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>;
 
 private:
+#if 0
     void get_parentheses(char* result, const std::string& seq);
 
     std::pair<std::string, std::string> get_parentheses_outside_real_backtrace(int i, int j, State& state_beta, std::map<std::tuple<BestTypes, int, int>, std::pair<std::string, std::string> >& global_visited_outside, std::map<std::tuple<BestTypes, int, int>, std::string>& global_visited_inside, std::set<std::pair<int,int> >& window_visited);
     std::string get_parentheses_inside_real_backtrace(int i, int j, State& state, std::map<std::tuple<BestTypes, int, int>, std::string>& global_visited_inside, std::set<std::pair<int,int> >& window_visited);
+#endif
 
     unsigned seq_length;
 
@@ -188,6 +216,11 @@ private:
 
     // vector to store the scores at each beam temporarily for beam pruning
     std::vector<std::pair<value_type, int>> scores;
+
+    value_type loss_paired(const std::vector<int>* ref, int i, int j) const { 
+        if (ref) return (*ref)[i]==j ? loss_paired_.first : loss_paired_.second;
+        return 0.0;
+    }
 };
 
 };

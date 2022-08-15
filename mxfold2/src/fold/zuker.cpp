@@ -305,7 +305,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #endif
     }
 
-    return Fv_[1] + loss_const;
+    return Fv_[1] /*+ loss_const*/;
 }
 
 template < typename P, typename S >
@@ -668,7 +668,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
         }
     }
 
-    return std::make_pair(e + loss_const, pair);
+    return std::make_pair(e /*+ loss_const*/, pair);
 }
 
 template <typename S>
@@ -860,7 +860,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
         }
     }
 
-    return Fi_[1] + loss_const;
+    return Fi_[1] /*+ loss_const*/;
 }
 
 template < typename P, typename S >

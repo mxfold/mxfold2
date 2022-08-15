@@ -13,7 +13,9 @@
 #include <cstring>
 #include <assert.h>
 
+#if !defined(lv) && !defined(FOR_MXFOLD2)
 #include "feature_weight.h"
+#endif
 
 #define INF 1000000007
 
@@ -32,10 +34,11 @@
 #define ASYMMETRY_MAX_LEN 28
 
 #define GET_ACGU_NUM(x) ((x=='A'? 0 : (x=='C'? 1 : (x=='G'? 2 : (x=='U'?3: 4)))))
-#define HELIX_STACKING_OLD(x, y, z, w) (_helix_stacking[GET_ACGU_NUM(x)][GET_ACGU_NUM(y)][GET_ACGU_NUM(z)][GET_ACGU_NUM(w)])
+//#define HELIX_STACKING_OLD(x, y, z, w) (_helix_stacking[GET_ACGU_NUM(x)][GET_ACGU_NUM(y)][GET_ACGU_NUM(z)][GET_ACGU_NUM(w)])
 
 bool _allowed_pairs[NOTON][NOTON];
-bool _helix_stacking[NOTON][NOTON][NOTON][NOTON];
+//bool _helix_stacking[NOTON][NOTON][NOTON][NOTON];
+#if !defined(lv) && !defined(FOR_MXFOLD2)
 double cache_single[SINGLE_MAX_LEN+1][SINGLE_MAX_LEN+1];
 
 void initialize_cachesingle()
@@ -75,6 +78,7 @@ void initialize_cachesingle()
         }
     return;
 }
+#endif
 
 void initialize()
 {
@@ -84,7 +88,7 @@ void initialize()
     _allowed_pairs[GET_ACGU_NUM('G')][GET_ACGU_NUM('C')] = true;
     _allowed_pairs[GET_ACGU_NUM('G')][GET_ACGU_NUM('U')] = true;
     _allowed_pairs[GET_ACGU_NUM('U')][GET_ACGU_NUM('G')] = true;
-
+#if 0
     HELIX_STACKING_OLD('A', 'U', 'A', 'U') = true;
     HELIX_STACKING_OLD('A', 'U', 'C', 'G') = true;
     HELIX_STACKING_OLD('A', 'U', 'G', 'C') = true;
@@ -106,10 +110,11 @@ void initialize()
     HELIX_STACKING_OLD('U', 'A', 'A', 'U') = true;
     HELIX_STACKING_OLD('U', 'A', 'G', 'U') = true;
     HELIX_STACKING_OLD('U', 'G', 'G', 'U') = true;
+#endif
 }
 
 // ------------- nucs based scores -------------
-
+#if !defined(lv) && !defined(FOR_MXFOLD2)
 // parameters: nucs[i], nucs[j]
 inline double base_pair_score(int nuci, int nucj) {
   return base_pair[nucj*NOTON + nuci];
@@ -271,5 +276,6 @@ inline double score_external_paired(int i, int j, int nuci_1, int nuci, int nucj
 inline double score_external_unpaired(int i, int j) {
     return (j-i+1) * external_unpaired;
 }
+#endif
 
 #endif //FASTCKY_UTILITY_H

@@ -8,12 +8,9 @@ import torch.nn.functional as F
 import numpy as np
 
 class AbstractFold(nn.Module):
-    def __init__(self, 
-            predict: Callable[..., tuple[float, str, list[int]]], 
-            partfunc: Callable[..., tuple[float, np.ndarray]]) -> None:
+    def __init__(self, fold_wrapper) -> None:
         super(AbstractFold, self).__init__()
-        self.predict = predict
-        self.partfunc = partfunc
+        self.fold_wrapper = fold_wrapper
 
 
     def clear_count(self, param: dict[str, Any]) -> dict[str, Any]:
@@ -57,7 +54,7 @@ class AbstractFold(nn.Module):
             param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
             param_on_cpu = self.clear_count(param_on_cpu)
             with torch.no_grad():
-                v, pred, pair = self.predict(seq[i], param_on_cpu,
+                self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             max_helix_length=max_helix_length,
                             allowed_pairs="aucggu",
@@ -65,8 +62,9 @@ class AbstractFold(nn.Module):
                             reference=reference[i].tolist() if reference is not None else None, 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                v, pred, pair = self.fold_wrapper.traceback_viterbi()
                 if return_partfunc:
-                    pf, bpp = self.partfunc(seq[i], param_on_cpu,
+                    pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                                 max_helix_length=max_helix_length,
                                 allowed_pairs="aucggu",

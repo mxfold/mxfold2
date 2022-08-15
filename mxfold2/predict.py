@@ -90,7 +90,11 @@ class Predict:
                 return RNAFold(param_turner2004), {}
         
         if args.model == 'LinearFold':
-            return LinearFold(), {}
+            if args.param != '':
+                return LinearFold(), {}
+            else:
+                from . import param_turner2004
+                return LinearFold(param_turner2004), {}
 
         config = {
             'max_helix_length': args.max_helix_length,

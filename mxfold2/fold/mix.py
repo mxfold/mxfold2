@@ -14,7 +14,7 @@ from .zuker import ZukerFold
 class MixedFold(AbstractFold):
     def __init__(self, init_param=None, model_type: str = 'M', 
         max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedFold, self).__init__(interface.predict_mxfold, interface.partfunc_mxfold)
+        super(MixedFold, self).__init__(interface.ZukerMixedWrapper())
         self.turner = RNAFold(init_param=init_param)
         self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
         self.max_helix_length = max_helix_length
@@ -43,7 +43,7 @@ class MixedFold(AbstractFold):
 
             with torch.no_grad():
                 #v, pred, pair = interface.predict_mxfold(seq[i], param_on_cpu,
-                v, pred, pair = self.predict(seq[i], param_on_cpu,
+                self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             max_helix_length=self.max_helix_length,
                             allowed_pairs="aucggu",
@@ -51,9 +51,10 @@ class MixedFold(AbstractFold):
                             reference=reference[i].tolist() if reference is not None else None, 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                v, pred, pair = self.fold_wrapper.traceback_viterbi()
                 if return_partfunc:
                     #pf, bpp = interface.partfunc_mxfold(seq[i], param_on_cpu,
-                    pf, bpp = self.partfunc(seq[i], param_on_cpu,
+                    pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                                 max_helix_length=self.max_helix_length,
                                 allowed_pairs="aucggu",

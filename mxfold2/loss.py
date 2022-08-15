@@ -34,7 +34,10 @@ class StructuredLoss(nn.Module):
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, max_internal_length=None)
+        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, reference=pairs,
+                                loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
+                                loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired,
+                                max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         if self.verbose:
@@ -93,7 +96,10 @@ class StructuredLossWithTurner(nn.Module):
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, max_internal_length=None)
+        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, reference=pairs,
+                                loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
+                                loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired, 
+                                max_internal_length=None)
         with torch.no_grad():
             ref2: torch.Tensor
             ref2_s: list[str]
