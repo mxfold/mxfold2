@@ -34,6 +34,13 @@ class AbstractFold(nn.Module):
     def make_param(self, seq) -> list[dict[str, Any]]:
         raise(RuntimeError('not implemented'))
 
+    def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
+            param_on_cpu = { k: v.to("cpu") for k, v in param.items() }
+            param_on_cpu = self.clear_count(param_on_cpu)
+            return param_on_cpu
+
+    def detect_device(self, param):
+        return next(iter(param.values())).device
 
     def forward(self, seq: list[str], 
             return_param: bool = False,
@@ -51,8 +58,7 @@ class AbstractFold(nn.Module):
         pfs: list[float] = []
         bpps: list[np.ndarray] = []
         for i in range(len(seq)):
-            param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
-            param_on_cpu = self.clear_count(param_on_cpu)
+            param_on_cpu = self.make_param_on_cpu(param[i])
             with torch.no_grad():
                 self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
@@ -62,7 +68,8 @@ class AbstractFold(nn.Module):
                             reference=reference[i].tolist() if reference is not None else None, 
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                v, pred, pair = self.fold_wrapper.traceback_viterbi()
+            v, pred, pair = self.fold_wrapper.traceback_viterbi()
+            with torch.no_grad():
                 if return_partfunc:
                     pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
@@ -80,7 +87,7 @@ class AbstractFold(nn.Module):
             preds.append(pred)
             pairs.append(pair)
 
-        device = next(iter(param[0].values())).device
+        device = self.detect_device(param[0])
         ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss, device=device)
         if return_param:
             return ss, preds, pairs, param

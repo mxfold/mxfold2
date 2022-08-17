@@ -8,6 +8,7 @@ ext_modules = [
             "mxfold2/src/interface.cpp",
             "mxfold2/src/param/turner.cpp",  #param/turner.h 
             "mxfold2/src/param/positional.cpp", #param/positional.h 
+            "mxfold2/src/param/positional_bl.cpp", #param/positional_bl.h 
             "mxfold2/src/param/bpscore.cpp", #param/bpscore.h     
             "mxfold2/src/param/mix.cpp", #param/mix.h
             #"mxfold2/src/param/util.h"

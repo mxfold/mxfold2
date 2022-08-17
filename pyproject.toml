@@ -2,8 +2,8 @@
 name = "mxfold2"
 version = "0.1.1"
 description = "RNA secondary structure prediction using deep neural networks with thermodynamic integrations"
-authors = ["Kengo Sato <satoken@bio.keio.ac.jp>"]
-repository = "https://github.com/keio-bioinformatics/mxfold2"
+authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
+repository = "https://github.com/mxfold/mxfold2"
 readme = "README.md"
 license = "MIT"
 build = "build.py"

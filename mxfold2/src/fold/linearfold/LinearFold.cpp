@@ -107,6 +107,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
 
 #if defined(FOR_MXFOLD2)
                     value_type newscore = param_->score_hairpin(i+1, j+1) + loss_paired(ref, i, j);
+                    param_->count_hairpin(i+1, j+1, 1.);
 #elif defined(lv)
                     int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
@@ -133,6 +134,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     stk.push(make_tuple(p, q, bestP[q][p]));
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + loss_paired(ref, i, j);
+                    param_->count_single_loop(i+1, j+1, p+1, q+1, 1.);
 #else
                     int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
 #ifdef lv
@@ -156,6 +158,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     q = j - 1;
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + loss_paired(ref, i,  j);
+                    param_->count_single_loop(i+1, j+1, p+1, q+1, 1.);
 #else
                     int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
 #ifdef lv
@@ -176,6 +179,8 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_multi_unpaired((i+1)+1, (p-1)+1) +
                         param_->score_multi_unpaired((q+1)+1, (j-1)+1);
+                    param_->count_multi_unpaired((i+1)+1, (p-1)+1, 1.); 
+                    param_->count_multi_unpaired((q+1)+1, (j-1)+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_multi_unpaired(i+1, p-1) -
                         v_score_multi_unpaired(q+1, j-1);
@@ -193,6 +198,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     stk.push(make_tuple(p, q, bestM2[q][p]));
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_multi_unpaired(q+1, (j-1)+1);
+                    param_->count_multi_unpaired(q+1, (j-1)+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_multi_unpaired(q, j - 1);
 #else
@@ -208,6 +214,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     stk.push(make_tuple(i, j, bestMulti[j][i]));
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_multi_loop(i+1, j+1) + loss_paired(ref, i, j);
+                    param_->count_multi_loop(i+1, j+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
 #else
@@ -223,6 +230,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     stk.push(make_tuple(k+1, j, bestP[j][k+1]));
 #ifdef FOR_MXFOLD2
                     value_type M1_score = param_->score_multi_paired((k+1)+1, j+1);
+                    param_->count_multi_paired((k+1)+1, j+1, 1.);
 #else
                     int nuck = nucs[k];
                     int nuck1 = (k + 1) < seq_length ? nucs[k + 1] : -1;
@@ -243,6 +251,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     stk.push(make_tuple(i, j-1, bestM[j-1][i]));
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_multi_unpaired(j+1, j+1);
+                    param_->count_multi_unpaired(j+1, j+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_multi_unpaired(j, j);
 #else
@@ -256,6 +265,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     stk.push(make_tuple(i, j, bestP[j][i]));
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_multi_paired(i+1, j+1);
+                    param_->count_multi_paired(i+1, j+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_M1(i, j, j, nuci_1, nuci, nucj, nucj1, seq_length);
 #else
@@ -271,6 +281,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                         stk.push(make_tuple(0, k, bestC[k]));
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_external_unpaired(j+1, j+1);
+                    param_->count_external_unpaired(j+1, j+1, 1.);
 #elif defined(lv)
                     value_type newscore = -v_score_external_unpaired(j, j);
 #else
@@ -294,6 +305,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     int nuck1 = nucs[k+1], nucj = nucs[j];
 #ifdef FOR_MXFOLD2
                     value_type newscore = param_->score_external_paired((k+1)+1, j+1);
+                    param_->count_external_paired((k+1)+1, j+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_external_paired(k+1, j, nuck, nuck1, nucj, nucj1, seq_length);
 #else
@@ -2302,7 +2314,9 @@ BeamCKYParser<P,S>::BeamCKYParser(
 
 // instantiation
 #include "../../param/turner.h"
+#include "../../param/positional_bl.h"
 template class BeamCKYParser<TurnerNearestNeighbor>;
+template class BeamCKYParser<PositionalNearestNeighborBL>;
 
 // -------------------------------------------------------------
 

@@ -8,6 +8,7 @@ pybind11_add_module(interface
     interface.cpp 
     param/turner.cpp param/turner.h 
     param/positional.cpp param/positional.h 
+    param/positional_bl.cpp param/positional_bl.h 
     param/bpscore.cpp param/bpscore.h     
     param/mix.cpp param/mix.h
     param/util.h

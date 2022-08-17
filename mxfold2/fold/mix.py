@@ -20,67 +20,28 @@ class MixedFold(AbstractFold):
         self.max_helix_length = max_helix_length
 
 
-    def forward(self, seq: list[str], return_param: bool = False, 
-            param: Optional[list[dict[str, dict[str, Any]]]] = None, 
-            return_partfunc: bool = False,
-            max_internal_length: int = 30, 
-            constraint: Optional[list[torch.Tensor]] = None, 
-            reference: Optional[list[torch.Tensor]] = None,
-            loss_pos_paired: float = 0.0, loss_neg_paired: float = 0.0, 
-            loss_pos_unpaired: float = 0.0, loss_neg_unpaired: float = 0.0):
-        param = self.make_param(seq) if param is None else param # reuse param or not
-        ss = []
-        preds: list[str] = []
-        pairs: list[list[int]] = []
-        pfs: list[float] = []
-        bpps: list[np.ndarray] = []
-        for i in range(len(seq)):
-            param_on_cpu = { 
-                'turner': {k: v.to("cpu") for k, v in param[i]['turner'].items() },
-                'positional': {k: v.to("cpu") for k, v in param[i]['positional'].items() }
-            }
-            param_on_cpu = {k: self.clear_count(v) for k, v in param_on_cpu.items()}
-
-            with torch.no_grad():
-                #v, pred, pair = interface.predict_mxfold(seq[i], param_on_cpu,
-                self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
-                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                            max_helix_length=self.max_helix_length,
-                            allowed_pairs="aucggu",
-                            constraint=constraint[i].tolist() if constraint is not None else None, 
-                            reference=reference[i].tolist() if reference is not None else None, 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                v, pred, pair = self.fold_wrapper.traceback_viterbi()
-                if return_partfunc:
-                    #pf, bpp = interface.partfunc_mxfold(seq[i], param_on_cpu,
-                    pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
-                                max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                                max_helix_length=self.max_helix_length,
-                                allowed_pairs="aucggu",
-                                constraint=constraint[i].tolist() if constraint is not None else None, 
-                                reference=reference[i].tolist() if reference is not None else None, 
-                                loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                                loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                    pfs.append(pf)
-                    bpps.append(bpp)
-            if torch.is_grad_enabled():
-                v = self.calculate_differentiable_score(v, param[i]['positional'], param_on_cpu['positional'])
-            ss.append(v)
-            preds.append(pred)
-            pairs.append(pair)
-
-        device = next(iter(param[0]['positional'].values())).device
-        ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss, device=device)
-        if return_param:
-            return ss, preds, pairs, param
-        elif return_partfunc:
-            return ss, preds, pairs, pfs, bpps
-        else:
-            return ss, preds, pairs
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+        return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
     def make_param(self, seq: list[str]) -> list[dict[str, dict[str, Any]]]:
         ts = self.turner.make_param(seq)
         ps = self.zuker.make_param(seq)
         return [{'turner': t, 'positional': p} for t, p in zip(ts, ps)]
+
+
+    def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
+        param_on_cpu = { 
+            'turner': {k: v.to("cpu") for k, v in param['turner'].items() },
+            'positional': {k: v.to("cpu") for k, v in param['positional'].items() }
+        }
+        param_on_cpu = {k: self.clear_count(v) for k, v in param_on_cpu.items()}
+        return param_on_cpu
+
+
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
+        return super().calculate_differentiable_score(v, param['positional'], count['positional'])
+
+
+    def detect_device(self, param):
+        return super().detect_device(param['positional'])
