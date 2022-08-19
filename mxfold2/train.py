@@ -17,6 +17,8 @@ from tqdm import tqdm
 
 from .dataset import BPseqDataset
 from .fold.fold import AbstractFold
+from .fold.linearfold import LinearFold
+from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
@@ -59,9 +61,9 @@ class Train:
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
                 loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
-                loss_total += loss.item()
-                num += n_batch
                 if float(loss.item()) > 0.:
+                    loss_total += loss.item()
+                    num += n_batch
                     loss.backward()
                     if self.verbose:
                         for n, p in self.model.named_parameters():
@@ -70,16 +72,16 @@ class Train:
                                 torch.max(cast(torch.Tensor, p.grad)).item())
                     self.optimizer.step()
 
-                pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
-                pbar.update(n_batch)
+                    pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
+                    pbar.update(n_batch)
 
-                running_loss += loss.item()
-                n_running_loss += n_batch
-                if n_running_loss >= 100 or num >= n_dataset:
-                    running_loss /= n_running_loss
-                    if self.writer is not None:
-                        self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
-                    running_loss, n_running_loss = 0, 0
+                    running_loss += loss.item()
+                    n_running_loss += n_batch
+                    if n_running_loss >= 100 or num >= n_dataset:
+                        running_loss /= n_running_loss
+                        if self.writer is not None:
+                            self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
+                        running_loss, n_running_loss = 0, 0
         elapsed_time = time.time() - start
         if self.verbose:
             print()
@@ -102,7 +104,7 @@ class Train:
 
         elapsed_time = time.time() - start
         if self.writer is not None:
-            self.writer.add_scalar("test/loss", epoch * n_dataset, loss_total / num)
+            self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
@@ -126,6 +128,9 @@ class Train:
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
             return RNAFold(), {}
+
+        if args.model == 'LinearFoldV':
+            return LinearFoldV(), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -168,6 +173,9 @@ class Train:
         elif args.model == 'MixC':
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
+
+        elif args.model == 'LinearFold':
+            model = LinearFold(**config)
 
         else:
             raise(RuntimeError('not implemented'))
@@ -228,10 +236,10 @@ class Train:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)
-        self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+        self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
-            self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+            self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False) # works well only for batch_size=1!!
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
@@ -328,8 +336,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

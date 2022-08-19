@@ -165,7 +165,7 @@ class PairedLayer(nn.Module):
             x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
         x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
         x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
-        x_l = torch.tril(x_u.view(B, -1, N, N), diagonal=-1)
+        x_l = torch.tril(x_l.view(B, -1, N, N), diagonal=-1)
         x = x_u + x_l # (B, n_out, N, N)
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
         x = self.fc(x)
@@ -342,3 +342,46 @@ class NeuralNet(nn.Module):
             score_unpaired = self.linear(x)
 
             return score_paired, score_unpaired
+
+
+class NeuralNet1D(nn.Module):
+    def __init__(self, embed_size: int = 0,
+            num_filters: tuple[int, ...] = (96,), 
+            filter_size: tuple[int, ...] = (5,), 
+            dilation: int = 0, 
+            pool_size: tuple[int, ...] = (1,), 
+            num_lstm_layers: int = 0, num_lstm_units: int = 0, num_att: int = 0, 
+            num_transformer_layers: int = 0, num_transformer_hidden_units: int = 2048,
+            num_transformer_att: int = 8,
+            num_hidden_units: tuple[int, ...] = (32,), 
+            dropout_rate: float =0.0, fc_dropout_rate: float = 0.0, 
+            n_out: int = 0,  
+            **kwargs: dict[str, Any]) -> None:
+
+        super(NeuralNet1D, self).__init__()
+
+        self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
+        n_in = self.embedding.n_out
+
+        if num_transformer_layers==0:
+            self.encoder = CNNLSTMEncoder(n_in,
+                num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
+                num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
+        else:
+            self.encoder = TransformerLayer(n_in, n_head=num_transformer_att, 
+                            n_hidden=num_transformer_hidden_units, 
+                            n_layers=num_transformer_layers, dropout=dropout_rate)
+        n_in = self.encoder.n_out
+        self.fc = nn.Linear(n_in, n_out) if n_in != n_out else None
+
+
+
+    def forward(self, seq: list[str]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        device = next(self.parameters()).device
+        x: torch.Tensor
+        x = self.embedding(['0' + s for s in seq]).to(device) # (B, 4, N)
+        x = self.encoder(x)
+        if self.fc is not None:
+            x = self.fc(x)
+        return x
+

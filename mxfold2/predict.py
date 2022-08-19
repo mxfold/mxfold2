@@ -16,11 +16,11 @@ from torch.utils.data import DataLoader
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
+from .fold.linearfold import LinearFold
+from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
-from .fold.linearfold import LinearFold
-from .fold.linearfoldv import LinearFoldV
 
 
 class Predict:
@@ -90,9 +90,6 @@ class Predict:
                 from . import param_turner2004
                 return RNAFold(param_turner2004), {}
         
-        if args.model == 'LinearFold':
-            return LinearFold(), {}
-
         if args.model == 'LinearFoldV':
             if args.param != '':
                 return LinearFoldV(), {}
@@ -141,6 +138,9 @@ class Predict:
         elif args.model == 'MixC':
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
+
+        elif args.model == 'LinearFold':
+            model = LinearFold(**config)
 
         else:
             raise(RuntimeError('not implemented'))

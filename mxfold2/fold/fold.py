@@ -1,16 +1,24 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, cast 
+import copy
+from typing import Any, Callable, Optional, cast
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
 
 class AbstractFold(nn.Module):
     def __init__(self, fold_wrapper) -> None:
         super(AbstractFold, self).__init__()
         self.fold_wrapper = fold_wrapper
+
+
+    def duplicate(self) -> AbstractFold:
+        dup = copy.copy(self)
+        dup.fold_wrapper = type(self.fold_wrapper)()
+        return dup
 
 
     def clear_count(self, param: dict[str, Any]) -> dict[str, Any]:

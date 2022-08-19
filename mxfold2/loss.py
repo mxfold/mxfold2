@@ -29,12 +29,14 @@ class StructuredLoss(nn.Module):
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
         pred: torch.Tensor
         pred_s: list[str]
-        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pairs,
+        pred_model = self.model.duplicate()
+        pred, pred_s, _, param = pred_model(seq, return_param=True, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, reference=pairs,
+        ref_model = self.model.duplicate()
+        ref, ref_s, _ = ref_model(seq, param=param, constraint=pairs, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired,
                                 max_internal_length=None)
@@ -91,12 +93,14 @@ class StructuredLossWithTurner(nn.Module):
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
         pred: torch.Tensor
         pred_s: list[str]
-        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pairs,
+        pred_model = self.model.duplicate()
+        pred, pred_s, _, param = pred_model(seq, return_param=True, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, reference=pairs,
+        ref_model = self.model.duplicate()
+        ref, ref_s, _ = ref_model(seq, param=param, constraint=pairs, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired, 
                                 max_internal_length=None)

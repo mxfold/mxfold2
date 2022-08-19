@@ -6,7 +6,6 @@
 #include "fold/nussinov.h"
 #include "param/turner.h"
 #include "param/positional.h"
-#include "param/positional_pc.h"
 #include "param/positional_bl.h"
 #include "param/bpscore.h"
 #include "param/mix.h"

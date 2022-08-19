@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractFold
-from .layers import LengthLayer
+from .layers import LengthLayer, NeuralNet1D
 
 class PositionalScore(nn.Module):
     def __init__(self, embedding: torch.Tensor, bilinears: nn.ModuleDict, fc_length: dict[str, torch.Tensor]):
@@ -155,7 +155,7 @@ class PositionalScore(nn.Module):
 
 
 class LinearFold(AbstractFold):
-    def __init__(self, emb_size: int = 4):
+    def __init__(self, emb_size: int = 4, **kwargs: dict[str, Any]):
         super(LinearFold, self).__init__(interface.LinearFoldPositionalWrapper())
         self.emb_size = emb_size
         bilinears = [ nn.Bilinear(emb_size, emb_size, 1) ] * 3
@@ -179,6 +179,7 @@ class LinearFold(AbstractFold):
             'score_internal_asymmetry': LengthLayer(29),
             'score_helix_length': LengthLayer(31)
         })
+        self.net = NeuralNet1D(n_out=emb_size, **kwargs)
 
 
     def make_param(self, seq: list[str]):
@@ -192,7 +193,7 @@ class LinearFold(AbstractFold):
             'score_internal_asymmetry': cast(LengthLayer, self.fc_length['score_internal_asymmetry']).make_param(),
             'score_helix_length': cast(LengthLayer, self.fc_length['score_helix_length']).make_param()
         } 
-        embeddings = [ torch.rand(len(s)+1, self.emb_size, device=device) for s in seq ] # for test
+        embeddings = self.net(seq) 
 
         param = [ { 
             'embedding': embedding,
