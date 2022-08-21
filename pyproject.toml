@@ -10,22 +10,30 @@ build = "build.py"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-numpy = "^1.18"
-torch = "^1.4"
+torch = "^1.8"
 torchvision = "^0"
+#torch = { version = "=1.12.1+cu116", source = "pytorch-cu116" }
+#torchvision = { version = "=0.13.1+cu116", source = "pytorch-cu116" }
+numpy = "*"
 tqdm = "^4.40"
-wheel = "^0.36.0"
+wheel = "*"
 pybind11 = "^2.6.2"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.5.3"
 jupyter = "^1.0.0"
-pandas = "^1.1.0"
-tensorboard = "^2.3.0"
+pandas = "*"
+tensorboard = "*"
+torch-tb-profiler = "*"
 
 [tool.poetry.scripts]
 mxfold2 = "mxfold2.__main__:main"
 
+# [[tool.poetry.source]]
+# name = "pytorch-cu116"
+# url = "https://download.pytorch.org/whl/cu116/"
+# secondary = true
+
 [build-system]
-requires = ["poetry>=0.12", "setuptools", "wheel"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
