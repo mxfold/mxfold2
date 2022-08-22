@@ -331,15 +331,15 @@ protected:
             }
             else if (py::isinstance<py::int_>(constraint[i]))
             {
-                auto v = py::cast<py::int_>(constraint[i]);
-                switch (static_cast<int>(v)) {
+                auto v = static_cast<int>(py::cast<py::int_>(constraint[i]));
+                switch (v) {
                     case  0: ret[i] = LinearFold::C_UNPAIRED; break;
                     case -1: ret[i] = LinearFold::C_ANY; break;
                     case -2: ret[i] = LinearFold::C_PAIRED_L; break;
                     case -3: ret[i] = LinearFold::C_PAIRED_R; break;
                     case -4: ret[i] = LinearFold::C_PAIRED_LR; break;
                     default: 
-                        if (static_cast<int>(v)>0) ret[i] = v-1;
+                        if (v>0) ret[i] = v-1;
                         break;
                 }
             }
@@ -355,7 +355,7 @@ protected:
         {
             std::vector<int> c(r.size()-1);
             std::transform(std::begin(r)+1, std::end(r), std::begin(c),
-                        [](auto x) -> int { return py::cast<py::int_>(x)-1; });
+                        [](auto x) -> int { return static_cast<int>(py::cast<py::int_>(x))-1; });
             return c;
         }
         return std::vector<int>();
