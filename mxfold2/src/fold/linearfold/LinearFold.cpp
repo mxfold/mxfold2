@@ -2315,8 +2315,8 @@ BeamCKYParser<P,S>::BeamCKYParser(
 // instantiation
 #include "../../param/turner.h"
 #include "../../param/positional_bl.h"
-template class BeamCKYParser<TurnerNearestNeighbor>;
-template class BeamCKYParser<PositionalNearestNeighborBL>;
+template class LinearFold::BeamCKYParser<TurnerNearestNeighbor>;
+template class LinearFold::BeamCKYParser<PositionalNearestNeighborBL>;
 
 // -------------------------------------------------------------
 
