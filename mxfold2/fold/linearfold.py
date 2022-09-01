@@ -237,10 +237,10 @@ class LinearFold(AbstractFold):
         return param_on_cpu
 
     def clear_count(self, param: dict[str, Any]) -> dict[str, Any]:
-        param['cnt'].total_energy = 0
+        param['cnt'].total_energy = torch.Tensor([0.])
         return param
 
     def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
         s = param['cnt'].total_energy
-        s += -cast(torch.Tensor, s).item() + v
+        s += -s.item() + v
         return s

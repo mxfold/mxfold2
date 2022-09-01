@@ -15,13 +15,13 @@ torchvision = "^0"
 #torch = { version = "=1.12.1+cu116", source = "pytorch-cu116" }
 #torchvision = { version = "=0.13.1+cu116", source = "pytorch-cu116" }
 numpy = "*"
-tqdm = "^4.40"
+tqdm = "*"
 wheel = "*"
-pybind11 = "^2.6.2"
+pybind11 = "*"
 
 [tool.poetry.dev-dependencies]
-pylint = "^2.5.3"
-jupyter = "^1.0.0"
+pylint = "*"
+jupyter = "*"
 pandas = "*"
 tensorboard = "*"
 torch-tb-profiler = "*"

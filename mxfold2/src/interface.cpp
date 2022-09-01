@@ -312,20 +312,20 @@ public:
 protected:
     auto convert_constraints(py::list constraint) const
     {
-        std::vector<int> ret(constraint.size(), LinearFold::C_ANY);
+        std::vector<int> ret(constraint.size()-1, LinearFold::C_ANY);
         for (auto i=1; i!=constraint.size(); i++)
         {
             if (py::isinstance<py::str>(constraint[i]))
             {
                 std::string c = py::cast<py::str>(constraint[i]);
                 if (c=="x")
-                    ret[i] = LinearFold::C_UNPAIRED;
+                    ret[i-1] = LinearFold::C_UNPAIRED;
                 else if (c=="<")
-                    ret[i] = LinearFold::C_PAIRED_L;
+                    ret[i-1] = LinearFold::C_PAIRED_L;
                 else if (c==">")
-                    ret[i] = LinearFold::C_PAIRED_R;
+                    ret[i-1] = LinearFold::C_PAIRED_R;
                 else if (c=="|")
-                    ret[i] = LinearFold::C_PAIRED_LR;
+                    ret[i-1] = LinearFold::C_PAIRED_LR;
                 /* else  if (c==".") 
                     ret[i] = LinearFold::BeamCKYParser::C_ANY; */
             }
@@ -333,13 +333,13 @@ protected:
             {
                 auto v = static_cast<int>(py::cast<py::int_>(constraint[i]));
                 switch (v) {
-                    case  0: ret[i] = LinearFold::C_UNPAIRED; break;
-                    case -1: ret[i] = LinearFold::C_ANY; break;
-                    case -2: ret[i] = LinearFold::C_PAIRED_L; break;
-                    case -3: ret[i] = LinearFold::C_PAIRED_R; break;
-                    case -4: ret[i] = LinearFold::C_PAIRED_LR; break;
+                    case  0: ret[i-1] = LinearFold::C_UNPAIRED; break;
+                    case -1: ret[i-1] = LinearFold::C_ANY; break;
+                    case -2: ret[i-1] = LinearFold::C_PAIRED_L; break;
+                    case -3: ret[i-1] = LinearFold::C_PAIRED_R; break;
+                    case -4: ret[i-1] = LinearFold::C_PAIRED_LR; break;
                     default: 
-                        if (v>0) ret[i] = v-1;
+                        if (v>0) ret[i-1] = v-1;
                         break;
                 }
             }

@@ -1114,8 +1114,9 @@ typename BeamCKYParser<P,S>::DecoderResult BeamCKYParser<P,S>::parse(const strin
                 if (!_allowed_pairs[nucs[i]][nucs[cons_idx]]){
                     //printf("Constrains on non-classical base pairs (non AU, CG, GU pairs)\n");
                     //exit(1);
-                    cons2[i] = cons2[cons2[i]] = C_UNPAIRED;
                     allow_unpaired_position[i] = true;
+                    allow_unpaired_position[cons2[i]] = true;
+                    cons2[i] = cons2[cons2[i]] = C_UNPAIRED;
                 }
             }
         }
