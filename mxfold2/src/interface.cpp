@@ -148,7 +148,7 @@ public:
         return f_->compute_viterbi(seq_, options_);
     }
 
-    auto traceback_viterbi()
+    auto traceback_viterbi(int from_pos = 0)
     {
         auto [e, p] = f_->traceback_viterbi(seq_, options_);
         auto s = Zuker<ParamClass>::make_paren(p);
@@ -242,7 +242,7 @@ public:
         return f_->compute_viterbi(seq_, options_);
     }
 
-    auto traceback_viterbi()
+    auto traceback_viterbi(int from_pos = 0)
     {
         auto [e, p] = f_->traceback_viterbi(seq_, options_);
         auto s = Nussinov<ParamClass>::make_paren(p);
@@ -278,11 +278,13 @@ public:
         for (auto i=0; i!=allowed_pairs.size(); i+=2)
             options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
     #endif
+        cons_.clear();
         if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
         {
             auto c = py::cast<py::list>(constraint);
             cons_ = convert_constraints(c);
         }
+        ref_.clear();
         if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
         {
             auto r = py::cast<py::list>(reference);
@@ -302,9 +304,9 @@ public:
         return r.score;
     }
 
-    auto traceback_viterbi()
+    auto traceback_viterbi(int from_pos=0)
     {
-        auto [e, p] = f_->traceback(seq_, ref_.size() > 0 ? &ref_ : NULL);
+        auto [e, p] = f_->traceback(seq_, ref_.size() > 0 ? &ref_ : NULL, from_pos);
         auto s = LinearFold::BeamCKYParser<ParamClass>::make_paren(p);
         return std::make_tuple(e, s, p);
     }
@@ -389,7 +391,9 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &ZukerWrapper<TurnerNearestNeighbor>::traceback_viterbi)
+        .def("traceback_viterbi", &ZukerWrapper<TurnerNearestNeighbor>::traceback_viterbi,
+            "traceback for Turner model",
+            "from_pos"_a=0)
         .def("compute_basepairing_probabilities", &ZukerWrapper<TurnerNearestNeighbor>::compute_basepairing_probabilities,
             "Partition function with Turner model", 
             "seq"_a, "param"_a, 
@@ -419,7 +423,9 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &ZukerWrapper<PositionalNearestNeighbor>::traceback_viterbi)
+        .def("traceback_viterbi", &ZukerWrapper<PositionalNearestNeighbor>::traceback_viterbi,
+            "traceback for positional nearest neighbor model",
+            "from_pos"_a=0)
         .def("compute_basepairing_probabilities", &ZukerWrapper<PositionalNearestNeighbor>::compute_basepairing_probabilities,
             "Partition function with positional nearest neighbor model", 
             "seq"_a, "param"_a, 
@@ -449,7 +455,9 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &ZukerWrapper<MixedNearestNeighbor>::traceback_viterbi)
+        .def("traceback_viterbi", &ZukerWrapper<MixedNearestNeighbor>::traceback_viterbi,
+            "traceback for mixed nearest neighbor model",
+            "from_pos"_a=0)
         .def("compute_basepairing_probabilities", &ZukerWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities,
             "Partition function with mixed nearest neighbor model", 
             "seq"_a, "param"_a, 
@@ -479,7 +487,9 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &NussinovWrapper<PositionalBasePairScore>::traceback_viterbi);
+        .def("traceback_viterbi", &NussinovWrapper<PositionalBasePairScore>::traceback_viterbi,
+            "traceback for positional Nussinov model",
+            "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<TurnerNearestNeighbor>>(m, "LinearFoldTurnerWrapper")
         .def(py::init<>())
@@ -497,7 +507,9 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &LinearFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi);
+        .def("traceback_viterbi", &LinearFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
+            "traceback for LinearFold-V",
+            "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<PositionalNearestNeighborBL>>(m, "LinearFoldPositionalWrapper")
         .def(py::init<>())
@@ -515,5 +527,7 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighborBL>::traceback_viterbi);
+        .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighborBL>::traceback_viterbi,
+            "traceback for LinearFold model",
+            "from_pos"_a=0);
 }
