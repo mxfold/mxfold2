@@ -8,6 +8,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <sys/time.h>
 #include <stack>
 #include <tuple>
@@ -72,11 +73,11 @@ void BeamCKYParser<P,S>::sort_keys(std::unordered_map<int, State> &map, std::vec
 #endif
 
 template < typename P, typename S >
-auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>
+auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* ref, int from_pos /*=0*/) -> std::pair<value_type, std::vector<uint32_t>>
 {
     std::vector<u_int32_t> bp(seq.size()+1, 0);
     stack<tuple<int, int, State>> stk;
-    stk.push(make_tuple(0, seq_length-1, bestC[seq_length-1]));
+    stk.push(make_tuple(0, seq_length-1-from_pos, bestC[seq_length-1-from_pos]));
 
     // verbose stuff
     value_type total_energy = .0;
@@ -326,8 +327,10 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                 } 
                 printf("wrong manner at %d, %d: manner %d\n", i, j, state.manner); fflush(stdout);
 #endif
-                assert(false);
-                
+                std::ostringstream s;
+                s << "wrong manner at " << i << ", " << j << ": manner " << state.manner;
+                throw(std::runtime_error(s.str()));
+                break;
         }
     }
     // std::cout << total_energy << std::endl;
@@ -1088,8 +1091,8 @@ bool BeamCKYParser<P,S>::allow_paired(int i, int j, const vector<int>* cons, cha
 }
 
 template < typename P, typename S >
-typename BeamCKYParser<P,S>::DecoderResult BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const vector<int>* ref) {
-
+auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const vector<int>* ref) -> DecoderResult
+{
     use_constraints = cons!=NULL;
     std::vector<int> cons2;
     if (use_constraints) cons2 = *cons;
@@ -1114,8 +1117,9 @@ typename BeamCKYParser<P,S>::DecoderResult BeamCKYParser<P,S>::parse(const strin
                 if (!_allowed_pairs[nucs[i]][nucs[cons_idx]]){
                     //printf("Constrains on non-classical base pairs (non AU, CG, GU pairs)\n");
                     //exit(1);
-                    cons2[i] = cons2[cons2[i]] = C_UNPAIRED;
                     allow_unpaired_position[i] = true;
+                    allow_unpaired_position[cons2[i]] = true;
+                    cons2[i] = cons2[cons2[i]] = C_UNPAIRED;
                 }
             }
         }
@@ -1816,9 +1820,10 @@ typename BeamCKYParser<P,S>::DecoderResult BeamCKYParser<P,S>::parse(const strin
                parse_elapsed_time, seq_length, double(viterbi.score), nos_tot,
                nos_H, nos_P, nos_M2, nos_Multi, nos_M, nos_C);
     }
-#endif
 
     fflush(stdout);
+#endif
+
 
 #if 0
     if (zuker){

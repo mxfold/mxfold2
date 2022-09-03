@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .fold.fold import AbstractFold
+# from .fold.linearfold import LinearFold
 
 
 class StructuredLoss(nn.Module):
@@ -29,21 +30,42 @@ class StructuredLoss(nn.Module):
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
         pred: torch.Tensor
         pred_s: list[str]
-        pred_model = self.model.duplicate()
-        pred, pred_s, _, param = pred_model(seq, return_param=True, reference=pairs,
+        #pred_model = self.model.duplicate()
+        pred, pred_s, _, param = self.model(seq, return_param=True, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
         ref: torch.Tensor
         ref_s: list[str]
-        ref_model = self.model.duplicate()
-        ref, ref_s, _ = ref_model(seq, param=param, constraint=pairs, reference=pairs,
+        #ref_model = self.model.duplicate()
+        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
                                 loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired,
                                 max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
+
+        # if loss.item() < 0. and type(self.model) is LinearFold:
+        #     print(f"loss: {loss.item()}")
+        #     for pos in range(1, int(torch.min(l))-1):
+        #         try: 
+        #             pred, pred_s, _ = pred_model(seq, param=param, reference=pairs,
+        #                                     only_traceback=True, from_pos=pos,
+        #                                     loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
+        #                                     loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
+        #             ref, ref_s, _ = ref_model(seq, param=param, constraint=pairs, reference=pairs,
+        #                                     from_pos=pos,
+        #                                     loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
+        #                                     loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired,
+        #                                     max_internal_length=None)
+        #             loss = (pred - ref) / l
+        #             print(f"traceback from {pos}: {loss.item()}")
+        #         except RuntimeError:
+        #             pass
+        #         if loss.item()>=0.:
+        #             break
+
         if self.verbose:
-            print("Loss = {} = ({} - {})".format(loss.item(), pred.item(), ref.item()))
+            print("Loss = {} = ({} - {})".format(loss.item(), pred.item()/l, ref.item()/l))
             print(seq)
             print(pred_s)
             print(ref_s)

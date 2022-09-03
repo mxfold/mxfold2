@@ -61,27 +61,29 @@ class Train:
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
                 loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
-                if float(loss.item()) > 0.:
-                    loss_total += loss.item()
-                    num += n_batch
-                    loss.backward()
-                    if self.verbose:
-                        for n, p in self.model.named_parameters():
-                            print(n, torch.min(p).item(), torch.max(p).item(), 
-                                torch.min(cast(torch.Tensor, p.grad)).item(), 
-                                torch.max(cast(torch.Tensor, p.grad)).item())
-                    self.optimizer.step()
+                # if float(loss.item()) < 0.:
+                #     next
+                # FIXME: loss must be positive, but this is not guaranteed for LinearFold model. Any idea?
+                loss_total += loss.item()
+                num += n_batch
+                loss.backward()
+                # if self.verbose:
+                #     for n, p in self.model.named_parameters():
+                #         print(n, torch.min(p).item(), torch.max(p).item(), 
+                #             torch.min(cast(torch.Tensor, p.grad)).item(), 
+                #             torch.max(cast(torch.Tensor, p.grad)).item())
+                self.optimizer.step()
 
-                    pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
-                    pbar.update(n_batch)
+                pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
+                pbar.update(n_batch)
 
-                    running_loss += loss.item()
-                    n_running_loss += n_batch
-                    if n_running_loss >= 100 or num >= n_dataset:
-                        running_loss /= n_running_loss
-                        if self.writer is not None:
-                            self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
-                        running_loss, n_running_loss = 0, 0
+                running_loss += loss.item()
+                n_running_loss += n_batch
+                if n_running_loss >= 100 or num >= n_dataset:
+                    running_loss /= n_running_loss
+                    if self.writer is not None:
+                        self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
+                    running_loss, n_running_loss = 0, 0
         elapsed_time = time.time() - start
         if self.verbose:
             print()
