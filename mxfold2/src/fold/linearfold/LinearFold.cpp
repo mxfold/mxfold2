@@ -1114,7 +1114,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
             int cons_idx = cons2[i];
             allow_unpaired_position[i] = cons_idx == C_ANY || cons_idx == C_UNPAIRED;
             if (cons_idx >= 0){
-                if (!_allowed_pairs[nucs[i]][nucs[cons_idx]]){
+                if (!_allowed_pairs[nucs[i]][nucs[cons_idx]] || std::abs(cons_idx - i) <= min_hairpin_loop){
                     //printf("Constrains on non-classical base pairs (non AU, CG, GU pairs)\n");
                     //exit(1);
                     allow_unpaired_position[i] = true;
@@ -2320,8 +2320,10 @@ BeamCKYParser<P,S>::BeamCKYParser(
 // instantiation
 #include "../../param/turner.h"
 #include "../../param/positional_bl.h"
+#include "../../param/mix_bl.h"
 template class LinearFold::BeamCKYParser<TurnerNearestNeighbor>;
 template class LinearFold::BeamCKYParser<PositionalNearestNeighborBL>;
+template class LinearFold::BeamCKYParser<MixedNearestNeighborBL>;
 
 // -------------------------------------------------------------
 

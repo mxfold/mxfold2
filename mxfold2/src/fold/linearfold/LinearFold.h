@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include "../fold.h"
 
-#define is_cube_pruning
+// #define is_cube_pruning
 #define is_candidate_list
 
 #define MIN_CUBE_PRUNING_SIZE 20

@@ -11,6 +11,7 @@ pybind11_add_module(interface
     param/positional_bl.cpp param/positional_bl.h 
     param/bpscore.cpp param/bpscore.h     
     param/mix.cpp param/mix.h
+    param/mix_bl.cpp param/mix_bl.h
     param/util.h
     fold/fold.cpp fold/fold.h 
     fold/zuker.cpp fold/zuker.h 

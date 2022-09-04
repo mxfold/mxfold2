@@ -104,11 +104,11 @@ class StructuredLossWithTurner(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         self.verbose = verbose
-        from . import param_turner2004
-        from .fold.rnafold import RNAFold
         if getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
             self.turner = self.model.turner
         else:
+            from . import param_turner2004
+            from .fold.rnafold import RNAFold
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
 

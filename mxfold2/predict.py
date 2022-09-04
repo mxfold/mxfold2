@@ -17,6 +17,7 @@ from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
+from .fold.mix_linearfold import MixedLinearFold
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
@@ -142,6 +143,10 @@ class Predict:
         elif args.model == 'LinearFold':
             model = LinearFold(**config)
 
+        elif args.model == 'MixedLinearFold':
+            from . import param_turner2004
+            model = MixedLinearFold(init_param=param_turner2004, **config)
+
         else:
             raise(RuntimeError('not implemented'))
 
@@ -196,8 +201,8 @@ class Predict:
                             help='output the base-pairing probability matrix to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
