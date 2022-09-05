@@ -1371,10 +1371,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
 #endif
                         // this candidate must be the best one at [i, jnext]
                         // so no need to check the score
-                        update_if_better(bestMulti[jnext][i], newscore, MANNER_MULTI_eq_MULTI_plus_U,
-                                         new_l1,
-                                         new_l2
-                        );
+                        update_if_better(bestMulti[jnext][i], newscore, MANNER_MULTI_eq_MULTI_plus_U, new_l1, new_l2);
                         ++nos_Multi;
                     }
                 }
@@ -1565,9 +1562,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
                                     score_single_without_junctionB(p, q, i, j, nuci_1, nuci, nucj, nucj1) +
                                     state.score;
 #endif
-                                update_if_better(bestP[q][p], newscore, MANNER_SINGLE,
-                                                 static_cast<char>(i - p),
-                                                 q - j);
+                                update_if_better(bestP[q][p], newscore, MANNER_SINGLE, i - p, q - j);
                                 ++nos_P;
                             }
                             q = next_pair[nucp][q];
@@ -1735,9 +1730,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
                             newscore = score_multi_unpaired(p+1, i-1) +
                                 score_multi_unpaired(j+1, q-1) + state.score;
 #endif
-                            update_if_better(bestMulti[q][p], newscore, MANNER_MULTI,
-                                             static_cast<char>(i - p),
-                                             q - j);
+                            update_if_better(bestMulti[q][p], newscore, MANNER_MULTI, i - p, q - j);
                             ++ nos_Multi;
                         }
                     }
