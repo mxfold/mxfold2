@@ -33,7 +33,8 @@ class PositionalScore(nn.Module):
 
     def score_hairpin(self, i: int, j: int) -> torch.Tensor:
         l = (j-1)-(i+1)+1
-        e = self.score_hairpin_length[min(l, len(self.score_hairpin_length)-1)].reshape(1,)
+        e = 0.
+        e += self.score_hairpin_length[min(l, len(self.score_hairpin_length)-1)].reshape(1,)
         e += self.score_base_hairpin_(i+1, j-1)
         e += self.score_mismatch_hairpin_(i, j)
         e += self.score_basepair_(i, j)
@@ -57,23 +58,25 @@ class PositionalScore(nn.Module):
         l1 = (k-1)-(i+1)+1
         l2 = (j-1)-(l+1)+1
         ls, ll = min(l1, l2), max(l1, l2)
+        e = 0.
 
         if ll==0: # stack
-            e: torch.Tensor = self.score_helix_stacking_(i, j)
+            e += self.score_helix_stacking_(i, j)
             e += self.score_helix_stacking_(l, k)
             e += self.score_basepair_(i, j)
             return e
 
         elif ls==0: # bulge
-            e = self.score_bulge_length[min(ll, len(self.score_bulge_length)-1)].reshape(1,)
+            e += self.score_bulge_length[min(ll, len(self.score_bulge_length)-1)].reshape(1,)
             e += self.score_base_internal_(i+1, k-1) + self.score_base_internal_(l+1, j-1)
             e += self.score_mismatch_internal_(i, j) + self.score_mismatch_internal_(l, k)
             e += self.score_basepair_(i, j)
             return e
 
         else: # internal loop
-            e = self.score_internal_length[min(ls+ll, len(self.score_internal_length)-1)].reshape(1,)
-            e += self.score_base_internal_(i+1, k-1) + self.score_base_internal_(l+1, j-1)
+            e += self.score_internal_length[min(ls+ll, len(self.score_internal_length)-1)].reshape(1,)
+            e += self.score_base_internal_(i+1, k-1) 
+            e += self.score_base_internal_(l+1, j-1)
             e += self.score_internal_explicit[min(ls, len(self.score_internal_explicit)-1), min(ll, len(self.score_internal_explicit)-1)].reshape(1,)
             if ls==ll:
                 e += self.score_internal_symmetry[min(ll, len(self.score_internal_symmetry)-1)].reshape(1,)
@@ -96,7 +99,8 @@ class PositionalScore(nn.Module):
 
 
     def score_helix(self, i: int, j: int, m: int) -> torch.Tensor:
-        e: torch.Tensor = self.score_helix_length_[min(m, len(self.score_helix_length_)-1)].reshape(1,)
+        e = 0.
+        e += self.score_helix_length_[min(m, len(self.score_helix_length_)-1)].reshape(1,)
         for k in range(1, m):
             e += self.score_helix_stacking_(i+(k-1), j-(k-1))
             e += self.score_helix_stacking_(j-k, i+k)
