@@ -5,6 +5,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
+// #define USE_PYSCORE // VERY SLOW!
+namespace py = pybind11;
 class PositionalNearestNeighborBL
 {
 public:
@@ -80,6 +82,17 @@ private:
     auto score_base_internal_(size_t i, size_t j) const -> ScoreType;
     auto score_base_multi_(size_t i, size_t j) const -> ScoreType;
     auto score_base_external_(size_t i, size_t j) const -> ScoreType;
+
+#ifdef USE_PYSCORE
+    py::object py_score_hairpin;
+    py::object py_score_single_loop;
+    py::object py_score_helix;
+    py::object py_score_multi_loop;
+    py::object py_score_multi_paired;
+    py::object py_score_multi_unpaired;
+    py::object py_score_external_paired;
+    py::object py_score_external_unpaired;
+#endif
 
 public:
     const u_int32_t MAX_HAIRPIN_LENGTH;

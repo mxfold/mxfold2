@@ -13,10 +13,10 @@ from .linearfoldv import LinearFoldV
 
 class MixedLinearFold(AbstractFold):
    
-    def __init__(self, init_param=None, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedLinearFold, self).__init__(interface.LinearFoldMixedWrapper())
-        self.turner = LinearFoldV(init_param=init_param)
-        self.positional = LinearFold(max_helix_length=max_helix_length, **kwargs)
+    def __init__(self, init_param=None, max_helix_length: int = 30, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
+        super(MixedLinearFold, self).__init__(interface.LinearFoldMixedWrapper(beam_size=beam_size))
+        self.turner = LinearFoldV(init_param=init_param, beam_size=beam_size)
+        self.positional = LinearFold(max_helix_length=max_helix_length, beam_size=beam_size, **kwargs)
         self.max_helix_length = max_helix_length
 
     def make_param(self, seq: list[str]) -> list[dict[str, dict[str, Any]]]:

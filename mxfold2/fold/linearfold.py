@@ -159,10 +159,9 @@ class PositionalScore(nn.Module):
 
 
 class LinearFold(AbstractFold):
-    def __init__(self, emb_size: int = 4, **kwargs: dict[str, Any]):
-        super(LinearFold, self).__init__(interface.LinearFoldPositionalWrapper())
-        self.emb_size = emb_size
-        bilinears = [ nn.Bilinear(emb_size, emb_size, 1) ] * 3
+    def __init__(self, bl_size: int = 4, beam_size: int = 100, **kwargs: dict[str, Any]):
+        super(LinearFold, self).__init__(interface.LinearFoldPositionalWrapper(beam_size=beam_size))
+        bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
         self.bilinears = nn.ModuleDict({
             'helix_stacking': bilinears[0],
             'mismatch_hairpin': bilinears[1],
@@ -183,7 +182,7 @@ class LinearFold(AbstractFold):
             'score_internal_asymmetry': LengthLayer(29),
             'score_helix_length': LengthLayer(31)
         })
-        self.net = NeuralNet1D(n_out=emb_size, **kwargs)
+        self.net = NeuralNet1D(n_out=bl_size, **kwargs)
 
 
     def make_param(self, seq: list[str]):

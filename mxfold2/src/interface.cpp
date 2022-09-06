@@ -260,7 +260,7 @@ template < class ParamClass >
 class LinearFoldWrapper : public FoldWrapper
 {
 public:
-    LinearFoldWrapper() {}
+    LinearFoldWrapper(int beam_size = 100) : beam_size_(beam_size) {}
 
     void set_param(const std::string& seq, py::object pa,
         int beam, int min_hairpin, int max_internal, float pos_paired, float neg_paired)
@@ -293,13 +293,13 @@ public:
         }
     }
     
-    auto compute_viterbi(const std::string& seq, py::object pa, int beam,
+    auto compute_viterbi(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
             py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
     {
-        set_param(seq, pa, beam, min_hairpin, max_internal,pos_paired, neg_paired);
+        set_param(seq, pa, beam_size_, min_hairpin, max_internal,pos_paired, neg_paired);
         set_options(allowed_pairs, constraint, reference);
         auto r = f_->parse(seq_, cons_.size() > 0 ? &cons_: NULL, ref_.size() > 0 ? &ref_ : NULL);
         return r.score;
@@ -369,6 +369,7 @@ private:
     std::unique_ptr<LinearFold::BeamCKYParser<ParamClass>> f_;
     std::vector<int> cons_;
     std::vector<int> ref_;
+    int beam_size_;
 };
 
 PYBIND11_MODULE(interface, m)
@@ -493,11 +494,10 @@ PYBIND11_MODULE(interface, m)
             "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<TurnerNearestNeighbor>>(m, "LinearFoldTurnerWrapper")
-        .def(py::init<>())
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
         .def("compute_viterbi", &LinearFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
             "predict RNA secondary structure with LinearFold-V Model", 
             "seq"_a, "param"_a, 
-            "beam"_a=100,
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
             "max_helix_length"_a=30,
@@ -513,11 +513,10 @@ PYBIND11_MODULE(interface, m)
             "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<PositionalNearestNeighborBL>>(m, "LinearFoldPositionalWrapper")
-        .def(py::init<>())
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
         .def("compute_viterbi", &LinearFoldWrapper<PositionalNearestNeighborBL>::compute_viterbi, 
             "predict RNA secondary structure with LinearFold Model", 
             "seq"_a, "param"_a, 
-            "beam"_a=100,
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
             "max_helix_length"_a=30,
@@ -533,11 +532,10 @@ PYBIND11_MODULE(interface, m)
             "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<MixedNearestNeighborBL>>(m, "LinearFoldMixedWrapper")
-        .def(py::init<>())
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
         .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighborBL>::compute_viterbi, 
             "predict RNA secondary structure with Mixed LinearFold Model", 
             "seq"_a, "param"_a, 
-            "beam"_a=100,
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
             "max_helix_length"_a=30,
