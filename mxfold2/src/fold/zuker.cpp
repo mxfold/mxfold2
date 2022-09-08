@@ -1178,7 +1178,11 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
 #include "../param/turner.h"
 #include "../param/positional.h"
 #include "../param/mix.h"
+#include "../param/positional_bl.h"
+#include "../param/mix_bl.h"
 
 template class Zuker<TurnerNearestNeighbor>;
 template class Zuker<PositionalNearestNeighbor>;
 template class Zuker<MixedNearestNeighbor>;
+template class Zuker<PositionalNearestNeighborBL>;
+template class Zuker<MixedNearestNeighborBL>;

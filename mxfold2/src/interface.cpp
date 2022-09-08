@@ -474,6 +474,68 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0);
 
+    py::class_<ZukerWrapper<PositionalNearestNeighborBL>>(m, "ZukerPositionalBLWrapper")
+        .def(py::init<>())
+        .def("compute_viterbi", &ZukerWrapper<PositionalNearestNeighborBL>::compute_viterbi, 
+            "predict RNA secondary structure with positional nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
+        .def("traceback_viterbi", &ZukerWrapper<PositionalNearestNeighborBL>::traceback_viterbi,
+            "traceback for positional nearest neighbor model")
+        .def("compute_basepairing_probabilities", &ZukerWrapper<PositionalNearestNeighborBL>::compute_basepairing_probabilities,
+            "Partition function with positional nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0);
+
+    py::class_<ZukerWrapper<MixedNearestNeighborBL>>(m, "ZukerMixedBLWrapper")
+        .def(py::init<>())
+        .def("compute_viterbi", &ZukerWrapper<MixedNearestNeighborBL>::compute_viterbi, 
+            "predict RNA secondary structure with mixed nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
+        .def("traceback_viterbi", &ZukerWrapper<MixedNearestNeighborBL>::traceback_viterbi,
+            "traceback for mixed nearest neighbor model")
+        .def("compute_basepairing_probabilities", &ZukerWrapper<MixedNearestNeighborBL>::compute_basepairing_probabilities,
+            "Partition function with mixed nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0);
+
     py::class_<NussinovWrapper<PositionalBasePairScore>>(m, "NussinovWrapper")
         .def(py::init<>())
         .def("compute_viterbi", &NussinovWrapper<PositionalBasePairScore>::compute_viterbi, 
@@ -549,4 +611,40 @@ PYBIND11_MODULE(interface, m)
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighborBL>::traceback_viterbi,
             "traceback for Mixed LinearFold model",
             "from_pos"_a=0);
+
+    py::class_<LinearFoldWrapper<PositionalNearestNeighbor>>(m, "LinearFoldPositional2DWrapper")
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
+        .def("compute_viterbi", &LinearFoldWrapper<PositionalNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
+        .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighbor>::traceback_viterbi,
+            "traceback for LinearFold model");
+
+    py::class_<LinearFoldWrapper<MixedNearestNeighbor>>(m, "MixedLinearFoldPositional2DWrapper")
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
+        .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
+        .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
+            "traceback for LinearFold model");
 }

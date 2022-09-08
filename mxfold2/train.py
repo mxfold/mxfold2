@@ -24,6 +24,10 @@ from .fold.mix import MixedFold
 from .fold.mix_linearfold import MixedLinearFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
+from .fold.zuker_bl import ZukerFoldBL
+from .fold.mix_bl import MixedFoldBL
+from .fold.linearfold2d import LinearFold2D
+from .fold.mix_linearfold2d import MixedLinearFold2D
 from .loss import StructuredLoss, StructuredLossWithTurner
 
 try:
@@ -174,12 +178,26 @@ class Train:
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
+        elif args.model == 'ZukerBL':
+            model = ZukerFoldBL(**config)
+
+        elif args.model == 'MixedBL':
+            from . import param_turner2004
+            model = MixedFoldBL(init_param=param_turner2004, **config)
+
         elif args.model == 'LinearFold':
             model = LinearFold(**config)
 
         elif args.model == 'MixedLinearFold':
             from . import param_turner2004
             model = MixedLinearFold(init_param=param_turner2004, **config)
+
+        elif args.model == 'LinearFold2D':
+            model = LinearFold2D(**config)
+
+        elif args.model == 'MixedLinearFold2D':
+            from . import param_turner2004
+            model = MixedLinearFold2D(init_param=param_turner2004, **config)
 
         else:
             raise(RuntimeError('not implemented'))
@@ -343,8 +361,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
