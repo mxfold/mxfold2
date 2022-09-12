@@ -148,7 +148,7 @@ class Predict:
         elif args.model == 'ZukerBL':
             model = ZukerFoldBL(**config)
 
-        elif args.model == 'MixBL':
+        elif args.model == 'MixedBL':
             from . import param_turner2004
             model = MixedFoldBL(init_param=param_turner2004, **config)
 
