@@ -17,10 +17,15 @@ from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
+from .fold.mix_linearfold import MixedLinearFold
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
+from .fold.zuker_bl import ZukerFoldBL
+from .fold.mix_bl import MixedFoldBL
+from .fold.linearfold2d import LinearFold2D
+from .fold.mix_linearfold2d import MixedLinearFold2D
 
 
 class Predict:
@@ -117,6 +122,7 @@ class Predict:
             'num_att': args.num_att,
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
+            'bl_size': args.bl_size,
         }
 
         if args.model == 'Zuker':
@@ -139,8 +145,26 @@ class Predict:
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
+        elif args.model == 'ZukerBL':
+            model = ZukerFoldBL(**config)
+
+        elif args.model == 'MixedBL':
+            from . import param_turner2004
+            model = MixedFoldBL(init_param=param_turner2004, **config)
+
         elif args.model == 'LinearFold':
             model = LinearFold(**config)
+
+        elif args.model == 'MixedLinearFold':
+            from . import param_turner2004
+            model = MixedLinearFold(init_param=param_turner2004, **config)
+
+        elif args.model == 'LinearFold2D':
+            model = LinearFold2D(**config)
+
+        elif args.model == 'MixedLinearFold2D':
+            from . import param_turner2004
+            model = MixedLinearFold2D(init_param=param_turner2004, **config)
 
         else:
             raise(RuntimeError('not implemented'))
@@ -196,8 +220,8 @@ class Predict:
                             help='output the base-pairing probability matrix to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
@@ -235,5 +259,7 @@ class Predict:
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--bl-size', type=int, default=4,
+                        help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))

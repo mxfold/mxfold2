@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 import time
+import logging
 from argparse import Namespace
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -20,8 +21,13 @@ from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
+from .fold.mix_linearfold import MixedLinearFold
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
+from .fold.zuker_bl import ZukerFoldBL
+from .fold.mix_bl import MixedFoldBL
+from .fold.linearfold2d import LinearFold2D
+from .fold.mix_linearfold2d import MixedLinearFold2D
 from .loss import StructuredLoss, StructuredLossWithTurner
 
 try:
@@ -34,7 +40,6 @@ class Train:
     step: int = 0
     train_loader: Optional[DataLoader]
     test_loader: Optional[DataLoader]
-    verbose: bool
     optimizer: optim.Optimizer
     model: AbstractFold
     loss_fn: StructuredLoss | StructuredLossWithTurner
@@ -54,10 +59,8 @@ class Train:
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs in self.train_loader:
-                if self.verbose:
-                    print()
-                    print("Step: {}, {}".format(self.step, fnames))
-                    self.step += 1
+                logging.info(f"Step: {self.step}, {fnames}")
+                self.step += 1
                 n_batch = len(seqs)
                 self.optimizer.zero_grad()
                 loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
@@ -85,8 +88,6 @@ class Train:
                         self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
                     running_loss, n_running_loss = 0, 0
         elapsed_time = time.time() - start
-        if self.verbose:
-            print()
         print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
@@ -154,6 +155,7 @@ class Train:
             'num_att': args.num_att,
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
+            'bl_size': args.bl_size,
         }
 
         if args.model == 'Zuker':
@@ -176,8 +178,26 @@ class Train:
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
+        elif args.model == 'ZukerBL':
+            model = ZukerFoldBL(**config)
+
+        elif args.model == 'MixedBL':
+            from . import param_turner2004
+            model = MixedFoldBL(init_param=param_turner2004, **config)
+
         elif args.model == 'LinearFold':
             model = LinearFold(**config)
+
+        elif args.model == 'MixedLinearFold':
+            from . import param_turner2004
+            model = MixedLinearFold(init_param=param_turner2004, **config)
+
+        elif args.model == 'LinearFold2D':
+            model = LinearFold2D(**config)
+
+        elif args.model == 'MixedLinearFold2D':
+            from . import param_turner2004
+            model = MixedLinearFold2D(init_param=param_turner2004, **config)
 
         else:
             raise(RuntimeError('not implemented'))
@@ -203,12 +223,12 @@ class Train:
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> StructuredLoss | StructuredLossWithTurner:
         if loss_func == 'hinge':
-            return StructuredLoss(model, verbose=self.verbose,
+            return StructuredLoss(model, 
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight)
         if loss_func == 'hinge_mix':
-            return StructuredLossWithTurner(model, verbose=self.verbose,
+            return StructuredLossWithTurner(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
@@ -232,7 +252,8 @@ class Train:
 
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         self.disable_progress_bar = args.disable_progress_bar
-        self.verbose = args.verbose
+        loglevel = 'INFO' if args.verbose else args.loglevel
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=getattr(logging, loglevel, None))
         self.writer = None
         if args.log_dir is not None and 'SummaryWriter' in globals():
             self.writer = SummaryWriter(log_dir=args.log_dir)
@@ -315,6 +336,8 @@ class Train:
                             help='disable the progress bar in training')
         subparser.add_argument('--verbose', action='store_true',
                             help='enable verbose outputs for debugging')
+        subparser.add_argument('--loglevel', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
+                            default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
 
         gparser = subparser.add_argument_group("Optimizer setting")
         gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD'), default='AdamW')
@@ -338,8 +361,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV')")
+        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
@@ -377,5 +400,7 @@ class Train:
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--bl-size', type=int, default=4,
+                        help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
 
         subparser.set_defaults(func = lambda args, conf: Train().run(args, conf))

@@ -44,6 +44,17 @@ PositionalNearestNeighborBL(const std::string& seq, pybind11::object obj) :
     MAX_INTERNAL_EXPLICIT_LENGTH(score_internal_explicit_.shape(0)-1),
     MAX_HELIX_LENGTH(score_helix_length_.shape(0)-1),
     cnt_(py::cast<py::dict>(obj)["cnt"])
+#ifdef USE_PYSCORE
+    ,
+    py_score_hairpin(cnt_.attr("score_hairpin")),
+    py_score_single_loop(cnt_.attr("score_single_loop")),
+    py_score_helix(cnt_.attr("score_helix")),
+    py_score_multi_loop(cnt_.attr("score_multi_loop")),
+    py_score_multi_paired(cnt_.attr("score_multi_paired")),
+    py_score_multi_unpaired(cnt_.attr("score_multi_unpaired")),
+    py_score_external_paired(cnt_.attr("score_external_paired")),
+    py_score_external_unpaired(cnt_.attr("score_external_unpaired"))
+#endif
 {
 
 }
@@ -136,6 +147,10 @@ auto
 PositionalNearestNeighborBL::
 score_hairpin(size_t i, size_t j) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_hairpin(i, j);
+    return py::cast<float>(e);
+#else
     const auto l = (j-1)-(i+1)+1;
     auto e = 0.;
 
@@ -145,6 +160,7 @@ score_hairpin(size_t i, size_t j) const -> ScoreType
     e += score_basepair_(i, j);
 
     return e;
+#endif
 }
 
 void
@@ -158,6 +174,10 @@ auto
 PositionalNearestNeighborBL::
 score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_single_loop(i, j, k, l);
+    return py::cast<float>(e);
+#else
     const auto l1 = (k-1)-(i+1)+1;
     const auto l2 = (j-1)-(l+1)+1;
     const auto [ls, ll] = std::minmax(l1, l2);
@@ -193,6 +213,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     }
 
     return e;
+#endif
 }
 
 void
@@ -206,6 +227,10 @@ auto
 PositionalNearestNeighborBL::
 score_helix(size_t i, size_t j, size_t m) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_helix(i, j, m);
+    return py::cast<float>(e);
+#else
     auto e = ScoreType(0.);
     for (auto k=1; k<m; k++)
     {
@@ -215,6 +240,7 @@ score_helix(size_t i, size_t j, size_t m) const -> ScoreType
     }
     e += score_helix_length_[std::min<u_int32_t>(m, MAX_HELIX_LENGTH)];
     return e;
+#endif
 }
 
 void
@@ -228,7 +254,12 @@ auto
 PositionalNearestNeighborBL::
 score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_multi_loop(i, j);
+    return py::cast<float>(e);
+#else
     return score_mismatch_multi_(i, j) + score_basepair_(i, j);
+#endif
 }
 
 void
@@ -242,7 +273,12 @@ auto
 PositionalNearestNeighborBL::
 score_multi_paired(size_t i, size_t j) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_multi_paired(i, j);
+    return py::cast<float>(e);
+#else
     return score_mismatch_multi_(j, i);
+#endif
 }
 
 void
@@ -256,7 +292,12 @@ auto
 PositionalNearestNeighborBL::
 score_multi_unpaired(size_t i, size_t j) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_multi_unpaired(i, j);
+    return py::cast<float>(e);
+#else
     return score_base_multi_(i, j);
+#endif
 }
 
 void
@@ -270,7 +311,12 @@ auto
 PositionalNearestNeighborBL::
 score_external_paired(size_t i, size_t j) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_external_paired(i, j);
+    return py::cast<float>(e);
+#else
     return score_mismatch_external_(j, i);
+#endif
 }
 
 void
@@ -284,7 +330,12 @@ auto
 PositionalNearestNeighborBL::
 score_external_unpaired(size_t i, size_t j) const -> ScoreType
 {
+#ifdef USE_PYSCORE
+    auto e = py_score_external_unpaired(i, j);
+    return py::cast<float>(e);
+#else
     return score_base_external_(i, j);
+#endif
 }
 
 void

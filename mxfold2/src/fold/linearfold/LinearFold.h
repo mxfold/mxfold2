@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include "../fold.h"
 
-#define is_cube_pruning
+// #define is_cube_pruning
 #define is_candidate_list
 
 #define MIN_CUBE_PRUNING_SIZE 20
@@ -68,7 +68,7 @@ struct State {
     union TraceInfo {
         int split;
         struct {
-            char l1;
+            int l1;
             int l2;
         } paddings;
     };
@@ -86,7 +86,7 @@ struct State {
         score = score_; manner = manner_; trace.split = split_;
     }
 
-    void set(value_type score_, Manner manner_, char l1_, int l2_) {
+    void set(value_type score_, Manner manner_, int l1_, int l2_) {
         score = score_; manner = manner_;
         trace.paddings.l1 = l1_; trace.paddings.l2 = l2_;
     }
@@ -207,7 +207,8 @@ private:
             state.set(newscore, manner, split);
     };
 
-    void update_if_better(State &state, value_type newscore, Manner manner, char l1, int l2) {
+    void update_if_better(State &state, value_type newscore, Manner manner, int l1, int l2) {
+        assert(l1>=0); assert(l2>=0);
         if (state.score < newscore || state.manner == MANNER_NONE)
             state.set(newscore, manner, l1, l2);
     };

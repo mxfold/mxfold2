@@ -11,6 +11,7 @@ ext_modules = [
             "mxfold2/src/param/positional_bl.cpp", #param/positional_bl.h 
             "mxfold2/src/param/bpscore.cpp", #param/bpscore.h     
             "mxfold2/src/param/mix.cpp", #param/mix.h
+            "mxfold2/src/param/mix_bl.cpp", #param/mix_bl.h
             #"mxfold2/src/param/util.h"
             "mxfold2/src/fold/fold.cpp", #fold/fold.h 
             "mxfold2/src/fold/zuker.cpp", #fold/zuker.h 
