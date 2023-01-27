@@ -102,7 +102,7 @@ class Train:
 
         elapsed_time = time.time() - start
         if self.writer is not None:
-            self.writer.add_scalar("test/loss", epoch * n_dataset, loss_total / num)
+            self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
@@ -147,6 +147,7 @@ class Train:
             'num_att': args.num_att,
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
+            'sym_opts': args.paired_opt,
         }
 
         if args.model == 'Zuker':
@@ -367,5 +368,6 @@ class Train:
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
 
         subparser.set_defaults(func = lambda args, conf: Train().run(args, conf))

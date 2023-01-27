@@ -10,7 +10,7 @@ default_conf = os.path.join(os.path.dirname(__file__), 'models', 'TrainSetAB.con
 
 def main():
     parser = ArgumentParser(
-        description='RNA secondary structure prediction using deep learning with thermodynamic integrations',
+        description='RNA secondary structure prediction using deep learning with thermodynamic integration',
         fromfile_prefix_chars='@',
         add_help=True)
     subparser = parser.add_subparsers(title='Sub-commands')

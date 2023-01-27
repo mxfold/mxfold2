@@ -123,7 +123,8 @@ class PairedLayer(nn.Module):
             ksize: tuple[int, ...] = (), 
             fc_layers: tuple[int, ...] = (), 
             dropout_rate: float = 0.0, 
-            exclude_diag: bool = True, resnet: bool = True) -> None:
+            exclude_diag: bool = True, resnet: bool = True, 
+            sym_opts: str = "0_1_1") -> None:
         super(PairedLayer, self).__init__()
 
         self.resnet = resnet        
@@ -152,8 +153,10 @@ class PairedLayer(nn.Module):
         fc += [ nn.Linear(n_in, n_out) ]
         self.fc = nn.Sequential(*fc)
 
+        self.forward = getattr(self, f'forward_{sym_opts}')
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+    def forward_0_1_1(self, x: torch.Tensor) -> torch.Tensor:
         diag = 1 if self.exclude_diag else 0
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
@@ -167,6 +170,38 @@ class PairedLayer(nn.Module):
         x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
         x_l = torch.tril(x_u.view(B, -1, N, N), diagonal=-1)
         x = x_u + x_l # (B, n_out, N, N)
+        x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
+        x = self.fc(x)
+        return x.view(B, N, N, -1) # (B, N, N, n_out)
+
+    def forward_fixed(self, x: torch.Tensor) -> torch.Tensor:
+        diag = 1 if self.exclude_diag else 0
+        B, N, _, C = x.shape
+        x = x.permute(0, 3, 1, 2)
+        x_u = torch.triu(x.view(B*C, N, N), diagonal=diag).view(B, C, N, N)
+        x_l = torch.tril(x.view(B*C, N, N), diagonal=-1).view(B, C, N, N)
+        x = torch.cat((x_u, x_l), dim=0).view(B*2, C, N, N)
+        for conv in self.conv:
+            x_a = conv(x)
+            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
+        x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
+        x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
+        x_l = torch.tril(x_l.view(B, -1, N, N), diagonal=-1)
+        x = x_u + x_l # (B, n_out, N, N)
+        x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
+        x = self.fc(x)
+        return x.view(B, N, N, -1) # (B, N, N, n_out)
+
+    def forward_symmetric(self, x: torch.Tensor) -> torch.Tensor:
+        B, N, _, C = x.shape
+        x = x.permute(0, 3, 1, 2)
+        x = torch.triu(x.view(B*C, N, N), diagonal=1).view(B, C, N, N)
+        for conv in self.conv:
+            x_a = conv(x)
+            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B, C, N, N)
+        x_u = torch.triu(x, diagonal=1)
+        x_l = torch.transpose(x_u, 2, 3)
+        x = x_u + x_l # (B, C, N, N)
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
         x = self.fc(x)
         return x.view(B, N, N, -1) # (B, N, N, n_out)
@@ -294,7 +329,8 @@ class NeuralNet(nn.Module):
             self.fc_paired = PairedLayer(n_in_paired, n_out_paired_layers,
                                     filters=num_paired_filters, ksize=paired_filter_size,
                                     exclude_diag=exclude_diag,
-                                    fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
+                                    fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
+                                    sym_opts=kwargs['sym_opts'])
             if n_out_unpaired_layers > 0:
                 self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
                                         filters=num_paired_filters, ksize=paired_filter_size,

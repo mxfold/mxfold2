@@ -1,31 +1,31 @@
 [tool.poetry]
 name = "mxfold2"
-version = "0.1.1"
-description = "RNA secondary structure prediction using deep neural networks with thermodynamic integrations"
-authors = ["Kengo Sato <satoken@bio.keio.ac.jp>"]
-repository = "https://github.com/keio-bioinformatics/mxfold2"
+version = "0.1.2"
+description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
+authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
+repository = "https://github.com/mxfold/mxfold2"
 readme = "README.md"
 license = "MIT"
 build = "build.py"
 
 [tool.poetry.dependencies]
-python = "^3.7"
-numpy = "^1.18"
-torch = "^1.4"
-torchvision = "^0"
-tqdm = "^4.40"
-wheel = "^0.36.0"
-pybind11 = "^2.6.2"
+python = "^3.8"
+numpy = "*"
+torch = "^1.13"
+torchvision = "*"
+tqdm = "*"
+wheel = "*"
+pybind11 = "^2.10"
 
 [tool.poetry.dev-dependencies]
-pylint = "^2.5.3"
-jupyter = "^1.0.0"
-pandas = "^1.1.0"
-tensorboard = "^2.3.0"
+pylint = "*"
+jupyter = "*"
+pandas = "*"
+tensorboard = "*"
 
 [tool.poetry.scripts]
 mxfold2 = "mxfold2.__main__:main"
 
 [build-system]
-requires = ["poetry>=0.12", "setuptools", "wheel"]
+requires = ["poetry>=1.2", "setuptools", "wheel"]
 build-backend = "poetry.masonry.api"

@@ -108,6 +108,7 @@ class Predict:
             'num_att': args.num_att,
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
+            'sym_opts': args.paired_opt,
         }
 
         if args.model == 'Zuker':
@@ -223,5 +224,6 @@ class Predict:
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
                             help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))
