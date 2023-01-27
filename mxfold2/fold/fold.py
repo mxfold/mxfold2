@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, cast 
+import copy
+from typing import Any, Callable, Optional, cast
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
 
 class AbstractFold(nn.Module):
-    def __init__(self, 
-            predict: Callable[..., tuple[float, str, list[int]]], 
-            partfunc: Callable[..., tuple[float, np.ndarray]]) -> None:
+    def __init__(self, fold_wrapper) -> None:
         super(AbstractFold, self).__init__()
-        self.predict = predict
-        self.partfunc = partfunc
+        self.fold_wrapper = fold_wrapper
+
+
+    def duplicate(self) -> AbstractFold:
+        dup = copy.copy(self)
+        dup.fold_wrapper = type(self.fold_wrapper)()
+        return dup
 
 
     def clear_count(self, param: dict[str, Any]) -> dict[str, Any]:
@@ -37,11 +42,20 @@ class AbstractFold(nn.Module):
     def make_param(self, seq) -> list[dict[str, Any]]:
         raise(RuntimeError('not implemented'))
 
+    def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
+            param_on_cpu = { k: v.to("cpu") for k, v in param.items() }
+            param_on_cpu = self.clear_count(param_on_cpu)
+            return param_on_cpu
+
+    def detect_device(self, param):
+        return next(iter(param.values())).device
 
     def forward(self, seq: list[str], 
             return_param: bool = False,
             param: Optional[list[dict[str, Any]]] = None, 
             return_partfunc: bool = False,
+            only_traceback: bool = False,
+            from_pos: int = 0,
             max_internal_length: int = 30, max_helix_length: int = 30, 
             constraint: Optional[list[torch.Tensor]] = None, 
             reference: Optional[list[torch.Tensor]] = None,
@@ -54,19 +68,42 @@ class AbstractFold(nn.Module):
         pfs: list[float] = []
         bpps: list[np.ndarray] = []
         for i in range(len(seq)):
-            param_on_cpu = { k: v.to("cpu") for k, v in param[i].items() }
-            param_on_cpu = self.clear_count(param_on_cpu)
+            param_on_cpu = self.make_param_on_cpu(param[i])
+            if not only_traceback:
+                # constraint_i = reference_i = None
+                # if constraint is not None:
+                #     constraint_i = constraint[i].tolist()
+                #     if from_pos > 0:
+                #         assert(len(seq[i])+1==len(constraint_i))
+                #         max_pos = len(seq[i])-from_pos
+                #         for p in range(len(constraint_i)):
+                #             if p<=max_pos and constraint_i[p]<=max_pos:
+                #                 pass
+                #             else:
+                #                 constraint_i[p] = 0
+                # if reference is not None:
+                #     reference_i = reference[i].tolist()
+                #     if from_pos > 0:
+                #         assert(len(seq[i])+1==len(reference_i))
+                #         max_pos = len(seq[i])-from_pos
+                #         for p in range(len(reference_i)):
+                #             if p<=max_pos and reference_i[p]<=max_pos:
+                #                 pass
+                #             else:
+                #                 reference_i[p] = 0
+                with torch.no_grad():
+                    self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
+                                max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                                max_helix_length=max_helix_length,
+                                allowed_pairs="aucggu",
+                                constraint=constraint[i].tolist() if constraint is not None else None, 
+                                reference=reference[i].tolist() if reference is not None else None, 
+                                loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                                loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+            v, pred, pair = self.fold_wrapper.traceback_viterbi(from_pos)
             with torch.no_grad():
-                v, pred, pair = self.predict(seq[i], param_on_cpu,
-                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                            max_helix_length=max_helix_length,
-                            allowed_pairs="aucggu",
-                            constraint=constraint[i].tolist() if constraint is not None else None, 
-                            reference=reference[i].tolist() if reference is not None else None, 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
                 if return_partfunc:
-                    pf, bpp = self.partfunc(seq[i], param_on_cpu,
+                    pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                                 max_helix_length=max_helix_length,
                                 allowed_pairs="aucggu",
@@ -82,7 +119,7 @@ class AbstractFold(nn.Module):
             preds.append(pred)
             pairs.append(pair)
 
-        device = next(iter(param[0].values())).device
+        device = self.detect_device(param[0])
         ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss, device=device)
         if return_param:
             return ss, preds, pairs, param

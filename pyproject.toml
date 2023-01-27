@@ -22,10 +22,16 @@ pylint = "*"
 jupyter = "*"
 pandas = "*"
 tensorboard = "*"
+torch-tb-profiler = "*"
 
 [tool.poetry.scripts]
 mxfold2 = "mxfold2.__main__:main"
 
+# [[tool.poetry.source]]
+# name = "pytorch-cu116"
+# url = "https://download.pytorch.org/whl/cu116/"
+# secondary = true
+
 [build-system]
-requires = ["poetry>=1.2", "setuptools", "wheel"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

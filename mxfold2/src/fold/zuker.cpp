@@ -305,7 +305,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #endif
     }
 
-    return Fv_[1] + loss_const;
+    return Fv_[1] /*+ loss_const*/;
 }
 
 template < typename P, typename S >
@@ -668,7 +668,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
         }
     }
 
-    return std::make_pair(e + loss_const, pair);
+    return std::make_pair(e /*+ loss_const*/, pair);
 }
 
 template <typename S>
@@ -860,7 +860,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
         }
     }
 
-    return Fi_[1] + loss_const;
+    return Fi_[1] /*+ loss_const*/;
 }
 
 template < typename P, typename S >
@@ -1178,7 +1178,11 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
 #include "../param/turner.h"
 #include "../param/positional.h"
 #include "../param/mix.h"
+#include "../param/positional_bl.h"
 
 template class Zuker<TurnerNearestNeighbor>;
 template class Zuker<PositionalNearestNeighbor>;
 template class Zuker<MixedNearestNeighbor>;
+template class Zuker<PositionalNearestNeighborBL>;
+template class Zuker<MixedNearestNeighborBL>;
+template class Zuker<MixedNearestNeighbor1D>;

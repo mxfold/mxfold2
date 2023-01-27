@@ -3,15 +3,18 @@
 #include <pybind11/pybind11.h>
 #include "turner.h"
 #include "positional.h"
+#include "positional_bl.h"
+#include "positional_1d.h"
 
-class MixedNearestNeighbor
+template <class T, class P>
+class MixedNearestNeighborTempl
 {
     public:
         using ScoreType = float;
 
     public:
-        MixedNearestNeighbor(const std::string& seq, pybind11::object obj);
-        ~MixedNearestNeighbor() {};
+        MixedNearestNeighborTempl(const std::string& seq, pybind11::object obj);
+        ~MixedNearestNeighborTempl() {};
 
         auto score_hairpin(size_t i, size_t j) const -> ScoreType;
         auto score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType;
@@ -34,6 +37,10 @@ class MixedNearestNeighbor
         void count_external_unpaired(size_t i, size_t j, ScoreType v);
 
     private:
-        TurnerNearestNeighbor turner_;
-        PositionalNearestNeighbor positional_;
+        T turner_;
+        P positional_;
 };
+
+using MixedNearestNeighbor = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor>;
+using MixedNearestNeighborBL = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighborBL>;
+using MixedNearestNeighbor1D = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor1D>;

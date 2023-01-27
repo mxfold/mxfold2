@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-import numpy as np
 import torch
 
 from .. import interface
 from .fold import AbstractFold
 from .rnafold import RNAFold
-from .zuker import ZukerFold
+from .zuker1d import ZukerFold1D
 
 
-class MixedFold(AbstractFold):
-    def __init__(self, init_param=None, model_type: str = 'M', 
+class MixedFold1D(AbstractFold):
+    def __init__(self, init_param=None,
         max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedFold, self).__init__(interface.ZukerMixedWrapper())
+        super(MixedFold1D, self).__init__(interface.ZukerMixed1DWrapper())
         self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
+        self.zuker = ZukerFold1D(max_helix_length=max_helix_length, **kwargs)
         self.max_helix_length = max_helix_length
 
 

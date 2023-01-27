@@ -1,21 +1,20 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the README at:
-// https://github.com/microsoft/vscode-dev-containers/tree/v0.163.1/containers/python-3-miniconda
+// https://github.com/microsoft/vscode-dev-containers/tree/v0.234.0/containers/python-3-miniconda
 {
-	"name": "Miniconda (Python 3)",
+	"name": "MXfold2",
 	"build": { 
 		"context": "..",
 		"dockerfile": "Dockerfile",
 		"args": {
-			"CUDA_VARIANT": "10.2-cudnn8-devel",
-			"INSTALL_NODE": "true",
 			"NODE_VERSION": "lts/*"
 		}
 	},
 
+	"runArgs": ["--gpus", "all"],
+
 	// Set *default* container specific settings.json values on container create.
 	"settings": { 
-		"terminal.integrated.shell.linux": "/bin/bash",
-		"python.pythonPath": "./.venv/bin/python",
+		"python.defaultInterpreterPath": "/opt/conda/bin/python",
 		"python.linting.enabled": true,
 		"python.linting.pylintEnabled": true,
 		"python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
@@ -26,14 +25,18 @@
 		"python.linting.mypyPath": "/usr/local/py-utils/bin/mypy",
 		"python.linting.pycodestylePath": "/usr/local/py-utils/bin/pycodestyle",
 		"python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
-		"python.linting.pylintPath": "/usr/local/py-utils/bin/pylint"
+		"python.linting.pylintPath": "/usr/local/py-utils/bin/pylint",
+		"cmake.sourceDirectory": "${workspaceFolder}/mxfold2/src",
+		"cmake.configureArgs": [ "-DCMAKE_PREFIX_PATH=/opt/conda/lib/python3.10/site-packages/pybind11" ]
 	},
 
 	// Add the IDs of extensions you want installed when the container is created.
 	"extensions": [
 		"ms-python.python",
 		"ms-python.vscode-pylance",
-		"ms-vscode.cpptools-extension-pack",
+		"ms-vscode.cpptools",
+		"twxs.cmake",
+		"ms-vscode.cmake-tools"
 	],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
@@ -41,10 +44,8 @@
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "python --version",
-	"postCreateCommand": "git submodule update --init --recursive && poetry config virtualenvs.in-project true && poetry install",
+	"postCreateCommand": "poetry config virtualenvs.create false && poetry install",
 
-	"runArgs": ["--gpus", "all"],
-
-	// Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
+	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode"
 }
