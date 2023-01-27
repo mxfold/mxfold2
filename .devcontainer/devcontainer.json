@@ -1,51 +1,30 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the README at:
-// https://github.com/microsoft/vscode-dev-containers/tree/v0.234.0/containers/python-3-miniconda
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
-	"name": "MXfold2",
-	"build": { 
-		"context": "..",
-		"dockerfile": "Dockerfile",
-		"args": {
-			"NODE_VERSION": "lts/*"
-		}
+	"name": "C++",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/nvidia-cuda:1": {},
+		"ghcr.io/devcontainers/features/python:1": {},
+		"ghcr.io/devcontainers-contrib/features/poetry:2": {}
 	},
 
-	"runArgs": ["--gpus", "all"],
-
-	// Set *default* container specific settings.json values on container create.
-	"settings": { 
-		"python.defaultInterpreterPath": "/opt/conda/bin/python",
-		"python.linting.enabled": true,
-		"python.linting.pylintEnabled": true,
-		"python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
-		"python.formatting.blackPath": "/usr/local/py-utils/bin/black",
-		"python.formatting.yapfPath": "/usr/local/py-utils/bin/yapf",
-		"python.linting.banditPath": "/usr/local/py-utils/bin/bandit",
-		"python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
-		"python.linting.mypyPath": "/usr/local/py-utils/bin/mypy",
-		"python.linting.pycodestylePath": "/usr/local/py-utils/bin/pycodestyle",
-		"python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
-		"python.linting.pylintPath": "/usr/local/py-utils/bin/pylint",
-		"cmake.sourceDirectory": "${workspaceFolder}/mxfold2/src",
-		"cmake.configureArgs": [ "-DCMAKE_PREFIX_PATH=/opt/conda/lib/python3.10/site-packages/pybind11" ]
-	},
-
-	// Add the IDs of extensions you want installed when the container is created.
-	"extensions": [
-		"ms-python.python",
-		"ms-python.vscode-pylance",
-		"ms-vscode.cpptools",
-		"twxs.cmake",
-		"ms-vscode.cmake-tools"
-	],
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "python --version",
-	"postCreateCommand": "poetry config virtualenvs.create false && poetry install",
+	// "postCreateCommand": "gcc -v",
 
-	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-	"remoteUser": "vscode"
+	// Configure tool-specific properties.
+	// "customizations": {},
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+
+	"runArgs": ["--gpus", "all"]
 }

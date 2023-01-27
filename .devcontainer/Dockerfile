@@ -1,28 +1,18 @@
-# See here for image contents: https://github.com/microsoft/vscode-dev-containers/tree/v0.234.0/containers/python-3-miniconda/.devcontainer/base.Dockerfile
+FROM mcr.microsoft.com/devcontainers/cpp:0-debian-11
 
-FROM mcr.microsoft.com/vscode/devcontainers/miniconda:0-3
+ARG REINSTALL_CMAKE_VERSION_FROM_SOURCE="3.22.2"
 
-# [Choice] Node.js version: none, lts/*, 16, 14, 12, 10
-ARG NODE_VERSION="none"
-RUN if [ "${NODE_VERSION}" != "none" ]; then su vscode -c "umask 0002 && . /usr/local/share/nvm/nvm.sh && nvm install ${NODE_VERSION} 2>&1"; fi
+# Optionally install the cmake for vcpkg
+COPY ./reinstall-cmake.sh /tmp/
 
-# Copy environment.yml (if found) to a temp location so we update the environment. Also
-# copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
-COPY environment.yml* .devcontainer/noop.txt /tmp/conda-tmp/
-RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bin/conda env update -n base -f /tmp/conda-tmp/environment.yml; fi \
-    && rm -rf /tmp/conda-tmp
+RUN if [ "${REINSTALL_CMAKE_VERSION_FROM_SOURCE}" != "none" ]; then \
+        chmod +x /tmp/reinstall-cmake.sh && /tmp/reinstall-cmake.sh ${REINSTALL_CMAKE_VERSION_FROM_SOURCE}; \
+    fi \
+    && rm -f /tmp/reinstall-cmake.sh
 
-RUN sudo -u vscode /opt/conda/bin/conda install -n base -y python=3.10 \
-    && sudo -u vscode /opt/conda/bin/conda install -n base -y pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge \
-    && sudo -u vscode /opt/conda/bin/conda install -n base -y poetry -c conda-forge \
-    && sudo -u vscode /opt/conda/bin/conda clean -a -y
+# [Optional] Uncomment this section to install additional vcpkg ports.
+# RUN su vscode -c "${VCPKG_ROOT}/vcpkg install <your-port-name-here>"
 
-# [Optional] Uncomment to install a different version of Python than the default
-# RUN conda install -y python=3.6 \
-#     && pip install --no-cache-dir pipx \
-#     && pipx reinstall-all
-
-# [Optional] Uncomment this section to install additional OS packages.
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get -y install build-essential cmake cppcheck valgrind clang lldb llvm gdb \
-    && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+# [Optional] Uncomment this section to install additional packages.
+# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+#     && apt-get -y install --no-install-recommends <your-package-list-here>
