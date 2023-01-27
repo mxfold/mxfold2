@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "mxfold2"
-version = "0.1.1"
-description = "RNA secondary structure prediction using deep neural networks with thermodynamic integrations"
+version = "0.1.2"
+description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
 authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
 repository = "https://github.com/mxfold/mxfold2"
 readme = "README.md"
@@ -10,14 +10,12 @@ build = "build.py"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-torch = "^1.8"
-torchvision = "^0"
-#torch = { version = "=1.12.1+cu116", source = "pytorch-cu116" }
-#torchvision = { version = "=0.13.1+cu116", source = "pytorch-cu116" }
 numpy = "*"
+torch = "^1.13"
+torchvision = "*"
 tqdm = "*"
 wheel = "*"
-pybind11 = "*"
+pybind11 = "^2.10"
 
 [tool.poetry.dev-dependencies]
 pylint = "*"

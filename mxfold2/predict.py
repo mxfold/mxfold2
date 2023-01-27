@@ -125,6 +125,7 @@ class Predict:
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
             'bl_size': args.bl_size,
+            'sym_opts': args.paired_opt,
         }
 
         if args.model == 'Zuker':
@@ -271,5 +272,6 @@ class Predict:
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
         gparser.add_argument('--bl-size', type=int, default=4,
                         help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
+        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))
