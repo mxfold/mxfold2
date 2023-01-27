@@ -31,7 +31,7 @@ class AbstractFold(nn.Module):
 
 
     def calculate_differentiable_score(self, v: float, param: 
-                dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
+                dict[str, Any], count: dict[str, Any]) -> torch.Tensor | float:
         s = 0
         for n, p in param.items():
             if n.startswith("score_"):

@@ -1,47 +1,49 @@
 from __future__ import annotations
 
+import logging
 import os
 import random
 import time
-import logging
 from argparse import Namespace
 from pathlib import Path
 from typing import Any, Optional, cast
 
 #import numpy as np
 import torch
+import torch.backends.cudnn
 #import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
+from dataset import FastaDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .dataset import BPseqDataset
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
+from .fold.linearfold2d import LinearFold2D
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
+from .fold.mix1d import MixedFold1D
+from .fold.mix_bl import MixedFoldBL
 from .fold.mix_linearfold import MixedLinearFold
+from .fold.mix_linearfold1d import MixedLinearFold1D
+from .fold.mix_linearfold2d import MixedLinearFold2D
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
-from .fold.mix_bl import MixedFoldBL
-from .fold.linearfold2d import LinearFold2D
-from .fold.mix_linearfold2d import MixedLinearFold2D
-from .fold.mix1d import MixedFold1D
-from .fold.mix_linearfold1d import MixedLinearFold1D
 from .loss import StructuredLoss, StructuredLossWithTurner
 
 try:
-    from torch.utils.tensorboard import SummaryWriter
+    from torch.utils.tensorboard.writer import SummaryWriter
 except ImportError:
     pass
 
 
 class Train:
     step: int = 0
-    train_loader: Optional[DataLoader]
-    test_loader: Optional[DataLoader]
+    train_loader: Optional[DataLoader[tuple[str, str, torch.Tensor]]]
+    test_loader: Optional[DataLoader[tuple[str, str, torch.Tensor]]]
     optimizer: optim.Optimizer
     model: AbstractFold
     loss_fn: StructuredLoss | StructuredLossWithTurner
@@ -54,8 +56,10 @@ class Train:
 
 
     def train(self, epoch: int) -> None:
+        if self.train_loader is None:
+            raise RuntimeError
         self.model.train()
-        n_dataset = len(self.train_loader.dataset)
+        n_dataset = len(cast(FastaDataset, self.train_loader.dataset))
         loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
         start = time.time()
@@ -94,8 +98,10 @@ class Train:
 
 
     def test(self, epoch: int) -> None:
+        if self.test_loader is None:
+            raise RuntimeError
         self.model.eval()
-        n_dataset = len(self.test_loader.dataset)
+        n_dataset = len(cast(FastaDataset, self.test_loader.dataset))
         loss_total, num = 0, 0
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:

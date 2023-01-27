@@ -241,7 +241,7 @@ class UnpairedLayer(nn.Module):
         self.fc = nn.Sequential(*fc)
 
 
-    def forward(self, x: torch.Tensor, x_base: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, x_base: Optional[torch.Tensor] = None) -> torch.Tensor:
         B, N, _ = x.shape
         x = x.transpose(1, 2) # (B, n_in, N)
         for conv in self.conv:
@@ -257,7 +257,7 @@ class LengthLayer(nn.Module):
             layers: tuple[int, ...] = (), dropout_rate: float = 0.5) -> None:
         super(LengthLayer, self).__init__()
         self.n_in = n_in
-        n = n_in if isinstance(n_in, int) else np.prod(n_in)
+        n = n_in if isinstance(n_in, int) else np.prod(n_in).astype(int)
 
         l = []
         for m in layers:
@@ -269,7 +269,7 @@ class LengthLayer(nn.Module):
         if isinstance(self.n_in, int):
             self.x = torch.tril(torch.ones((self.n_in, self.n_in)))
         else:
-            n = np.prod(self.n_in)
+            n = np.prod(self.n_in).astype(int)
             x = np.fromfunction(lambda i, j, k, l: np.logical_and(k<=i ,l<=j), (*self.n_in, *self.n_in))
             self.x = torch.from_numpy(x.astype(np.float32)).reshape(n, n)
 
@@ -300,7 +300,7 @@ class NeuralNet(nn.Module):
             dropout_rate: float =0.0, fc_dropout_rate: float = 0.0, 
             exclude_diag: bool = True, 
             n_out_paired_layers: int = 0, n_out_unpaired_layers: int = 0, 
-            **kwargs: dict[str, Any]) -> None:
+            **kwargs) -> None:
 
         super(NeuralNet, self).__init__()
 
@@ -412,7 +412,7 @@ class NeuralNet1D(nn.Module):
 
 
 
-    def forward(self, seq: list[str]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(self, seq: list[str]) -> torch.Tensor:
         device = next(self.parameters()).device
         x: torch.Tensor
         x = self.embedding(['0' + s for s in seq]).to(device) # (B, 4, N)

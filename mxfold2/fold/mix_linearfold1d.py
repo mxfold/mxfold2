@@ -32,7 +32,7 @@ class MixedLinearFold1D(AbstractFold):
         return param_on_cpu
 
 
-    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor | float:
         return super().calculate_differentiable_score(v, param['positional'], count['positional'])
 
 

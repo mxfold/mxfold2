@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import cast
 
 class PositionalScore(nn.Module):
     def __init__(self, embedding: torch.Tensor, bilinears: nn.ModuleDict, fc_length: dict[str, torch.Tensor]):
@@ -44,7 +45,7 @@ class PositionalScore(nn.Module):
         return self.bl_mismatch_hairpin(self.embedding[i], self.embedding[j])
 
     def score_basepair_(self, i: int, j: int) -> torch.Tensor:
-        return 0
+        return cast(torch.Tensor, 0)
 
 
     def score_single_loop(self, i: int, j: int, k: int, l: int) -> torch.Tensor:

@@ -13,7 +13,7 @@ from .linearfoldv import LinearFoldV
 
 class MixedLinearFold(AbstractFold):
    
-    def __init__(self, init_param=None, max_helix_length: int = 30, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
+    def __init__(self, init_param=None, max_helix_length: int = 30, beam_size: int = 100, **kwargs) -> None:
         super(MixedLinearFold, self).__init__(interface.LinearFoldMixedWrapper(beam_size=beam_size))
         self.turner = LinearFoldV(init_param=init_param, beam_size=beam_size)
         self.positional = LinearFold(max_helix_length=max_helix_length, beam_size=beam_size, **kwargs)

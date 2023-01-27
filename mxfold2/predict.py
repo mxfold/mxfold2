@@ -43,6 +43,8 @@ class Predict:
                 result: Optional[str] = None, 
                 use_constraint: bool = False) -> None:
         res_fn = open(result, 'w') if result is not None else None
+        if self.test_loader is None:
+            raise RuntimeError
         self.model.eval()
         with torch.no_grad():
             for headers, seqs, refs in self.test_loader:
