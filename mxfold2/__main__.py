@@ -22,7 +22,7 @@ def main():
 
     if hasattr(args, 'param'):
         if args.param == '':
-            sys.argv.append('@'+default_conf)
+            sys.argv.insert(2, '@'+default_conf)
             args = parser.parse_args()
         elif args.param == 'turner2004':
             args.param = ''

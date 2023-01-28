@@ -266,6 +266,7 @@ public:
         int beam, int min_hairpin, int max_internal, float pos_paired, float neg_paired)
     {
         seq_ = seq;
+        std::transform(seq_.begin(), seq_.end(), seq_.begin(), ::toupper);
         auto param = std::make_unique<ParamClass>(seq, pa);
         f_ = std::make_unique<LinearFold::BeamCKYParser<ParamClass>>(std::move(param),
             beam, min_hairpin, max_internal, pos_paired, neg_paired);

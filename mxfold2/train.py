@@ -14,11 +14,10 @@ import torch.backends.cudnn
 #import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
-from dataset import FastaDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from .dataset import BPseqDataset
+from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
 from .fold.linearfold2d import LinearFold2D
