@@ -168,7 +168,7 @@ class PairedLayer(nn.Module):
             x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
         x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
         x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
-        x_l = torch.tril(x_l.view(B, -1, N, N), diagonal=-1)
+        x_l = torch.tril(x_u.view(B, -1, N, N), diagonal=-1)
         x = x_u + x_l # (B, n_out, N, N)
         x = x.permute(0, 2, 3, 1).view(B*N*N, -1)
         x = self.fc(x)
