@@ -108,7 +108,7 @@ class Predict:
             'num_att': args.num_att,
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
-            'sym_opts': args.paired_opt,
+            'paired_opt': args.paired_opt,
         }
 
         if args.model == 'Zuker':

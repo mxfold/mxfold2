@@ -124,7 +124,7 @@ class PairedLayer(nn.Module):
             fc_layers: tuple[int, ...] = (), 
             dropout_rate: float = 0.0, 
             exclude_diag: bool = True, resnet: bool = True, 
-            sym_opts: str = "0_1_1") -> None:
+            paired_opt: str = "0_1_1") -> None:
         super(PairedLayer, self).__init__()
 
         self.resnet = resnet        
@@ -153,7 +153,7 @@ class PairedLayer(nn.Module):
         fc += [ nn.Linear(n_in, n_out) ]
         self.fc = nn.Sequential(*fc)
 
-        self.forward = getattr(self, f'forward_{sym_opts}')
+        self.forward = getattr(self, f'forward_{paired_opt}')
 
 
     def forward_0_1_1(self, x: torch.Tensor) -> torch.Tensor:
@@ -330,7 +330,7 @@ class NeuralNet(nn.Module):
                                     filters=num_paired_filters, ksize=paired_filter_size,
                                     exclude_diag=exclude_diag,
                                     fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                    sym_opts=kwargs['sym_opts'])
+                                    paired_opt=kwargs['paired_opt'])
             if n_out_unpaired_layers > 0:
                 self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
                                         filters=num_paired_filters, ksize=paired_filter_size,
