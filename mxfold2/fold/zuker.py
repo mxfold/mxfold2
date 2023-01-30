@@ -13,7 +13,7 @@ from .layers import LengthLayer, NeuralNet
 
 class ZukerFold(AbstractFold):
     def __init__(self, model_type: str = "M", max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(ZukerFold, self).__init__(interface.predict_zuker, interface.partfunc_zuker)
+        super(ZukerFold, self).__init__(interface.ZukerPositionalWrapper())
 
         exclude_diag = True
         if model_type == "S":

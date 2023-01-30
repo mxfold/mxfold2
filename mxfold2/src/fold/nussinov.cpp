@@ -84,7 +84,7 @@ compute_viterbi(const std::string& seq, Options opts /*= Options()*/) -> ScoreTy
         }
     }
 
-    return Dv_[1][L] + loss_const;
+    return Dv_[1][L] /*+ loss_const*/;
 }
 
 template < typename P, typename S >
@@ -188,7 +188,7 @@ traceback_viterbi(const std::string& seq, Options opts /*= Options()*/) -> std::
         }
     }
 
-    return std::make_pair(e + loss_const, pair);
+    return std::make_pair(e /*+ loss_const*/, pair);
 }
 
 #ifdef TEST

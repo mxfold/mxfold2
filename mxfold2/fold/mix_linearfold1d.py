@@ -1,27 +1,20 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-import numpy as np
 import torch
 
 from .. import interface
 from .fold import AbstractFold
-from .rnafold import RNAFold
-from .zuker import ZukerFold
+from .linearfoldv import LinearFoldV
+from .linearfold1d import LinearFold1D
 
 
-class MixedFold(AbstractFold):
-    def __init__(self, init_param=None, model_type: str = 'M', 
-        max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedFold, self).__init__(interface.ZukerMixedWrapper())
-        self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
-        self.max_helix_length = max_helix_length
-
-
-    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
-        return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
+class MixedLinearFold1D(AbstractFold):
+    def __init__(self, init_param=None, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
+        super(MixedLinearFold1D, self).__init__(interface.MixedLinearFoldPositional1DWrapper(beam_size=beam_size))
+        self.turner = LinearFoldV(init_param=init_param)
+        self.zuker = LinearFold1D(**kwargs)
 
 
     def make_param(self, seq: list[str]) -> list[dict[str, dict[str, Any]]]:
