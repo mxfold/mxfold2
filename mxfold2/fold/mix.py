@@ -13,14 +13,15 @@ from .zuker import ZukerFold
 
 class MixedFold(AbstractFold):
     def __init__(self, init_param=None, model_type: str = 'M', 
-        max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedFold, self).__init__(interface.ZukerMixedWrapper())
+        max_helix_length: int = 30, **kwargs) -> None:
+        print(kwargs['mix_type'])
+        super(MixedFold, self).__init__(interface.ZukerMixedWrapper() if kwargs['mix_type']=='add' else interface.ZukerMixedWrapper2())
         self.turner = RNAFold(init_param=init_param)
         self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
         self.max_helix_length = max_helix_length
 
 
-    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+    def forward(self, seq: list[str], **kwargs):
         return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 

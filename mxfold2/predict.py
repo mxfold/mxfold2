@@ -128,6 +128,7 @@ class Predict:
             'no_split_lr': args.no_split_lr,
             'bl_size': args.bl_size,
             'paired_opt': args.paired_opt,
+            'mix_type': args.mix_type,
         }
 
         if args.model == 'Zuker':
@@ -142,6 +143,9 @@ class Predict:
         elif args.model == 'ZukerS':
             model = ZukerFold(model_type='S', **config)
 
+        elif args.model == 'ZukerFold':
+            model = ZukerFold(model_type='4', **config)
+
         elif args.model == 'Mix':
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, **config)
@@ -153,6 +157,10 @@ class Predict:
         elif args.model == 'Mix1D':
             from . import param_turner2004
             model = MixedFold1D(init_param=param_turner2004, **config)
+
+        elif args.model == 'MixedZukerFold':
+            from . import param_turner2004
+            model = MixedFold(init_param=param_turner2004, model_type='4', **config)
 
         elif args.model == 'ZukerBL':
             model = ZukerFoldBL(**config)
@@ -233,8 +241,8 @@ class Predict:
                             help='output the base-pairing probability matrix to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Mix1D', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D'), default='Turner', 
-                        help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC', 'Mix1D', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'ZukerBL', 'MixedBL', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D')")
+        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'Mix1D', 'MixedZukerFold', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D'), default='Turner', 
+                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'Mix1D', 'MixedZukerFold', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
@@ -275,5 +283,6 @@ class Predict:
         gparser.add_argument('--bl-size', type=int, default=4,
                         help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
         gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
+        gparser.add_argument('--mix-type', choices=('add', 'average'), default='add')
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))

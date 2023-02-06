@@ -29,6 +29,11 @@ class ZukerFold(AbstractFold):
             n_out_paired_layers = 3
             n_out_unpaired_layers = 0
             exclude_diag = False
+        elif model_type == "4":
+            n_out_paired_layers = 4
+            n_out_unpaired_layers = 0
+            exclude_diag = False
+            kwargs['paired_opt'] = 'symmetric'
         else:
             raise(RuntimeError("not implemented"))
 
@@ -115,6 +120,20 @@ class ZukerFold(AbstractFold):
             score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
             score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
+            score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
+
+        elif self.model_type == "4":
+            score_basepair = torch.zeros((B, N, N), device=device)
+            score_helix_stacking = torch.triu(score_paired[:, :, :, 0], diagonal=1) # (B, N, N)
+            score_mismatch = torch.triu(score_paired[:, :, :, 1], diagonal=1) + torch.tril(score_paired[:, :, :, 2], diagonal=-1)
+            score_mismatch_external = score_mismatch # (B, N, N)
+            score_mismatch_internal = score_mismatch # (B, N, N)
+            score_mismatch_multi = score_mismatch # (B, N, N)
+            score_mismatch_hairpin = score_mismatch# (B, N, N)
             score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
             score_base_hairpin = score_unpaired
             score_base_internal = score_unpaired

@@ -6,7 +6,7 @@
 #include "positional_bl.h"
 #include "positional_1d.h"
 
-template <class T, class P>
+template <class T, class P, int M = 1>
 class MixedNearestNeighborTempl
 {
     public:
@@ -41,6 +41,7 @@ class MixedNearestNeighborTempl
         P positional_;
 };
 
-using MixedNearestNeighbor = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor>;
-using MixedNearestNeighborBL = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighborBL>;
-using MixedNearestNeighbor1D = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor1D>;
+using MixedNearestNeighbor = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor, 1>;
+using MixedNearestNeighbor2 = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor, 2>;
+using MixedNearestNeighborBL = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighborBL, 1>;
+using MixedNearestNeighbor1D = MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor1D, 1>;
