@@ -134,7 +134,7 @@ class ZukerFold(AbstractFold):
             score_mismatch_internal = score_mismatch # (B, N, N)
             score_mismatch_multi = score_mismatch # (B, N, N)
             score_mismatch_hairpin = score_mismatch# (B, N, N)
-            score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
+            score_unpaired = score_paired[:, :, :, 3] # (B, N, N)
             score_base_hairpin = score_unpaired
             score_base_internal = score_unpaired
             score_base_multi = score_unpaired
