@@ -241,8 +241,8 @@ class Predict:
                             help='output the base-pairing probability matrix to the specified directory')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'Mix1D', 'MixedZukerFold', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D'), default='Turner', 
-                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'Mix1D', 'MixedZukerFold', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D')")
+        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

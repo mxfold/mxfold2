@@ -24,10 +24,14 @@ class MixedFold(AbstractFold):
         return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
-    def make_param(self, seq: list[str]) -> list[dict[str, dict[str, Any]]]:
+    def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         ts = self.turner.make_param(seq)
-        ps = self.zuker.make_param(seq)
-        return [{'turner': t, 'positional': p} for t, p in zip(ts, ps)]
+        ps = self.zuker.make_param(seq, perturb)
+        if perturb > 0.:
+            return ( [{'turner': t, 'positional': p} for t, p in zip(ts, ps[0])],
+                [{'turner': t, 'positional': p} for t, p in zip(ts, ps[1])] )
+        else:
+            return [{'turner': t, 'positional': p} for t, p in zip(ts, ps)]
 
 
     def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:

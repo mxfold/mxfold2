@@ -46,6 +46,9 @@ class RNAFold(AbstractFold):
                     setattr(self, n, nn.Parameter(torch.tensor(getattr(init_param, n))))
 
 
-    def make_param(self, seq: list[str]) -> list[dict[str, Any]]:
-        param = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
+    def make_param(self, seq: list[str], perturb: float = 0) -> list[dict[str, Any]]:
+        if perturb > 0:
+            param = { n : getattr(self, n) + torch.normal(0, perturb, size=getattr(self, n).shape) for n in dir(self) if n.startswith("score_") }
+        else:
+            param = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
         return [ param for s in seq ]

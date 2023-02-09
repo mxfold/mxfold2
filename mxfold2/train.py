@@ -11,7 +11,7 @@ from typing import Any, Optional, cast
 #import numpy as np
 import torch
 import torch.backends.cudnn
-#import torch.nn as nn
+import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -31,7 +31,8 @@ from .fold.mix_linearfold2d import MixedLinearFold2D
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
-from .loss import StructuredLoss, StructuredLossWithTurner
+from .loss import (FenchelYoungLoss, FenchelYoungLossWithTurner,
+                   StructuredLoss, StructuredLossWithTurner)
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -45,7 +46,7 @@ class Train:
     test_loader: Optional[DataLoader[tuple[str, str, torch.Tensor]]]
     optimizer: optim.Optimizer
     model: AbstractFold
-    loss_fn: StructuredLoss | StructuredLossWithTurner
+    loss_fn: nn.Module
     disable_progress_bar: bool
     writer: Optional[SummaryWriter]
 
@@ -246,7 +247,7 @@ class Train:
             raise(RuntimeError('not implemented'))
 
 
-    def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> StructuredLoss | StructuredLossWithTurner:
+    def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
         if loss_func == 'hinge':
             return StructuredLoss(model, 
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
@@ -257,6 +258,13 @@ class Train:
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
+        if loss_func == 'fy':
+            return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+
+        if loss_func == 'fy_mix':
+            return FenchelYoungLossWithTurner(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                                                sl_weight=args.score_loss_weight)
+
         else:
             raise(RuntimeError('not implemented'))
 
@@ -371,11 +379,13 @@ class Train:
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
         gparser.add_argument('--score-loss-weight', type=float, default=1.,
-                            help='the weight for score loss for hinge_mix loss (default: 1)')
+                            help='the weight for score loss for {hinge,fy}_mix loss (default: 1)')
+        gparser.add_argument('--perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for fy, fy_mix loss (default: 0.1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix'), default='hinge',
-                            help="loss fuction ('hinge', 'hinge_mix') ")
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix'), default='hinge',
+                            help="loss fuction ('hinge', 'hinge_mix', 'fy', 'fy_mix') ")
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
@@ -386,8 +396,8 @@ class Train:
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'Mix1D', 'MixedZukerFold', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D'), default='Turner', 
-                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'Mix1D', 'MixedZukerFold', 'LinearFold', 'LinearFoldV', 'MixedLinearFold', 'LinearFold2D', 'MixedLinearFold2D', 'MixedLinearFold1D')")
+        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

@@ -692,7 +692,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
         .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighbor>::traceback_viterbi,
-            "traceback for LinearFold model");
+            "traceback for LinearFold model",
+            "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<MixedNearestNeighbor>>(m, "MixedLinearFoldPositional2DWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
@@ -710,7 +711,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
-            "traceback for LinearFold model");
+            "traceback for LinearFold model",
+            "from_pos"_a=0);
 
     py::class_<LinearFoldWrapper<MixedNearestNeighbor1D>>(m, "MixedLinearFoldPositional1DWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
@@ -728,5 +730,6 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
-            "traceback for LinearFold model");
+            "traceback for LinearFold model",
+            "from_pos"_a=0);
 }

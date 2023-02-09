@@ -39,7 +39,7 @@ class AbstractFold(nn.Module):
         s += -cast(torch.Tensor, s).item() + v
         return s
 
-    def make_param(self, seq) -> list[dict[str, Any]]:
+    def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         raise(RuntimeError('not implemented'))
 
     def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
@@ -54,14 +54,27 @@ class AbstractFold(nn.Module):
             return_param: bool = False,
             param: Optional[list[dict[str, Any]]] = None, 
             return_partfunc: bool = False,
-            only_traceback: bool = False,
-            from_pos: int = 0,
             max_internal_length: int = 30, max_helix_length: int = 30, 
             constraint: Optional[list[torch.Tensor]] = None, 
             reference: Optional[list[torch.Tensor]] = None,
+            perturb: float = 0.0,
             loss_pos_paired: float = 0.0, loss_neg_paired: float = 0.0, 
-            loss_pos_unpaired: float = 0.0, loss_neg_unpaired: float = 0.0): # -> tuple[torch.Tensor, list[str], list[list[int]]] | tuple[torch.Tensor, list[str], list[list[int]], Any] | tuple[torch.Tensor, list[str], list[list[int]], list[torch.Tensor], list[np.ndarray]]:
-        param = self.make_param(seq) if param is None else param # reuse param or not
+            loss_pos_unpaired: float = 0.0, loss_neg_unpaired: float = 0.0) \
+                ->  tuple[torch.Tensor, list[str], list[list[int]]] | \
+                    tuple[torch.Tensor, list[str], list[list[int]], list[float], list[np.ndarray]] | \
+                    tuple[torch.Tensor, list[str], list[list[int]], list[dict[str, Any]], list[dict[str, Any]]]:
+        if param is None:
+            param_temp = self.make_param(seq, perturb) # reuse param or not
+            if perturb > 0.:
+                param_temp = cast(tuple[list[dict[str, Any]], list[dict[str, Any]]], param_temp)
+                param_without_perturb = param_temp[1]
+                param = param_temp[0]
+            else:
+                param_temp = cast(list[dict[str, Any]], param_temp)
+                param_without_perturb = param_temp
+                param = param_temp
+        else:
+            param_without_perturb = param
         ss = []
         preds: list[str] = []
         pairs: list[list[int]] = []
@@ -69,39 +82,17 @@ class AbstractFold(nn.Module):
         bpps: list[np.ndarray] = []
         for i in range(len(seq)):
             param_on_cpu = self.make_param_on_cpu(param[i])
-            if not only_traceback:
-                # constraint_i = reference_i = None
-                # if constraint is not None:
-                #     constraint_i = constraint[i].tolist()
-                #     if from_pos > 0:
-                #         assert(len(seq[i])+1==len(constraint_i))
-                #         max_pos = len(seq[i])-from_pos
-                #         for p in range(len(constraint_i)):
-                #             if p<=max_pos and constraint_i[p]<=max_pos:
-                #                 pass
-                #             else:
-                #                 constraint_i[p] = 0
-                # if reference is not None:
-                #     reference_i = reference[i].tolist()
-                #     if from_pos > 0:
-                #         assert(len(seq[i])+1==len(reference_i))
-                #         max_pos = len(seq[i])-from_pos
-                #         for p in range(len(reference_i)):
-                #             if p<=max_pos and reference_i[p]<=max_pos:
-                #                 pass
-                #             else:
-                #                 reference_i[p] = 0
-                with torch.no_grad():
-                    self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
-                                max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                                max_helix_length=max_helix_length,
-                                allowed_pairs="aucggu",
-                                constraint=constraint[i].tolist() if constraint is not None else None, 
-                                reference=reference[i].tolist() if reference is not None else None, 
-                                loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                                loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-            v, pred, pair = self.fold_wrapper.traceback_viterbi(from_pos)
             with torch.no_grad():
+                self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
+                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
+                            max_helix_length=max_helix_length,
+                            allowed_pairs="aucggu",
+                            constraint=constraint[i].tolist() if constraint is not None else None, 
+                            reference=reference[i].tolist() if reference is not None else None, 
+                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
+                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                v, pred, pair = self.fold_wrapper.traceback_viterbi()
+
                 if return_partfunc:
                     pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
@@ -122,7 +113,7 @@ class AbstractFold(nn.Module):
         device = self.detect_device(param[0])
         ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss, device=device)
         if return_param:
-            return ss, preds, pairs, param
+            return ss, preds, pairs, param, param_without_perturb
         elif return_partfunc:
             return ss, preds, pairs, pfs, bpps
         else:
