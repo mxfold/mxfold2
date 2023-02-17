@@ -14,6 +14,7 @@ import torch.backends.cudnn
 import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -42,34 +43,26 @@ except ImportError:
 
 class Train:
     step: int = 0
-    train_loader: Optional[DataLoader[tuple[str, str, torch.Tensor]]]
-    test_loader: Optional[DataLoader[tuple[str, str, torch.Tensor]]]
-    optimizer: optim.Optimizer
-    model: AbstractFold
-    loss_fn: nn.Module
     disable_progress_bar: bool
     writer: Optional[SummaryWriter]
 
     def __init__(self):
-        self.train_loader = None
-        self.test_loader = None
+        pass
 
-
-    def train(self, epoch: int) -> None:
-        if self.train_loader is None:
-            raise RuntimeError
-        self.model.train()
-        n_dataset = len(cast(FastaDataset, self.train_loader.dataset))
+    def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
+                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]]) -> None:
+        model.train()
+        n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in self.train_loader:
+            for fnames, seqs, pairs in data_loader:
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
-                self.optimizer.zero_grad()
-                loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
+                optimizer.zero_grad()
+                loss = torch.sum(loss_fn(seqs, pairs, fname=fnames))
                 # if float(loss.item()) < 0.:
                 #     next
                 # FIXME: loss must be positive, but this is not guaranteed for LinearFold model. Any idea?
@@ -77,11 +70,11 @@ class Train:
                 num += n_batch
                 loss.backward()
                 # if self.verbose:
-                #     for n, p in self.model.named_parameters():
+                #     for n, p in model.named_parameters():
                 #         print(n, torch.min(p).item(), torch.max(p).item(), 
                 #             torch.min(cast(torch.Tensor, p.grad)).item(), 
                 #             torch.max(cast(torch.Tensor, p.grad)).item())
-                self.optimizer.step()
+                optimizer.step()
 
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
@@ -97,17 +90,16 @@ class Train:
         print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def test(self, epoch: int) -> None:
-        if self.test_loader is None:
-            raise RuntimeError
-        self.model.eval()
-        n_dataset = len(cast(FastaDataset, self.test_loader.dataset))
+    def test(self, epoch: int, model: AbstractFold, 
+                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]]) -> None:
+        model.eval()
+        n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in self.test_loader:
+            for fnames, seqs, pairs in data_loader:
                 n_batch = len(seqs)
-                loss = self.loss_fn(seqs, pairs, fname=fnames)
+                loss = loss_fn(seqs, pairs, fname=fnames)
                 loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
@@ -120,20 +112,20 @@ class Train:
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def save_checkpoint(self, outdir, epoch):
+    def save_checkpoint(self, outdir: str, epoch: int, model: AbstractFold, optimizer: optim.Optimizer) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         torch.save({
             'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict()
         }, filename)
 
 
-    def resume_checkpoint(self, filename: str) -> int:
+    def resume_checkpoint(self, filename: str, model: AbstractFold, optimizer: optim.Optimizer) -> int:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         return epoch
 
 
@@ -292,10 +284,12 @@ class Train:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)
-        self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
+        train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
-            self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False) # works well only for batch_size=1!!
+            test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False) # works well only for batch_size=1!!
+        else:
+            test_loader = None
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
@@ -303,7 +297,7 @@ class Train:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-        self.model, config = self.build_model(args)
+        model, config = self.build_model(args)
         config.update({ 'model': args.model, 'param': args.param })
         
         if args.init_param != '':
@@ -313,26 +307,36 @@ class Train:
             p = torch.load(init_param)
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
-            self.model.load_state_dict(p)
+            model.load_state_dict(p)
 
         if args.gpu >= 0:
-            self.model.to(torch.device("cuda", args.gpu))
-        self.optimizer = self.build_optimizer(args.optimizer, self.model, args.lr, args.l2_weight)
-        self.loss_fn = self.build_loss_function(args.loss_func, self.model, args)
+            model.to(torch.device("cuda", args.gpu))
+        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
+        loss_fn = self.build_loss_function(args.loss_func, model, args)
 
         checkpoint_epoch = 0
         if args.resume is not None:
-            checkpoint_epoch = self.resume_checkpoint(args.resume)
+            checkpoint_epoch = self.resume_checkpoint(args.resume, model, optimizer)
+        
+        if args.swa:
+            swa_model = AveragedModel(model)
+            swa_start = args.swa_start if args.swa_start > 1.0 else args.epochs * args.swa_start
+            swa_scheduler = SWALR(optimizer, swa_lr=args.swa_lr)
+        else:
+            swa_model = None
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
-            self.train(epoch)
-            if self.test_loader is not None:
-                self.test(epoch)
+            self.train(epoch, model, optimizer, loss_fn, train_loader)
+            if swa_model is not None and epoch > swa_start:
+                swa_model.update_parameters(model)
+                swa_scheduler.step()
+            if test_loader is not None:
+                self.test(epoch, swa_model or model, loss_fn, test_loader)
             if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch)
+                self.save_checkpoint(args.log_dir, epoch, swa_model or model, optimizer)
 
         if args.param is not None:
-            torch.save(self.model.state_dict(), args.param)
+            torch.save((swa_model or model).state_dict(), args.param)
         if args.save_config is not None:
             self.save_config(args.save_config, config)
 
@@ -394,6 +398,11 @@ class Train:
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--swa', default=False, action='store_true',
+                            help='use stochastic weight averaging (SWA)')
+        gparser.add_argument('--swa-start', type=float, default=0.75, 
+                            help='start epoch of SWA: epochs * swa_start for swa_start<1.0, or swa_start otherwise')
+        gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 

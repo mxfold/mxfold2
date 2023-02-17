@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from copy import copy, deepcopy
 from typing import Any, Callable, Optional, cast
 
 import numpy as np
@@ -13,6 +14,18 @@ class AbstractFold(nn.Module):
     def __init__(self, fold_wrapper) -> None:
         super(AbstractFold, self).__init__()
         self.fold_wrapper = fold_wrapper
+
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == 'fold_wrapper': # cannot deepcopy it
+                setattr(result, k, v)
+            else:
+                setattr(result, k, deepcopy(v, memo))
+        return result
 
 
     def duplicate(self) -> AbstractFold:
