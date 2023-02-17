@@ -321,7 +321,9 @@ class Train:
         if args.swa:
             swa_model = AveragedModel(model)
             swa_start = args.swa_start if args.swa_start > 1.0 else args.epochs * args.swa_start
-            swa_scheduler = SWALR(optimizer, swa_lr=args.swa_lr)
+            swa_scheduler = SWALR(optimizer, swa_lr=args.swa_lr, 
+                                    anneal_epochs=args.swa_anneal_epochs,
+                                    anneal_strategy=args.swa_anneal_strategy)
         else:
             swa_model = None
 
@@ -402,6 +404,9 @@ class Train:
                             help='use stochastic weight averaging (SWA)')
         gparser.add_argument('--swa-start', type=float, default=0.75, 
                             help='start epoch of SWA: epochs * swa_start for swa_start<1.0, or swa_start otherwise')
+        gparser.add_argument('--swa-anneal-epochs', type=int, default=10, help='SWA anneal-epochs (default: 10)')
+        gparser.add_argument('--swa-anneal-strategy', choices=('linear', 'cos'), default='linear',
+                            help="SWA anneal strategy ('linear', 'cos')")
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
         gparser = subparser.add_argument_group("Network setting")
