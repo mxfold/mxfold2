@@ -90,7 +90,7 @@ class Train:
         print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def test(self, epoch: int, model: AbstractFold, 
+    def test(self, epoch: int, model: AbstractFold | AveragedModel, 
                 loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]]) -> None:
         model.eval()
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
@@ -112,7 +112,9 @@ class Train:
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def save_checkpoint(self, outdir: str, epoch: int, model: AbstractFold, optimizer: optim.Optimizer) -> None:
+    def save_checkpoint(self, outdir: str, epoch: int, 
+                        model: AbstractFold | AveragedModel, 
+                        optimizer: optim.Optimizer) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         torch.save({
             'epoch': epoch,
@@ -325,11 +327,13 @@ class Train:
                                     anneal_epochs=args.swa_anneal_epochs,
                                     anneal_strategy=args.swa_anneal_strategy)
         else:
+            swa_start = args.epochs
             swa_model = None
+            swa_scheduler = None
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
             self.train(epoch, model, optimizer, loss_fn, train_loader)
-            if swa_model is not None and epoch > swa_start:
+            if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
             if test_loader is not None:
