@@ -52,9 +52,9 @@ class LinearFold2D(AbstractFold):
         device = next(self.parameters()).device
         B, N, _, _ = score_paired.shape
         if perturb > 0.:
-            score_paired += torch.normal(0., perturb, size=score_paired.shape)
+            score_paired += torch.normal(0., perturb, size=score_paired.shape, device=device)
             if score_unpaired is not None:
-                score_unpaired += torch.normal(0., perturb, size=score_unpaired.shape)
+                score_unpaired += torch.normal(0., perturb, size=score_unpaired.shape, device=device)
 
         def unpair_interval(su: torch.Tensor) -> torch.Tensor:
             su = su.view(B, 1, N)
@@ -76,7 +76,7 @@ class LinearFold2D(AbstractFold):
 
         if perturb > 0.:
             for f in score_lengths.keys(): 
-                score_lengths[f] = score_lengths[f] + torch.normal(0., perturb, size=score_lengths[f].shape)
+                score_lengths[f] = score_lengths[f] + torch.normal(0., perturb, size=score_lengths[f].shape, device=device)
 
         param = [ { 
             'score_basepair': score_basepair[i],
