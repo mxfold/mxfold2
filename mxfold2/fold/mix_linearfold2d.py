@@ -13,7 +13,8 @@ from .linearfold2d import LinearFold2D
 
 class MixedLinearFold2D(AbstractFold):
     def __init__(self, init_param=None, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
-        super(MixedLinearFold2D, self).__init__(interface.MixedLinearFoldPositional2DWrapper(beam_size=beam_size))
+        super(MixedLinearFold2D, self).__init__(interface.MixedLinearFoldPositional2DWrapper(beam_size=beam_size) \
+                                                if kwargs['mix_type']=='add' else interface.MixedLinearFoldPositional2DWrapper2(beam_size=beam_size))
         self.turner = LinearFoldV(init_param=init_param)
         self.zuker = LinearFold2D(**kwargs)
 

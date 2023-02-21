@@ -15,9 +15,16 @@ class LinearFold2D(AbstractFold):
     def __init__(self, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
         super(LinearFold2D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size))
 
-        n_out_paired_layers = 3
-        n_out_unpaired_layers = 0
-        exclude_diag = False
+        self.model_type = '4' # default
+        if self.model_type == "C":
+            n_out_paired_layers = 3
+            n_out_unpaired_layers = 0
+            exclude_diag = False
+        elif self.model_type == "4":
+            n_out_paired_layers = 4
+            n_out_unpaired_layers = 0
+            exclude_diag = False
+            kwargs['paired_opt'] = 'symmetric'
 
         self.net = NeuralNet(**kwargs, 
             n_out_paired_layers=n_out_paired_layers,
@@ -62,17 +69,32 @@ class LinearFold2D(AbstractFold):
             su = torch.bmm(torch.triu(su), torch.triu(torch.ones_like(su)))
             return su
 
-        score_basepair = torch.zeros((B, N, N), device=device)
-        score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
-        score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
-        score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
-        score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
-        score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
-        score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
-        score_base_hairpin = score_unpaired
-        score_base_internal = score_unpaired
-        score_base_multi = score_unpaired
-        score_base_external = score_unpaired
+        if self.model_type == 'C':
+            score_basepair = torch.zeros((B, N, N), device=device)
+            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+            score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
+            score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
+
+        elif self.model_type == "4":
+            score_basepair = torch.zeros((B, N, N), device=device)
+            score_helix_stacking = torch.triu(score_paired[:, :, :, 0], diagonal=1) # (B, N, N)
+            score_mismatch = torch.triu(score_paired[:, :, :, 1], diagonal=1) + torch.tril(score_paired[:, :, :, 2], diagonal=-1)
+            score_mismatch_external = score_mismatch # (B, N, N)
+            score_mismatch_internal = score_mismatch # (B, N, N)
+            score_mismatch_multi = score_mismatch # (B, N, N)
+            score_mismatch_hairpin = score_mismatch# (B, N, N)
+            score_unpaired = score_paired[:, :, :, 3] # (B, N, N)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
 
         if perturb > 0.:
             for f in score_lengths.keys(): 

@@ -714,6 +714,25 @@ PYBIND11_MODULE(interface, m)
             "traceback for LinearFold model",
             "from_pos"_a=0);
 
+    py::class_<LinearFoldWrapper<MixedNearestNeighbor2>>(m, "MixedLinearFoldPositional2DWrapper2")
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
+        .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighbor2>::compute_viterbi, 
+            "predict RNA secondary structure with LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
+        .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor2>::traceback_viterbi,
+            "traceback for LinearFold model",
+            "from_pos"_a=0);
+
     py::class_<LinearFoldWrapper<MixedNearestNeighbor1D>>(m, "MixedLinearFoldPositional1DWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
         .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighbor1D>::compute_viterbi, 

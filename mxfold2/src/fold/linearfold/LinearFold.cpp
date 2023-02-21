@@ -2320,6 +2320,7 @@ template class LinearFold::BeamCKYParser<PositionalNearestNeighborBL>;
 template class LinearFold::BeamCKYParser<MixedNearestNeighborBL>;
 template class LinearFold::BeamCKYParser<PositionalNearestNeighbor>;
 template class LinearFold::BeamCKYParser<MixedNearestNeighbor>;
+template class LinearFold::BeamCKYParser<MixedNearestNeighbor2>;
 template class LinearFold::BeamCKYParser<MixedNearestNeighbor1D>;
 
 // -------------------------------------------------------------
