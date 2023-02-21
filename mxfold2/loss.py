@@ -45,10 +45,10 @@ class StructuredLoss(nn.Module):
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
 
-        logging.info(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
-        logging.info(seq)
-        logging.info(pred_s)
-        logging.info(ref_s)
+        logging.debug(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
+        logging.debug(seq)
+        logging.debug(pred_s)
+        logging.debug(ref_s)
         if float(loss.item())> 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
@@ -112,10 +112,10 @@ class StructuredLossWithTurner(nn.Module):
         loss = (pred - ref) / l
         loss += self.sl_weight * (ref-ref2)**2 / l
 
-        logging.info(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
-        logging.info(seq)
-        logging.info(pred_s)
-        logging.info(ref_s)
+        logging.debug(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
+        logging.debug(seq)
+        logging.debug(pred_s)
+        logging.debug(ref_s)
         if float(loss.item())> 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
@@ -156,10 +156,10 @@ class FenchelYoungLoss(nn.Module):
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
 
-        logging.info(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
-        logging.info(seq)
-        logging.info(pred_s)
-        logging.info(ref_s)
+        logging.debug(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
+        logging.debug(seq)
+        logging.debug(pred_s)
+        logging.debug(ref_s)
         if float(loss.item())> 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
@@ -212,10 +212,10 @@ class FenchelYoungLossWithTurner(nn.Module):
         loss = (pred - ref) / l
         loss += self.sl_weight * (ref-ref2)**2 / l
 
-        logging.info(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
-        logging.info(seq)
-        logging.info(pred_s)
-        logging.info(ref_s)
+        logging.debug(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
+        logging.debug(seq)
+        logging.debug(pred_s)
+        logging.debug(ref_s)
         if float(loss.item())> 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")

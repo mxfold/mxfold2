@@ -50,7 +50,8 @@ class Train:
         pass
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]]) -> None:
+                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]],
+                clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
         model.train()
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0., 0
@@ -65,7 +66,6 @@ class Train:
                 loss = torch.sum(loss_fn(seqs, pairs, fname=fnames))
                 # if float(loss.item()) < 0.:
                 #     next
-                # FIXME: loss must be positive, but this is not guaranteed for LinearFold model. Any idea?
                 loss_total += loss.item()
                 num += n_batch
                 loss.backward()
@@ -74,6 +74,10 @@ class Train:
                 #         print(n, torch.min(p).item(), torch.max(p).item(), 
                 #             torch.min(cast(torch.Tensor, p.grad)).item(), 
                 #             torch.max(cast(torch.Tensor, p.grad)).item())
+                if clip_grad_norm > 0.0:
+                    nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
+                elif clip_grad_value > 0.0:
+                    nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
                 optimizer.step()
 
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -114,20 +118,24 @@ class Train:
 
     def save_checkpoint(self, outdir: str, epoch: int, 
                         model: AbstractFold | AveragedModel, 
-                        optimizer: optim.Optimizer) -> None:
+                        optimizer: optim.Optimizer, scheduler) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
-        torch.save({
+        checkpoint = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict()
-        }, filename)
+            'optimizer_state_dict': optimizer.state_dict() }
+        if scheduler is not None:
+            checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+        torch.save(checkpoint, filename)
 
 
-    def resume_checkpoint(self, filename: str, model: AbstractFold, optimizer: optim.Optimizer) -> int:
+    def resume_checkpoint(self, filename: str, model: AbstractFold, optimizer: optim.Optimizer, scheduler) -> int:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if scheduler is not None:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         return epoch
 
 
@@ -263,6 +271,16 @@ class Train:
             raise(RuntimeError('not implemented'))
 
 
+    def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
+        if scheduler == 'CyclicLR':
+            return optim.lr_scheduler.CyclicLR(optimizer=optimizer, base_lr=0.001, max_lr=args.lr,
+                                                step_size_up=args.scheduler_step_size, gamma=args.scheduler_gamma, mode="exp_range")
+        if scheduler == 'CosineAnnealingLR':
+            return optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=args.scheduler_step_size)
+        
+        return None
+
+
     def save_config(self, file: str, config: dict[str, Any]) -> None:
         with open(file, 'w') as f:
             for k, v in config.items():
@@ -315,10 +333,11 @@ class Train:
             model.to(torch.device("cuda", args.gpu))
         optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
         loss_fn = self.build_loss_function(args.loss_func, model, args)
+        scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         checkpoint_epoch = 0
         if args.resume is not None:
-            checkpoint_epoch = self.resume_checkpoint(args.resume, model, optimizer)
+            checkpoint_epoch = self.resume_checkpoint(args.resume, model, optimizer, scheduler)
         
         if args.swa:
             swa_model = AveragedModel(model)
@@ -332,14 +351,20 @@ class Train:
             swa_scheduler = None
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
-            self.train(epoch, model, optimizer, loss_fn, train_loader)
+            self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
+                       clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
             if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
+                logging.info(f'LR = {swa_scheduler.get_last_lr()}')
+            elif scheduler is not None:
+                scheduler.step()
+                logging.info(f'LR = {scheduler.get_last_lr()}')
+
             if test_loader is not None:
-                self.test(epoch, swa_model or model, loss_fn, test_loader)
+                self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader)
             if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch, swa_model or model, optimizer)
+                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler)
 
         if args.param is not None:
             torch.save((swa_model or model).state_dict(), args.param)
@@ -404,6 +429,14 @@ class Train:
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--clip-grad-value', type=float, default=0,
+                            help='gradient clipping by values (default=0, no clipping)')
+        gparser.add_argument('--clip-grad-norm', type=float, default=0,
+                            help='gradient clipping by norm (default=0, no clipping)')
+        gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
+                            help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
+        gparser.add_argument('--scheduler-step-size', type=int, default=5, help='scheduler step size (default=5)')
+        gparser.add_argument('--scheduler-gamma', type=float, default=0.95, help='scheduler decoy rate (default=0.95)')
         gparser.add_argument('--swa', default=False, action='store_true',
                             help='use stochastic weight averaging (SWA)')
         gparser.add_argument('--swa-start', type=float, default=0.75, 
