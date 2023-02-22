@@ -11,55 +11,54 @@ import numpy as np
 import torch
 #import torch.nn as nn
 #import torch.nn.functional as F
+from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
-from .fold.mix_linearfold import MixedLinearFold
+from .fold.linearfold2d import LinearFold2D
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
+from .fold.mix1d import MixedFold1D
+from .fold.mix_bl import MixedFoldBL
+from .fold.mix_linearfold import MixedLinearFold
+from .fold.mix_linearfold1d import MixedLinearFold1D
+from .fold.mix_linearfold2d import MixedLinearFold2D
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
-from .fold.mix_bl import MixedFoldBL
-from .fold.linearfold2d import LinearFold2D
-from .fold.mix_linearfold2d import MixedLinearFold2D
-from .fold.mix1d import MixedFold1D
-from .fold.mix_linearfold1d import MixedLinearFold1D
 
 
 class Predict:
-    model: AbstractFold
-    test_loader: Optional[DataLoader]
-    
     def __init__(self):
-        self.test_loader = None
+        pass
 
 
-    def predict(self, output_bpseq: Optional[str] = None, 
+    def predict(self, 
+                model: AbstractFold | AveragedModel,
+                data_loader: DataLoader,
+                output_bpseq: Optional[str] = None, 
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
                 use_constraint: bool = False) -> None:
         res_fn = open(result, 'w') if result is not None else None
-        if self.test_loader is None:
-            raise RuntimeError
-        self.model.eval()
+        model.eval()
         with torch.no_grad():
-            for headers, seqs, refs in self.test_loader:
+            for headers, seqs, refs in data_loader:
                 start = time.time()
                 if output_bpp is None:
                     if use_constraint:
-                        scs, preds, bps = self.model(seqs, constraint=refs)
+                        scs, preds, bps = model(seqs, constraint=refs)
                     else:
-                        scs, preds, bps = self.model(seqs)
+                        scs, preds, bps = model(seqs)
                     pfs = bpps = [None] * len(preds)
                 else:
                     if use_constraint:
-                        scs, preds, bps, pfs, bpps = self.model(seqs, return_partfunc=True, constraint=refs)
+                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=refs)
                     else:
-                        scs, preds, bps, pfs, bpps = self.model(seqs, return_partfunc=True, )
+                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, )
                 elapsed_time = time.time() - start
                 for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs, scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
@@ -197,13 +196,13 @@ class Predict:
         test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
-        self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
 
-        self.model, _ = self.build_model(args)
+        model, _ = self.build_model(args)
         if args.param != '':
             param = Path(args.param)
             if not param.exists() and conf is not None:
@@ -211,12 +210,16 @@ class Predict:
             p = torch.load(param, map_location='cpu')
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
-            self.model.load_state_dict(p)
+            if 'n_averaged' in p:
+                model = AveragedModel(model)
+            model.load_state_dict(p)
 
         if args.gpu >= 0:
-            self.model.to(torch.device("cuda", args.gpu))
+            model.to(torch.device("cuda", args.gpu))
 
-        self.predict(output_bpseq=args.bpseq, output_bpp=args.bpp, result=args.result, use_constraint=args.use_constraint)
+        self.predict(model=model, data_loader=test_loader, 
+                    output_bpseq=args.bpseq, output_bpp=args.bpp, 
+                    result=args.result, use_constraint=args.use_constraint)
 
 
     @classmethod
