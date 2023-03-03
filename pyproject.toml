@@ -12,10 +12,10 @@ build = "build.py"
 python = "^3.8"
 numpy = "*"
 torch = "^1.13"
-torchvision = "*"
 tqdm = "*"
 wheel = "*"
 pybind11 = "^2.10"
+pytorch-optimizer = "^2.5.0"
 
 [tool.poetry.dev-dependencies]
 pylint = "*"

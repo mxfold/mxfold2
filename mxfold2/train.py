@@ -8,6 +8,7 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Any, Optional, cast
 
+import pytorch_optimizer as po
 #import numpy as np
 import torch
 import torch.backends.cudnn
@@ -246,6 +247,10 @@ class Train:
             #return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
         elif optimizer == 'ASGD':
             return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+        elif optimizer == 'AdaBelief':
+            return po.AdaBelief(model.parameters(), lr=lr, weight_decay=l2_weight)
+        elif optimizer == 'Lion':
+            return po.Lion(model.parameters(), lr=lr, weight_decay=l2_weight)
         else:
             raise(RuntimeError('not implemented'))
 
@@ -409,7 +414,7 @@ class Train:
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
 
         gparser = subparser.add_argument_group("Optimizer setting")
-        gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD'), default='AdamW')
+        gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD', 'AdaBelief', 'Lion'), default='AdamW')
         gparser.add_argument('--l1-weight', type=float, default=0.,
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
