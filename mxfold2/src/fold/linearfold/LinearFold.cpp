@@ -73,11 +73,11 @@ void BeamCKYParser<P,S>::sort_keys(std::unordered_map<int, State> &map, std::vec
 #endif
 
 template < typename P, typename S >
-auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* ref, int from_pos /*=0*/) -> std::pair<value_type, std::vector<uint32_t>>
+auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>
 {
     std::vector<u_int32_t> bp(seq.size()+1, 0);
     stack<tuple<int, int, State>> stk;
-    stk.push(make_tuple(0, seq_length-1-from_pos, bestC[seq_length-1-from_pos]));
+    stk.push(make_tuple(0, seq_length-1, bestC[seq_length-1]));
 
     // verbose stuff
     value_type total_energy = .0;

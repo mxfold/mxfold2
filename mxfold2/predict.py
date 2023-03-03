@@ -49,17 +49,18 @@ class Predict:
             for headers, seqs, refs in data_loader:
                 start = time.time()
                 if output_bpp is None:
-                    if use_constraint:
-                        scs, preds, bps = model(seqs, constraint=refs)
+                    if use_constraint and 'BPSEQ' in refs:
+                        scs, preds, bps = model(seqs, constraint=refs['BPSEQ'])
                     else:
                         scs, preds, bps = model(seqs)
                     pfs = bpps = [None] * len(preds)
                 else:
-                    if use_constraint:
+                    if use_constraint and 'BPSEQ' in refs:
                         scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=refs)
                     else:
                         scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, )
                 elapsed_time = time.time() - start
+                refs = refs['BPSEQ'] if 'BPSEQ' in refs else refs['FASTA'] if 'FASTA' in refs else [None] * len(seq)
                 for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs, scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
                         print('>'+header)

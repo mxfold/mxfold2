@@ -68,7 +68,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #endif
 
     const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
 #ifdef SIMPLE_SPARSIFICATION
     std::vector<std::vector<u_int32_t>> split_point_c_l(L+1);
@@ -83,9 +83,10 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #ifdef HELIX_LENGTH
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 if (allow_unpaired[i+1][j-1]) 
                 {
-                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                     update_max(Nv_[i][j], s, Nt_[i][j], TBType::N_HAIRPIN_LOOP);
                 }
 
@@ -98,7 +99,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                         if (((k-1)-(i+1)+1)+((j-1)-(l+1)+1)==0) continue; // nothoing to do here for stacking
                         if (allow_paired[k][l])
                         {
-                            auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             update_max(Nv_[i][j], s, Nt_[i][j], TBType::N_INTERNAL_LOOP, k-i, j-l);
                         }
                     }
@@ -108,13 +109,13 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                 for (auto u: split_point_m1_l[j-1])
                 {
                     if (i+1>u-1) break;
-                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     update_max(Nv_[i][j], s, Nt_[i][j], TBType::N_MULTI_LOOP, u);
                 }
 #else
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     update_max(Nv_[i][j], s, Nt_[i][j], TBType::N_MULTI_LOOP, u);
                 }
 #endif
@@ -122,7 +123,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                 /////
                 if (i+1 < j-1 && allow_paired[i+1][j-1]) 
                 {
-                    auto s = Ev_[i+1][j-1] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired[i][j];
+                    auto s = Ev_[i+1][j-1] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired_ij;
                     update_max(Ev_[i][j], s, Et_[i][j], TBType::E_HELIX);
                 }
                 update_max(Ev_[i][j], Nv_[i][j], Et_[i][j], TBType::E_TERMINAL);
@@ -139,7 +140,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                     for (m=2; m<=opts.max_helix; m++)
                     {
                         if (i+(m-1)>=j-(m-1) || !allow_paired[i+(m-1)][j-(m-1)]) break;
-                        lp += loss_paired[i+(m-2)][j-(m-2)];
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Nv_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX, m);
                     }
@@ -165,10 +166,11 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #else
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.addtional_paired_score(i, j);
                 bool updated=false;
                 if (allow_unpaired[i+1][j-1]) 
                 {
-                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                     updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HAIRPIN_LOOP);
                 }
 
@@ -180,7 +182,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                         if (!allow_unpaired[l+1][j-1]) break;
                         if (allow_paired[k][l])
                         {
-                            auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_INTERNAL_LOOP, k-i, j-l);
                         }
                     }
@@ -190,7 +192,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                 for (auto u: split_point_m1_l[j-1])
                 {
                     if (i+1>u-1) break;
-                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_MULTI_LOOP, u);
                 }
 
@@ -202,7 +204,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #else
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mv_[i+1][u-1]+M1v_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_MULTI_LOOP, u);
                 }
 #endif
@@ -218,7 +220,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                 {
                     auto s = param_->score_multi_unpaired(i, u-1);
                     auto t = param_->score_multi_paired(u, j);
-                    auto r = Cv_[u][j] + s + t + loss_unpaired[i][u-1];
+                    auto r = Cv_[u][j] + s + t /*+ loss_unpaired[i][u-1]*/;
                     update_max(Mv_[i][j], r, Mt_[i][j], TBType::M_PAIRED, u);
                 }
             }
@@ -236,7 +238,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
                 {
                     auto s = param_->score_multi_unpaired(i, u-1);
                     auto t = param_->score_multi_paired(u, j);
-                    auto r = Cv_[u][j] + s + t + loss_unpaired[i][u-1];
+                    auto r = Cv_[u][j] + s + t /*+ loss_unpaired[i][u-1]*/;
                     update_max(Mv_[i][j], r, Mt_[i][j], TBType::M_PAIRED, u);
                 }
             }
@@ -253,7 +255,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 
             if (allow_unpaired[j][j])
             {
-                auto s = Mv_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                auto s = Mv_[i][j-1] + param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 update_max(Mv_[i][j], s, Mt_[i][j], TBType::M_UNPAIRED);
             }
 
@@ -267,7 +269,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 
             if (allow_unpaired[j][j])
             {
-                auto s = M1v_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                auto s = M1v_[i][j-1] + param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 updated |= update_max(M1v_[i][j], s, M1t_[i][j], TBType::M1_UNPAIRED);
             }
 
@@ -283,7 +285,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
     {
         if (allow_unpaired[i][i])
         {
-            auto s = Fv_[i+1] + param_->score_external_unpaired(i, i) + loss_unpaired[i][i];
+            auto s = Fv_[i+1] + param_->score_external_unpaired(i, i) /*+ loss_unpaired[i][i]*/;
             update_max(Fv_[i], s, Ft_[i], TBType::F_UNPAIRED);
         }
 
@@ -305,7 +307,7 @@ compute_viterbi(const std::string& seq, Options opts) -> ScoreType
 #endif
     }
 
-    return Fv_[1] /*+ loss_const*/;
+    return Fv_[1];
 }
 
 template < typename P, typename S >
@@ -474,7 +476,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
 {
     const auto L = Ft_.size()-2;
     std::vector<u_int32_t> pair(L+1, 0);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Ft_[1], 1, L);
     auto e = 0.;
@@ -491,7 +493,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
             case TBType::N_HAIRPIN_LOOP: {
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
-                e += param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                e += param_->score_hairpin(i, j) + opts.additional_paired_score(i, j) /*+ loss_unpaired[i+1][j-1]*/;
                 param_->count_hairpin(i, j, 1.);
                 pair[i] = j;
                 pair[j] = i;
@@ -504,7 +506,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 const auto k = i+p;
                 const auto l = j-q;
                 assert(k < l);
-                e += param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                e += param_->score_single_loop(i, j, k, l) + opts.additional_paired_score(i, j) /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                 param_->count_single_loop(i, j, k, l, 1.);
                 tb_queue.emplace(Ct_[k][l], k, l);
                 pair[i] = j;
@@ -515,7 +517,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
                 const auto u = std::get<0>(kl);
-                e += param_->score_multi_loop(i, j) + loss_paired[i][j];
+                e += param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
                 param_->count_multi_loop(i, j, 1.);
                 tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
                 tb_queue.emplace(M1t_[u][j-1], u, j-1);
@@ -525,7 +527,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
             }
             case TBType::E_HELIX: {
                 tb_queue.emplace(Et_[i+1][j-1], i+1, j-1);
-                e += param_->score_single_loop(i, j, i+1, j-1) + loss_paired[i][j];
+                e += param_->score_single_loop(i, j, i+1, j-1) + opts.additional_paired_score(i, j);
                 param_->count_single_loop(i, j, i+1, j-1, 1.);
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
@@ -553,7 +555,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                     assert(pair[j-(k-2)] == 0);
                     pair[i+(k-2)] = j-(k-2);
                     pair[j-(k-2)] = i+(k-2);
-                    lp += loss_paired[i+(k-2)][j-(k-2)];
+                    lp += opts.additional_paired_score(i+(k-2), j-(k-2));
                 }
                 e += param_->score_helix(i, j, m) + lp;
                 param_->count_helix(i, j, m, 1.);
@@ -569,7 +571,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                     assert(pair[j-(k-2)] == 0);
                     pair[i+(k-2)] = j-(k-2);
                     pair[j-(k-2)] = i+(k-2);
-                    lp += loss_paired[i+(k-2)][j-(k-2)];
+                    lp += opts.additional_paired_score(i+(k-2), j-(k-2));
                 }
                 e += param_->score_helix(i, j, m) + lp;
                 param_->count_helix(i, j, m, 1.);
@@ -579,7 +581,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
             case TBType::C_HAIRPIN_LOOP: {
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
-                e += param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                e += param_->score_hairpin(i, j) + opts.additional_paired_score(i, j) /*+ loss_unpaired[i+1][j-1]*/;
                 param_->count_hairpin(i, j, 1.);
                 pair[i] = j;
                 pair[j] = i;
@@ -592,7 +594,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 const auto k = i+p;
                 const auto l = j-q;
                 assert(k < l);
-                e += param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                e += param_->score_single_loop(i, j, k, l) + opts.additional_paired_score(i, j) /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                 param_->count_single_loop(i, j, k, l, 1.);
                 tb_queue.emplace(Ct_[k][l], k, l);
                 pair[i] = j;
@@ -603,7 +605,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
                 const auto u = std::get<0>(kl);
-                e += param_->score_multi_loop(i, j) + loss_paired[i][j];
+                e += param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
                 param_->count_multi_loop(i, j, 1.);
                 tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
                 tb_queue.emplace(M1t_[u][j-1], u, j-1);
@@ -614,7 +616,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
 #endif
             case TBType::M_PAIRED: {
                 const auto u = std::get<0>(kl);
-                e += param_->score_multi_paired(u, j) + param_->score_multi_unpaired(i, u-1) + loss_unpaired[i][u-1];
+                e += param_->score_multi_paired(u, j) + param_->score_multi_unpaired(i, u-1) /*+ loss_unpaired[i][u-1]*/;
                 param_->count_multi_paired(u, j, 1.);
                 param_->count_multi_unpaired(i, u-1, 1.);
                 tb_queue.emplace(Ct_[u][j], u, j);
@@ -629,7 +631,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 break;
             }
             case TBType::M_UNPAIRED: {
-                e += param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                e += param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 param_->count_multi_unpaired(j, j, 1.);
                 tb_queue.emplace(Mt_[i][j-1], i, j-1);
                 break;
@@ -641,7 +643,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 break;
             }
             case TBType::M1_UNPAIRED: {
-                e += param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                e += param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 param_->count_multi_unpaired(j, j, 1.);
                 tb_queue.emplace(M1t_[i][j-1], i, j-1);
                 break;
@@ -652,7 +654,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
                 break;
             }
             case TBType::F_UNPAIRED: {
-                e += param_->score_external_unpaired(i, i) + loss_unpaired[i][i];
+                e += param_->score_external_unpaired(i, i) /*+ loss_unpaired[i][i]*/;
                 param_->count_external_unpaired(i, i, 1.);
                 tb_queue.emplace(Ft_[i+1], i+1, j);
                 break;
@@ -668,7 +670,7 @@ traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P:
         }
     }
 
-    return std::make_pair(e /*+ loss_const*/, pair);
+    return std::make_pair(e, pair);
 }
 
 template <typename S>
@@ -696,7 +698,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 #endif
 
     const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
     for (auto i=L; i>=1; i--)
     {
@@ -705,9 +707,10 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 #ifdef HELIX_LENGTH
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 if (allow_unpaired[i+1][j-1]) 
                 {
-                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                     Ni_[i][j] = logsumexp(Ni_[i][j], s);
                 }
 
@@ -720,7 +723,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
                         if (((k-1)-(i+1)+1)+((j-1)-(l+1)+1)==0) continue; // nothoing to do here for stacking
                         if (allow_paired[k][l])
                         {
-                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             Ni_[i][j] = logsumexp(Ni_[i][j], s);
                         }
                     }
@@ -728,14 +731,14 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     Ni_[i][j] = logsumexp(Ni_[i][j], s);
                 }
             
                 /////
                 if (i+1 < j-1 && allow_paired[i+1][j-1]) 
                 {
-                    auto s = Ei_[i+1][j-1] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired[i][j];
+                    auto s = Ei_[i+1][j-1] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired_ij;
                     Ei_[i][j] = logsumexp(Ei_[i][j], s);
                 }
                 Ei_[i][j] = logsumexp(Ei_[i][j], Ni_[i][j]);
@@ -751,7 +754,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
                     for (m=2; m<=opts.max_helix; m++)
                     {
                         if (i+(m-1)>=j-(m-1) || !allow_paired[i+(m-1)][j-(m-1)]) break;
-                        lp += loss_paired[i+(m-2)][j-(m-2)];
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ni_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         Ci_[i][j] = logsumexp(Ci_[i][j], s);
                     }
@@ -769,10 +772,11 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 #else
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 bool updated=false;
                 if (allow_unpaired[i+1][j-1]) 
                 {
-                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                     Ci_[i][j] = logsumexp(Ci_[i][j], s);
                 }
 
@@ -784,7 +788,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
                         if (!allow_unpaired[l+1][j-1]) break;
                         if (allow_paired[k][l])
                         {
-                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             Ci_[i][j] = logsumexp(Ci_[i][j], s);
                         }
                     }
@@ -792,7 +796,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     Ci_[i][j] = logsumexp(Ci_[i][j], s);
                 }
             }
@@ -805,7 +809,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
                 {
                     auto s = param_->score_multi_unpaired(i, u-1);
                     auto t = param_->score_multi_paired(u, j);
-                    auto r = Ci_[u][j] + s + t + loss_unpaired[i][u-1];
+                    auto r = Ci_[u][j] + s + t /*+ loss_unpaired[i][u-1]*/;
                     Mi_[i][j] = logsumexp(Mi_[i][j], r);
                 }
             }
@@ -821,7 +825,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 
             if (allow_unpaired[j][j])
             {
-                auto s = Mi_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                auto s = Mi_[i][j-1] + param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 Mi_[i][j] = logsumexp(Mi_[i][j], s);
             }
 
@@ -834,7 +838,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 
             if (allow_unpaired[j][j])
             {
-                auto s = M1i_[i][j-1] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                auto s = M1i_[i][j-1] + param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 M1i_[i][j] = logsumexp(M1i_[i][j], s);
             }
         }
@@ -846,7 +850,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
     {
         if (allow_unpaired[i][i])
         {
-            auto s = Fi_[i+1] + param_->score_external_unpaired(i, i) + loss_unpaired[i][i];
+            auto s = Fi_[i+1] + param_->score_external_unpaired(i, i) /*+ loss_unpaired[i][i]*/;
             Fi_[i] = logsumexp(Fi_[i], s);
         }
 
@@ -860,7 +864,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
         }
     }
 
-    return Fi_[1] /*+ loss_const*/;
+    return Fi_[1];
 }
 
 template < typename P, typename S >
@@ -880,7 +884,7 @@ compute_outside(const std::string& seq, Options opts)
 #endif
 
     const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
     Fo_[1] = param_->score_external_zero();
 
@@ -888,7 +892,7 @@ compute_outside(const std::string& seq, Options opts)
     {
         if (allow_unpaired[i][i])
         {
-            auto s = Fo_[i] + param_->score_external_unpaired(i, i) + loss_unpaired[i][i];
+            auto s = Fo_[i] + param_->score_external_unpaired(i, i) /*+ loss_unpaired[i][i]*/;
             Fo_[i+1] = logsumexp(Fo_[i+1], s);
         }
 
@@ -917,7 +921,7 @@ compute_outside(const std::string& seq, Options opts)
 
             if (allow_unpaired[j][j])
             {
-                auto s = M1o_[i][j] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                auto s = M1o_[i][j] + param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 M1o_[i][j-1] = logsumexp(M1o_[i][j-1], s);
             }
 
@@ -928,7 +932,7 @@ compute_outside(const std::string& seq, Options opts)
                 {
                     auto s = param_->score_multi_unpaired(i, u-1);
                     auto t = param_->score_multi_paired(u, j);
-                    auto r = Mo_[i][j] + s + t + loss_unpaired[i][u-1];
+                    auto r = Mo_[i][j] + s + t /*+ loss_unpaired[i][u-1]*/;
                     Co_[u][j] = logsumexp(Co_[u][j], r); 
                 }
             }
@@ -946,13 +950,14 @@ compute_outside(const std::string& seq, Options opts)
 
             if (allow_unpaired[j][j])
             {
-                auto s = Mo_[i][j] + param_->score_multi_unpaired(j, j) + loss_unpaired[j][j];
+                auto s = Mo_[i][j] + param_->score_multi_unpaired(j, j) /*+ loss_unpaired[j][j]*/;
                 Mo_[i][j-1] = logsumexp(Mo_[i][j-1], s);
             }
 
 #ifdef HELIX_LENGTH
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 /////
                 if (opts.max_helix>0)
                 {
@@ -965,7 +970,7 @@ compute_outside(const std::string& seq, Options opts)
                     for (m=2; m<=opts.max_helix; m++)
                     {
                         if (i+(m-1)>=j-(m-1) || !allow_paired[i+(m-1)][j-(m-1)]) break;
-                        lp += loss_paired[i+(m-2)][j-(m-2)];
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Co_[i][j] + param_->score_helix(i, j, m) + lp;
                         No_[i+(m-1)][j-(m-1)] = logsumexp(No_[i+(m-1)][j-(m-1)], s);
                     }
@@ -983,7 +988,7 @@ compute_outside(const std::string& seq, Options opts)
                 /////
                 if (i+1 < j-1 && allow_paired[i+1][j-1]) 
                 {
-                    auto s = Eo_[i][j] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired[i][j];
+                    auto s = Eo_[i][j] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired_ij;
                     Eo_[i+1][j-1] = logsumexp(Eo_[i+1][j-1], s);
                 }
                 No_[i][j] = logsumexp(No_[i][j], Eo_[i][j]);
@@ -991,7 +996,7 @@ compute_outside(const std::string& seq, Options opts)
                 /////
                 // if (allow_unpaired[i+1][j-1]) 
                 // {
-                //     auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                //     auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                 //     // update_max(Nv_[i][j], s, Nt_[i][j], TBType::N_HAIRPIN_LOOP);
                 //     Ni_[i][j] = logsumexp(Ni_[i][j], s);
                 // }
@@ -1005,7 +1010,7 @@ compute_outside(const std::string& seq, Options opts)
                         if (((k-1)-(i+1)+1)+((j-1)-(l+1)+1)==0) continue; // nothoing to do here for stacking
                         if (allow_paired[k][l])
                         {
-                            auto s = No_[i][j] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = No_[i][j] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             Co_[k][l] = logsumexp(Co_[k][l], s);
                         }
                     }
@@ -1013,8 +1018,8 @@ compute_outside(const std::string& seq, Options opts)
 
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s1 = No_[i][j] + M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
-                    auto s2 = No_[i][j] + Mi_[i+1][u-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s1 = No_[i][j] + M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
+                    auto s2 = No_[i][j] + Mi_[i+1][u-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     Mo_[i+1][u-1] = logsumexp(Mo_[i+1][u-1], s1);
                     M1o_[u][j-1] = logsumexp(M1o_[u][j-1], s2);
                 }
@@ -1022,11 +1027,12 @@ compute_outside(const std::string& seq, Options opts)
 #else
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 /////
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s1 = Co_[i][j] + M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
-                    auto s2 = Co_[i][j] + Mi_[i+1][u-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s1 = Co_[i][j] + M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
+                    auto s2 = Co_[i][j] + Mi_[i+1][u-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     Mo_[i+1][u-1] = logsumexp(Mo_[i+1][u-1], s1);
                     M1o_[u][j-1] = logsumexp(M1o_[u][j-1], s2);
                 }
@@ -1034,7 +1040,7 @@ compute_outside(const std::string& seq, Options opts)
                 /////
                 // if (allow_unpaired[i+1][j-1]) 
                 // {
-                //     auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                //     auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                 //     // updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HAIRPIN_LOOP);
                 //     Ci_[i][j] = logsumexp(Ci_[i][j], s);
                 // }
@@ -1047,7 +1053,7 @@ compute_outside(const std::string& seq, Options opts)
                         if (!allow_unpaired[l+1][j-1]) break;
                         if (allow_paired[k][l])
                         {
-                            auto s = Co_[i][j] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Co_[i][j] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             Co_[k][l] = logsumexp(Co_[k][l], s);
                         }
                     }
@@ -1068,7 +1074,7 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
     const auto log_partition_coefficient = Fi_[1];
 
     const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
     for (auto i=L; i>=1; i--)
     {
@@ -1077,9 +1083,10 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
 #ifdef HELIX_LENGTH
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 if (allow_unpaired[i+1][j-1]) 
                 {
-                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                     bpp[i][j] += exp(s + No_[i][j] - log_partition_coefficient);
                 }
 
@@ -1092,7 +1099,7 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
                         if (((k-1)-(i+1)+1)+((j-1)-(l+1)+1)==0) continue; // nothoing to do here for stacking
                         if (allow_paired[k][l])
                         {
-                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             bpp[i][j] += exp(s + No_[i][j] - log_partition_coefficient);
                         }
                     }
@@ -1100,14 +1107,14 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
 
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     bpp[i][j] += exp(s + No_[i][j] - log_partition_coefficient);
                 }
             
                 /////
                 if (i+1 < j-1 && allow_paired[i+1][j-1]) 
                 {
-                    auto s = Ei_[i+1][j-1] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired[i][j];
+                    auto s = Ei_[i+1][j-1] + param_->score_single_loop(i, j, i+1, j-1) + loss_paired_ij;
                     bpp[i][j] += exp(s + Eo_[i][j] - log_partition_coefficient);
                 }
 
@@ -1122,7 +1129,7 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
                     for (m=2; m<=opts.max_helix; m++)
                     {
                         if (i+(m-1)>=j-(m-1) || !allow_paired[i+(m-1)][j-(m-1)]) break;
-                        lp += loss_paired[i+(m-2)][j-(m-2)];
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ni_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         float p = exp(s + Co_[i][j] - log_partition_coefficient);
                         for (auto k=2; k<m; k++)
@@ -1140,10 +1147,11 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
 #else
             if (allow_paired[i][j])
             {
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 bool updated=false;
                 if (allow_unpaired[i+1][j-1]) 
                 {
-                    auto s = param_->score_hairpin(i, j) + loss_paired[i][j] + loss_unpaired[i+1][j-1];
+                    auto s = param_->score_hairpin(i, j) + loss_paired_ij /*+ loss_unpaired[i+1][j-1]*/;
                     bpp[i][j] += exp(s + Co_[i][j] - log_partition_coefficient);
                 }
 
@@ -1155,7 +1163,7 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
                         if (!allow_unpaired[l+1][j-1]) break;
                         if (allow_paired[k][l])
                         {
-                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired[i][j] + loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1];
+                            auto s = Ci_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
                             bpp[i][j] += exp(s + Co_[i][j] - log_partition_coefficient);
                         }
                     }
@@ -1163,7 +1171,7 @@ compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::
 
                 for (auto u=i+2; u<=j-1; u++)
                 {
-                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired[i][j];
+                    auto s = Mi_[i+1][u-1]+M1i_[u][j-1] + param_->score_multi_loop(i, j) + loss_paired_ij;
                     bpp[i][j] += exp(s + Co_[i][j] - log_partition_coefficient);
                 }
             }

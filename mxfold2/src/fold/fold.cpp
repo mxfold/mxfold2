@@ -33,7 +33,7 @@ allow_paired(char x, char y)
 auto
 Fold::Options::
 make_constraint(const std::string& seq, bool canonical_only /*=true*/) 
-    -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>
+    -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>> const
 {
     const auto L = seq.size();
     stru.reserve(L+1);
@@ -122,13 +122,15 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/)
 
 auto 
 Fold::Options::
-make_penalty(size_t L) 
-    -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>, float>
+make_additional_scores(size_t L) 
+    -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>> const
 {
     TriMatrix<float> p_paired(L+1, 0.0);
     std::vector<std::vector<float>> p_unpaired(L+1, std::vector<float>(L+1, 0.0));
+
+    // margin terms
     float p_const = 0;
-    if (use_penalty)
+    if (use_margin)
     {
         if (ref2.size() == 0)
         {
@@ -185,6 +187,12 @@ make_penalty(size_t L)
                 p_const += pos_paired;
             }
         }
+
+        // pseudo-energy terms
+        if (score_paired_position_.size() >= L)
+            for (auto i=score_paired_position_.size(); i>=1; i--)
+                for (auto j=i+1; j<=L; j++)
+                    p_paired[i][j] += score_paired_position_[i-1] + score_paired_position_[j-1];
     }
-    return std::make_tuple(p_paired, p_unpaired, p_const);
+    return std::make_tuple(p_paired, p_unpaired);
 }

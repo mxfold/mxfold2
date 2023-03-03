@@ -50,7 +50,7 @@ class Train:
         pass
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]],
+                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
                 clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
         model.train()
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
@@ -59,11 +59,12 @@ class Train:
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs in data_loader:
+                assert('BPSEQ' in pairs)
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
                 optimizer.zero_grad()
-                loss = torch.sum(loss_fn(seqs, pairs, fname=fnames))
+                loss = torch.sum(loss_fn(seqs, pairs['BPSEQ'], fname=fnames))
                 # if float(loss.item()) < 0.:
                 #     next
                 loss_total += loss.item()
@@ -95,15 +96,16 @@ class Train:
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, torch.Tensor]]) -> None:
+                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
         model.eval()
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs in data_loader:
+                assert('BPSEQ' in pairs)
                 n_batch = len(seqs)
-                loss = loss_fn(seqs, pairs, fname=fnames)
+                loss = loss_fn(seqs, pairs['BPSEQ'], fname=fnames)
                 loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
@@ -111,7 +113,6 @@ class Train:
 
         elapsed_time = time.time() - start
         if self.writer is not None:
-            self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
             self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 

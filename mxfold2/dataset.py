@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import math
 from itertools import groupby
-from typing import Generator
+from typing import Generator, Any
 
 import torch
 from torch.utils.data import Dataset
 
 
-class FastaDataset(Dataset[tuple[str, str, torch.Tensor]]):
+class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __init__(self, fasta: str) -> None:
         super(Dataset, self).__init__()
         it = self.fasta_iter(fasta)
@@ -23,7 +23,7 @@ class FastaDataset(Dataset[tuple[str, str, torch.Tensor]]):
     def __getitem__(self, idx) -> tuple[str, str, torch.Tensor]:
         return self.data[idx]
 
-    def fasta_iter(self, fasta_name: str) -> Generator[tuple[str, str, torch.Tensor], None, None]:
+    def fasta_iter(self, fasta_name: str) -> Generator[tuple[str, str, dict[str, Any]], None, None]:
         fh = open(fasta_name)
         faiter = (x[1] for x in groupby(fh, lambda line: line[0] == ">"))
 
@@ -34,10 +34,10 @@ class FastaDataset(Dataset[tuple[str, str, torch.Tensor]]):
             # join all sequence lines to one.
             seq = "".join(s.strip() for s in faiter.__next__())
 
-            yield (headerStr, seq, torch.tensor([]))
+            yield (headerStr, seq, {'FASTA': torch.Tensor([])})
 
 
-class BPseqDataset(Dataset[tuple[str, str, torch.Tensor]]):
+class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __init__(self, bpseq_list: str) -> None:
         super(Dataset, self).__init__()
         self.data = []
@@ -52,10 +52,10 @@ class BPseqDataset(Dataset[tuple[str, str, torch.Tensor]]):
     def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx) -> tuple[str, str, torch.Tensor]:
+    def __getitem__(self, idx) -> tuple[str, str, dict[str, torch.Tensor]]:
         return self.data[idx]
 
-    def read(self, filename: str) -> tuple[str, str, torch.Tensor]:
+    def read(self, filename: str) -> tuple[str, str, dict[str, torch.Tensor]]:
         with open(filename) as f:
             structure_is_known = True
             p: list[int | list[float]] = [0]
@@ -86,11 +86,12 @@ class BPseqDataset(Dataset[tuple[str, str, torch.Tensor]]):
         
         if structure_is_known:
             seq = ''.join(s)
-            return (filename, seq, torch.tensor(p))
+            return (filename, seq, {'BPSEQ': torch.tensor(p)})
         else:
             seq = ''.join(s)
             p.pop(0)
-            return (filename, seq, torch.tensor(p))
+            return (filename, seq, {'BPSEQ2': torch.tensor(p)})
+            #return (filename, seq, p)
 
     def fasta_iter(self, fasta_name: str) -> Generator[tuple[str, str], None, None]:
         fh = open(fasta_name)
@@ -105,7 +106,7 @@ class BPseqDataset(Dataset[tuple[str, str, torch.Tensor]]):
 
             yield (headerStr, seq)
 
-    def read_pdb(self, seq_filename: str, label_filename: str) -> tuple[str, str, torch.Tensor]:
+    def read_pdb(self, seq_filename: str, label_filename: str) -> tuple[str, str, dict[str, torch.Tensor]]:
         it = self.fasta_iter(seq_filename)
         h, seq = next(it)
 
@@ -116,4 +117,4 @@ class BPseqDataset(Dataset[tuple[str, str, torch.Tensor]]):
                 if len(l) == 2 and l[0].isdecimal() and l[1].isdecimal():
                     p.append([int(l[0]), int(l[1])])
 
-        return (h, seq, torch.tensor(p))
+        return (h, seq, {'PDB': torch.tensor(p)})

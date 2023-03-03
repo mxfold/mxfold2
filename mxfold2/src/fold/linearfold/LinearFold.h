@@ -146,7 +146,7 @@ public:
 #if 0
     void outside(std::vector<int> next_pair[]); //for zuker subopt
 #endif
-    auto traceback(const std::string& seq, const std::vector<int>* ref, int from_pos=0) -> std::pair<value_type, std::vector<uint32_t>>;
+    auto traceback(const std::string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>;
 
 private:
 #if 0

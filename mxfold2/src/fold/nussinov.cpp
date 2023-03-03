@@ -25,7 +25,7 @@ compute_viterbi(const std::string& seq, Options opts /*= Options()*/) -> ScoreTy
     Dt_.clear(); Dt_.resize(L+1);
 
     const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    const auto [loss_paired, loss_unpaired] = opts.make_additional_scores(L);
 
     std::vector<std::vector<u_int32_t>> split_point_l(L+1);
 
@@ -84,7 +84,7 @@ compute_viterbi(const std::string& seq, Options opts /*= Options()*/) -> ScoreTy
         }
     }
 
-    return Dv_[1][L] /*+ loss_const*/;
+    return Dv_[1][L];
 }
 
 template < typename P, typename S >
@@ -142,7 +142,7 @@ traceback_viterbi(const std::string& seq, Options opts /*= Options()*/) -> std::
 {
     const auto L = Dt_.size()-1;
     std::vector<u_int32_t> pair(L+1, 0);
-    const auto [loss_paired, loss_unpaired, loss_const] = opts.make_penalty(L);
+    const auto [loss_paired, loss_unpaired] = opts.make_additional_scores(L);
     std::queue<std::tuple<TB, u_int32_t, u_int32_t>> tb_queue;
     tb_queue.emplace(Dt_[1][L], 1, L);
     auto e = 0.;
@@ -188,7 +188,7 @@ traceback_viterbi(const std::string& seq, Options opts /*= Options()*/) -> std::
         }
     }
 
-    return std::make_pair(e /*+ loss_const*/, pair);
+    return std::make_pair(e, pair);
 }
 
 #ifdef TEST
