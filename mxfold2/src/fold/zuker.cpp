@@ -48,7 +48,7 @@ update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, 
 template < typename P, typename S >
 auto 
 Zuker<P, S>::
-compute_viterbi(const std::string& seq, Options opts) -> ScoreType
+compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 {
     const auto L = seq.size();
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
@@ -472,7 +472,7 @@ traceback_viterbi() -> std::vector<u_int32_t>
 template < typename P, typename S >
 auto
 Zuker<P, S>::
-traceback_viterbi(const std::string& seq, Options opts) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>
+traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>
 {
     const auto L = Ft_.size()-2;
     std::vector<u_int32_t> pair(L+1, 0);
@@ -684,7 +684,7 @@ logsumexp(S x, S y)
 template < typename P, typename S >
 auto 
 Zuker<P, S>::
-compute_inside(const std::string& seq, Options opts) -> ScoreType
+compute_inside(const std::string& seq, const Options& opts) -> ScoreType
 {
     const auto L = seq.size();
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
@@ -870,7 +870,7 @@ compute_inside(const std::string& seq, Options opts) -> ScoreType
 template < typename P, typename S >
 void 
 Zuker<P, S>::
-compute_outside(const std::string& seq, Options opts)
+compute_outside(const std::string& seq, const Options& opts)
 {
     const auto L = seq.size();
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
@@ -1067,7 +1067,7 @@ compute_outside(const std::string& seq, Options opts)
 template < typename P, typename S >
 auto 
 Zuker<P, S>::
-compute_basepairing_probabilities(const std::string& seq, Options opts) -> std::vector<std::vector<float>>
+compute_basepairing_probabilities(const std::string& seq, const Options& opts) -> std::vector<std::vector<float>>
 {
     const auto L = seq.size();
     std::vector<std::vector<float>> bpp(L+1, std::vector<float>(L+1, 0.0));

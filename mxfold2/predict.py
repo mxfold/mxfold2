@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import random
 import time
@@ -42,24 +43,22 @@ class Predict:
                 output_bpseq: Optional[str] = None, 
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
-                use_constraint: bool = False) -> None:
+                use_constraint: bool = False,
+                pseudoenergy: Optional[torch.tensor] = None) -> None:
         res_fn = open(result, 'w') if result is not None else None
         model.eval()
         with torch.no_grad():
             for headers, seqs, refs in data_loader:
                 start = time.time()
+                constraint = refs['BPSEQ'] if use_constraint and 'BPSEQ' in refs else None
+                pseudoenergy = [pseudoenergy]*len(seqs) if pseudoenergy is not None else None
                 if output_bpp is None:
-                    if use_constraint and 'BPSEQ' in refs:
-                        scs, preds, bps = model(seqs, constraint=refs['BPSEQ'])
-                    else:
-                        scs, preds, bps = model(seqs)
+                    scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                     pfs = bpps = [None] * len(preds)
                 else:
-                    if use_constraint and 'BPSEQ' in refs:
-                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=refs)
-                    else:
-                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, )
+                    scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 elapsed_time = time.time() - start
+
                 refs = refs['BPSEQ'] if 'BPSEQ' in refs else refs['FASTA'] if 'FASTA' in refs else [None] * len(seq)
                 for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs, scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
@@ -218,10 +217,30 @@ class Predict:
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
 
+        pseudoenergy = None
+        if args.shape is not None:
+            pseudoenergy = self.load_shape_reactivity(args.shape, args.shape_intercept, args.shape_slope)
+
         self.predict(model=model, data_loader=test_loader, 
-                    output_bpseq=args.bpseq, output_bpp=args.bpp, 
+                    output_bpseq=args.bpseq, output_bpp=args.bpp, pseudoenergy=pseudoenergy,
                     result=args.result, use_constraint=args.use_constraint)
 
+
+    def load_shape_reactivity(self, fname: str, intercept: float, slope: float) -> torch.tensor:
+        r = []
+        with open(fname) as f:
+            for l in f:
+                idx, val = l.rstrip('\n').split()
+                idx, val = int(idx), float(val)
+                while len(r) < idx:
+                    r.append(-999)
+                r[idx-1] = val
+        # Deigan’s pseudoenergy approach
+        r = torch.tensor(r, dtype=float)
+        not_na = r > -1
+        r[torch.logical_not(not_na)] = 0
+        r[not_na] = slope * torch.log(r[not_na]+1) + intercept
+        return r
 
     @classmethod
     def add_args(cls, parser):
@@ -243,6 +262,11 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
         subparser.add_argument('--bpp', type=str, default=None,
                             help='output the base-pairing probability matrix to the specified directory')
+        subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.6 kcal/mol.')
+        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+                            help='Specify a slope used with SHAPE restraints.  Default is 1.8 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 

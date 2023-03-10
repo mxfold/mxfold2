@@ -25,10 +25,8 @@ class Fold
             size_t max_internal;
             size_t max_helix;
             std::vector<u_int32_t> stru;
-            std::vector<std::pair<u_int32_t, u_int32_t>> stru2;
             bool use_margin;
             std::vector<u_int32_t> ref;
-            std::vector<std::pair<u_int32_t,u_int32_t>> ref2;
             float pos_paired;
             float neg_paired;
             float pos_unpaired;
@@ -70,14 +68,7 @@ class Fold
                 this->stru = s;
                 return *this;
             }
-#if 0
-            Options& constraints(const std::vector<std::pair<u_int32_t, u_int32_t>>& s)
-            {
-                throw "this call has been obsolete.";
-                this->stru2 = s;
-                return *this;
-            }
-#endif
+
             Options& margin_terms(const std::vector<u_int32_t>& ref,
                         float pos_paired=0, float neg_paired=0, float pos_unpaired=0, float neg_unpaired=0)
             {
@@ -89,20 +80,7 @@ class Fold
                 this->neg_unpaired = neg_unpaired;
                 return *this;
             }
-#if 0
-            Options& margin_terms( 
-                        const std::vector<std::pair<u_int32_t, u_int32_t>>& ref2, 
-                        float pos_paired=0, float neg_paired=0, float pos_unpaired=0, float neg_unpaired=0)
-            {
-                this->use_margin = pos_paired!=0 || neg_paired!=0 || pos_unpaired!=0 || neg_unpaired!=0;
-                this->ref2 = ref2;
-                this->pos_paired = pos_paired;
-                this->neg_paired = neg_paired;
-                this->pos_unpaired = pos_unpaired;
-                this->neg_unpaired = neg_unpaired;
-                return *this;
-            }
-#endif
+
             Options& score_paired_position(const std::vector<float>& sc)
             {
                 if (sc.size() > 0)
@@ -126,11 +104,11 @@ class Fold
                 return s;
             }
 
-            auto make_constraint(const std::string& seq, bool canonical_only=true)
-                -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>> const;
-            auto make_additional_scores(size_t L)
-                -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>> const;
-            bool allow_paired(char x, char y);
+            auto make_constraint(const std::string& seq, bool canonical_only=true) const
+                -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
+            auto make_additional_scores(size_t L) const
+                -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>>;
+            bool allow_paired(char x, char y) const;
         };
 
     public:

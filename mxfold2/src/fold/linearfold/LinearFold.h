@@ -105,10 +105,20 @@ enum {
 template < typename P, typename S = typename P::ScoreType >
 class BeamCKYParser : public Fold {
 public:
+    struct Options : public Fold::Options
+    {
+        std::vector<int> cons;
+        Options& constraints(const std::vector<int>& c)
+        {
+            this->cons = c;
+            return *this;
+        }
+    };
+
     std::unique_ptr<P> param_;
     int beam;
-    int min_hairpin_loop;
-    int max_single_loop;
+    //int min_hairpin_loop;
+    //int max_single_loop;
     std::pair<value_type, value_type> loss_paired_;
     bool is_verbose;
     bool use_constraints; // lisiz, add constraints
@@ -129,11 +139,7 @@ public:
 
     BeamCKYParser(
                   std::unique_ptr<P>&& p, 
-                  int beam_size=100,
-                  int min_hairpin_loop=3,
-                  int max_single_loop=30,
-                  value_type pos_paired=0.0,
-                  value_type neg_paired=0.0 //,
+                  int beam_size=100
                   //bool is_verbose=false,
                   //bool is_constraints=false,
                   //bool zuker_subopt=false,
@@ -142,11 +148,11 @@ public:
                   //bool is_fasta=false
                   ); // lisiz, add constraints
 
-    auto parse(const std::string& seq, const std::vector<int>* cons, const std::vector<int>* ref) -> DecoderResult;
+    auto parse(const std::string& seq, const Options& opts = Options()) -> DecoderResult;
 #if 0
     void outside(std::vector<int> next_pair[]); //for zuker subopt
 #endif
-    auto traceback(const std::string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>;
+    auto traceback(const std::string& seq, const Options& opts = Options()) -> std::pair<value_type, std::vector<uint32_t>>;
 
 private:
 #if 0
@@ -186,8 +192,8 @@ private:
     std::vector<State> bestC_beta;
     
     // SHAPE
-    std::vector<double> SHAPE_data;
-    std::vector<int> pseudo_energy_stack;
+    // std::vector<double> SHAPE_data;
+    // std::vector<int> pseudo_energy_stack;
 
 
     // lisiz: constraints
@@ -217,11 +223,6 @@ private:
 
     // vector to store the scores at each beam temporarily for beam pruning
     std::vector<std::pair<value_type, int>> scores;
-
-    value_type loss_paired(const std::vector<int>* ref, int i, int j) const { 
-        if (ref) return (*ref)[i]==j ? loss_paired_.first : loss_paired_.second;
-        return 0.0;
-    }
 };
 
 };

@@ -6,7 +6,7 @@ authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
 repository = "https://github.com/mxfold/mxfold2"
 readme = "README.md"
 license = "MIT"
-build = "build.py"
+#build = "build.py"
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -31,6 +31,10 @@ mxfold2 = "mxfold2.__main__:main"
 # name = "pytorch-cu116"
 # url = "https://download.pytorch.org/whl/cu116/"
 # secondary = true
+
+[tool.poetry.build]
+script = "build.py"
+generate-setup-file = true
 
 [build-system]
 requires = ["poetry-core"]

@@ -70,6 +70,7 @@ class AbstractFold(nn.Module):
             max_internal_length: int = 30, max_helix_length: int = 30, 
             constraint: Optional[list[torch.Tensor]] = None, 
             reference: Optional[list[torch.Tensor]] = None,
+            pseudoenergy: Optional[list[torch.Tensor]] = None,
             perturb: float = 0.0,
             loss_pos_paired: float = 0.0, loss_neg_paired: float = 0.0, 
             loss_pos_unpaired: float = 0.0, loss_neg_unpaired: float = 0.0) \
@@ -93,8 +94,13 @@ class AbstractFold(nn.Module):
         pairs: list[list[int]] = []
         pfs: list[float] = []
         bpps: list[np.ndarray] = []
+        paired_position_scores = None
         for i in range(len(seq)):
             param_on_cpu = self.make_param_on_cpu(param[i])
+            if pseudoenergy is not None:
+                paired_position_scores = (-pseudoenergy[i]).tolist() 
+                while len(paired_position_scores) < len(seq[i]):
+                    paired_position_scores.append(0.0)
             with torch.no_grad():
                 self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
@@ -102,6 +108,7 @@ class AbstractFold(nn.Module):
                             allowed_pairs="aucggu",
                             constraint=constraint[i].tolist() if constraint is not None else None, 
                             reference=reference[i].tolist() if reference is not None else None, 
+                            paired_position_scores=paired_position_scores,
                             loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                             loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
                 v, pred, pair = self.fold_wrapper.traceback_viterbi()
@@ -113,6 +120,7 @@ class AbstractFold(nn.Module):
                                 allowed_pairs="aucggu",
                                 constraint=constraint[i].tolist() if constraint is not None else None, 
                                 reference=reference[i].tolist() if reference is not None else None, 
+                                paired_position_scores=paired_position_scores,
                                 loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
                                 loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
                     pfs.append(pf)

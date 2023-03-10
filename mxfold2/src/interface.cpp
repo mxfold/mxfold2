@@ -53,26 +53,6 @@ protected:
         }
         return ret;
     }
-#if 0
-    auto convert_pairs(py::list pairs) const
-    {
-        std::vector<std::pair<u_int32_t, u_int32_t>> ret;
-        for (auto pair: pairs)
-        {
-            if (py::isinstance<py::list>(pair))
-            {
-                auto p = py::cast<py::list>(pair);
-                if (p.size()==2)
-                {
-                    auto p0 = py::cast<py::int_>(p[0]);
-                    auto p1 = py::cast<py::int_>(p[1]);
-                    ret.emplace_back(p0, p1);
-                }
-            }
-        }
-        return ret;
-    }
-#endif
 
     template < typename V, typename W >
     auto convert_list(py::list r) const
@@ -131,11 +111,6 @@ public:
             auto c1 = convert_constraints(c);
             if (c1.size()>0)
                 options.constraints(c1);
-#if 0
-            auto c2 = convert_pairs(c);
-            if (c2.size()>0)
-                options.constraints(c2);
-#endif
         }
         if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
         {
@@ -143,11 +118,6 @@ public:
             auto r1 = convert_reference(r);
             if (r1.size() > 0)
                 options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-#if 0
-            auto r2 = convert_pairs(r);
-            if (r2.size() > 0)
-                options.margin_terms(r2, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-#endif
         }
         if (py::isinstance<py::list>(paired_position_scores))
         {
@@ -238,11 +208,6 @@ public:
             auto c1 = convert_constraints(c);
             if (c1.size()>0)
                 options.constraints(c1);
-#if 0
-            auto c2 = convert_pairs(c);
-            if (c2.size()>0)
-                options.constraints(c2);
-#endif
         }
         if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
         {
@@ -250,11 +215,6 @@ public:
             auto r1 = convert_reference(r);
             if (r1.size() > 0)
                 options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-#if 0
-            auto r2 = convert_pairs(r);
-            if (r2.size() > 0)
-                options.margin_terms(r2, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-#endif
         }
         std::swap(options, options_);
         return options_;
@@ -264,7 +224,8 @@ public:
                 int min_hairpin, int max_internal, int max_helix,
                 const std::string& allowed_pairs,
                 py::object constraint, py::object reference, 
-                float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
+                float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+                py::object paired_position_scores)
     {
         set_param(seq, pa);
         set_options(min_hairpin, max_internal, max_helix, allowed_pairs, constraint, reference, 
@@ -291,53 +252,71 @@ class LinearFoldWrapper : public FoldWrapper
 public:
     LinearFoldWrapper(int beam_size = 100) : beam_size_(beam_size) {}
 
-    void set_param(const std::string& seq, py::object pa,
-        int beam, int min_hairpin, int max_internal, float pos_paired, float neg_paired)
+    void set_param(const std::string& seq, py::object pa, int beam)
     {
         seq_ = seq;
         std::transform(seq_.begin(), seq_.end(), seq_.begin(), ::toupper);
         auto param = std::make_unique<ParamClass>(seq, pa);
-        f_ = std::make_unique<LinearFold::BeamCKYParser<ParamClass>>(std::move(param),
-            beam, min_hairpin, max_internal, pos_paired, neg_paired);
+        f_ = std::make_unique<LinearFold::BeamCKYParser<ParamClass>>(std::move(param), beam);
     }
 
-    void set_options(const std::string& allowed_pairs, py::object constraint, py::object reference)
-                
-    {     // TODO: support {pos, neg}_unpaired for LinearFold
-    #if 0 // TODO: support allowed_pairs for LinearFold, which is needed for modifications
+    auto set_options(int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+            py::object paired_position_scores)
+    {   // TODO: support {pos, neg}_unpaired for LinearFold
+        // TODO: support allowed_pairs for LinearFold, which is needed for modifications
         typename LinearFold::BeamCKYParser<ParamClass>::Options options;
+        options.min_hairpin_loop_length(min_hairpin)
+            .max_internal_loop_length(max_internal)
+            .max_helix_length(max_helix);
+
         for (auto i=0; i!=allowed_pairs.size(); i+=2)
             options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-    #endif
-        cons_.clear();
+
         if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
         {
             auto c = py::cast<py::list>(constraint);
-            cons_ = convert_constraints(c);
+            auto c1 = convert_constraints(c);
+            if (c1.size()>0)
+                options.constraints(c1);
         }
-        ref_.clear();
         if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
         {
             auto r = py::cast<py::list>(reference);
-            ref_ = convert_reference(r);
+            auto r1 = convert_reference(r);
+            if (r1.size() > 0)
+                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
         }
+        if (py::isinstance<py::list>(paired_position_scores))
+        {
+            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
+            options.score_paired_position(sc);
+        }
+
+        std::swap(options, options_);
+        return options_;
     }
     
     auto compute_viterbi(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
             py::object constraint, py::object reference, 
-            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+            py::object paired_position_scores)
     {
-        set_param(seq, pa, beam_size_, min_hairpin, max_internal, pos_paired, neg_paired);
-        set_options(allowed_pairs, constraint, reference);
-        auto r = f_->parse(seq_, cons_.size() > 0 ? &cons_: NULL, ref_.size() > 0 ? &ref_ : NULL);
+        set_param(seq, pa, beam_size_);
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
+                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
+                paired_position_scores);
+        auto r = f_->parse(seq_, options_);
         return r.score;
     }
 
     auto traceback_viterbi()
     {
-        auto [e, p] = f_->traceback(seq_, ref_.size() > 0 ? &ref_ : NULL);
+        auto [e, p] = f_->traceback(seq_, options_);
         auto s = LinearFold::BeamCKYParser<ParamClass>::make_paren(p);
         return std::make_tuple(e, s, p);
     }
@@ -380,25 +359,10 @@ protected:
         return ret;
     }
 
-    auto convert_reference(py::list reference) const
-    {
-
-        auto r = py::cast<py::list>(reference);
-        if (r.size()>0 && py::isinstance<py::int_>(r[0]))
-        {
-            std::vector<int> c(r.size()-1);
-            std::transform(std::begin(r)+1, std::end(r), std::begin(c),
-                        [](auto x) -> int { return static_cast<int>(py::cast<py::int_>(x))-1; });
-            return c;
-        }
-        return std::vector<int>();
-    }
-
 private:
     std::string seq_;
     std::unique_ptr<LinearFold::BeamCKYParser<ParamClass>> f_;
-    std::vector<int> cons_;
-    std::vector<int> ref_;
+    typename LinearFold::BeamCKYParser<ParamClass>::Options options_;
     int beam_size_;
 };
 
@@ -653,7 +617,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_paired"_a=0.0, 
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
-            "loss_neg_unpaired"_a=0.0)
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &NussinovWrapper<PositionalBasePairScore>::traceback_viterbi,
             "traceback for positional Nussinov model");
 
@@ -671,7 +636,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_paired"_a=0.0, 
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
-            "loss_neg_unpaired"_a=0.0)
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinearFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
             "traceback for LinearFold-V");
 #if 0
@@ -725,7 +691,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_paired"_a=0.0, 
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
-            "loss_neg_unpaired"_a=0.0)
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighbor>::traceback_viterbi,
             "traceback for LinearFold model");
 
@@ -743,7 +710,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_paired"_a=0.0, 
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
-            "loss_neg_unpaired"_a=0.0)
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
             "traceback for LinearFold model");
 
@@ -761,7 +729,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_paired"_a=0.0, 
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
-            "loss_neg_unpaired"_a=0.0)
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor2>::traceback_viterbi,
             "traceback for LinearFold model");
 
@@ -779,7 +748,8 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_paired"_a=0.0, 
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
-            "loss_neg_unpaired"_a=0.0)
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
             "traceback for LinearFold model");
 }

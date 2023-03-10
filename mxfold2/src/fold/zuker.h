@@ -29,12 +29,12 @@ class Zuker : public Fold
 
     public:
         Zuker(std::unique_ptr<P>&& p);
-        auto compute_viterbi(const std::string& seq, Options opt = Options()) -> ScoreType;
+        auto compute_viterbi(const std::string& seq, const Options& opt = Options()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
-        auto traceback_viterbi(const std::string& seq, Options opt = Options()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
-        auto compute_inside(const std::string& seq, Options opt = Options()) -> ScoreType;
-        void compute_outside(const std::string& seq, Options opt = Options());
-        auto compute_basepairing_probabilities(const std::string& seq, Options opt = Options()) -> std::vector<std::vector<float>>;
+        auto traceback_viterbi(const std::string& seq, const Options& opt = Options()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
+        auto compute_inside(const std::string& seq, const Options& opt = Options()) -> ScoreType;
+        void compute_outside(const std::string& seq, const Options& opt = Options());
+        auto compute_basepairing_probabilities(const std::string& seq, const Options& opt = Options()) -> std::vector<std::vector<float>>;
         const P& param_model() const { return *param_; }
 
     private:

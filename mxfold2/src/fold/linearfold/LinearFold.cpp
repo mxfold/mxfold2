@@ -73,7 +73,7 @@ void BeamCKYParser<P,S>::sort_keys(std::unordered_map<int, State> &map, std::vec
 #endif
 
 template < typename P, typename S >
-auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* ref) -> std::pair<value_type, std::vector<uint32_t>>
+auto BeamCKYParser<P,S>::traceback(const string& seq, const Options& opts) -> std::pair<value_type, std::vector<uint32_t>>
 {
     std::vector<u_int32_t> bp(seq.size()+1, 0);
     stack<tuple<int, int, State>> stk;
@@ -107,7 +107,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     bp[j+1] = i+1;
 
 #if defined(FOR_MXFOLD2)
-                    value_type newscore = param_->score_hairpin(i+1, j+1) + loss_paired(ref, i, j);
+                    value_type newscore = param_->score_hairpin(i+1, j+1) + opts.additional_paired_score(i+1, j+1);
                     param_->count_hairpin(i+1, j+1, 1.);
 #elif defined(lv)
                     int tetra_hex_tri = -1;
@@ -134,7 +134,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     q = j - state.trace.paddings.l2;
                     stk.push(make_tuple(p, q, bestP[q][p]));
 #ifdef FOR_MXFOLD2
-                    value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + loss_paired(ref, i, j);
+                    value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) +  opts.additional_paired_score(i+1, j+1);
                     param_->count_single_loop(i+1, j+1, p+1, q+1, 1.);
 #else
                     int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
@@ -158,7 +158,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     p = i + 1;
                     q = j - 1;
 #ifdef FOR_MXFOLD2
-                    value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + loss_paired(ref, i,  j);
+                    value_type newscore = param_->score_single_loop(i+1, j+1, p+1, q+1) + opts.additional_paired_score(i+1, j+1);
                     param_->count_single_loop(i+1, j+1, p+1, q+1, 1.);
 #else
                     int nucp_1 = nucs[p-1], nucp = nucs[p], nucq = nucs[q], nucq1 = nucs[q+1];
@@ -214,7 +214,7 @@ auto BeamCKYParser<P,S>::traceback(const string& seq, const std::vector<int>* re
                     bp[j+1] = i+1;
                     stk.push(make_tuple(i, j, bestMulti[j][i]));
 #ifdef FOR_MXFOLD2
-                    value_type newscore = param_->score_multi_loop(i+1, j+1) + loss_paired(ref, i, j);
+                    value_type newscore = param_->score_multi_loop(i+1, j+1) + opts.additional_paired_score(i+1, j+1);
                     param_->count_multi_loop(i+1, j+1, 1.);
 #elif defined(lv)
                     value_type newscore = - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
@@ -1091,11 +1091,14 @@ bool BeamCKYParser<P,S>::allow_paired(int i, int j, const vector<int>* cons, cha
 }
 
 template < typename P, typename S >
-auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const vector<int>* ref) -> DecoderResult
+auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> DecoderResult
 {
-    use_constraints = cons!=NULL;
+    use_constraints = opts.cons.size() > 0;
     std::vector<int> cons2;
-    if (use_constraints) cons2 = *cons;
+    if (use_constraints) cons2 = opts.cons;
+    
+    const int min_hairpin_loop = opts.min_hairpin;
+    const int max_single_loop = opts.max_internal;
 
     struct timeval parse_starttime, parse_endtime;
 
@@ -1228,7 +1231,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
 
                     value_type newscore;
 #ifdef FOR_MXFOLD2
-                    newscore = param_->score_hairpin(j+1, jnext+1) + loss_paired(ref, j, jnext);
+                    newscore = param_->score_hairpin(j+1, jnext+1) + opts.additional_paired_score(j+1, jnext+1);
 #elif defined(lv)
                     int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
@@ -1337,7 +1340,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
                 {
                     value_type newscore;
 #ifdef FOR_MXFOLD2
-                    newscore = state.score + param_->score_multi_loop(i+1, j+1) + loss_paired(ref, i, j);
+                    newscore = state.score + param_->score_multi_loop(i+1, j+1) + opts.additional_paired_score(i+1, j+1);
 #elif defined(lv)
                     newscore = state.score - v_score_multi(i, j, nuci, nuci1, nucs[j-1], nucj, seq_length);
 #else
@@ -1535,7 +1538,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
                                 value_type newscore;
 #ifdef FOR_MXFOLD2 
                                 newscore = param_->score_single_loop(p+1, q+1, i+1, j+1)
-                                    + state.score + loss_paired(ref, p, q);
+                                    + state.score + opts.additional_paired_score(p+1, q+1);
 #elif defined(lv)
                                 newscore = -v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
                                     + state.score;
@@ -1552,7 +1555,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const vector<int>* cons, const
                                 value_type newscore;
 #ifdef FOR_MXFOLD2
                                 newscore = param_->score_single_loop(p+1, q+1, i+1, j+1)
-                                    + state.score + loss_paired(ref, p, q);
+                                    + state.score + opts.additional_paired_score(p+1, q+1);
 #elif defined(lv)
                                 newscore = - v_score_single(p,q,i,j, nucp, nucp1, nucq_1, nucq, nuci_1, nuci, nucj, nucj1)
                                     + state.score;
@@ -2236,11 +2239,7 @@ void BeamCKYParser<P,S>::outside(vector<int> next_pair[]){
 template < typename P, typename S >
 BeamCKYParser<P,S>::BeamCKYParser(
                              std::unique_ptr<P>&& p, 
-                             int beam_size /*=100*/,
-                             int min_hairpin_loop /*=3*/,
-                             int max_single_loop /*=30*/,
-                             value_type pos_paired /*=0.0*/,
-                             value_type neg_paired /*=0.0*/ //,
+                             int beam_size /*=100*/
                              //bool verbose,
                              //bool constraints,
                              //bool zuker_subopt,
@@ -2250,9 +2249,6 @@ BeamCKYParser<P,S>::BeamCKYParser(
                              )
     : param_(std::move(p)),
       beam(beam_size), 
-      min_hairpin_loop(min_hairpin_loop),
-      max_single_loop(max_single_loop),
-      loss_paired_(pos_paired, neg_paired),
       is_verbose(false),
       use_constraints(false)
       //zuker(zuker_subopt),
