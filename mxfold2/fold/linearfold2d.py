@@ -13,7 +13,7 @@ from .layers import LengthLayer, NeuralNet
 
 class LinearFold2D(AbstractFold):
     def __init__(self, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
-        super(LinearFold2D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size))
+        super(LinearFold2D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size), kwargs['use_fp'])
 
         self.model_type = '4' # default
         if self.model_type == "C":

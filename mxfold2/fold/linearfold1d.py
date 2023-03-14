@@ -11,7 +11,7 @@ from .layers import LengthLayer, NeuralNet1D
 
 class LinearFold1D(AbstractFold):
     def __init__(self, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
-        super(LinearFold1D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size))
+        super(LinearFold1D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size), kwargs['use_fp'])
 
         self.net = NeuralNet1D(n_out=1, **kwargs)
 

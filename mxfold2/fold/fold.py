@@ -8,12 +8,21 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from ..nucleosides import supported_nucleosides
 
 class AbstractFold(nn.Module):
-    def __init__(self, fold_wrapper) -> None:
+    def __init__(self, fold_wrapper, use_fp: bool = False) -> None:
         super(AbstractFold, self).__init__()
         self.fold_wrapper = fold_wrapper
+        if use_fp:
+            self.allowed_pairs = ''
+            for v in supported_nucleosides.values():
+                for s in v.pairedwith:
+                    self.allowed_pairs += v.code+s
+            self.allowed_pairs = self.allowed_pairs.lower()
+        else:
+            self.allowed_pairs = "aucggu"
+        print(self.allowed_pairs)
 
 
     def __deepcopy__(self, memo):
@@ -105,7 +114,7 @@ class AbstractFold(nn.Module):
                 self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             max_helix_length=max_helix_length,
-                            allowed_pairs="aucggu",
+                            allowed_pairs=self.allowed_pairs,
                             constraint=constraint[i].tolist() if constraint is not None else None, 
                             reference=reference[i].tolist() if reference is not None else None, 
                             paired_position_scores=paired_position_scores,
@@ -117,7 +126,7 @@ class AbstractFold(nn.Module):
                     pf, bpp = self.fold_wrapper.compute_basepairing_probabilities(seq[i], param_on_cpu,
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                                 max_helix_length=max_helix_length,
-                                allowed_pairs="aucggu",
+                                allowed_pairs=self.allowed_pairs,
                                 constraint=constraint[i].tolist() if constraint is not None else None, 
                                 reference=reference[i].tolist() if reference is not None else None, 
                                 paired_position_scores=paired_position_scores,

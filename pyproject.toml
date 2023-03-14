@@ -16,6 +16,7 @@ tqdm = "*"
 wheel = "*"
 pybind11 = "^2.10"
 pytorch-optimizer = "^2.5.0"
+rdkit = "^2022.9.5"
 
 [tool.poetry.dev-dependencies]
 pylint = "*"

@@ -151,6 +151,9 @@ class Train:
         config = {
             'max_helix_length': args.max_helix_length,
             'embed_size' : args.embed_size,
+            'use_fp': args.use_fp,
+            'fp_radius': args.fp_radius,
+            'fp_bits': args.fp_bits,
             'num_filters': args.num_filters if args.num_filters is not None else (96,),
             'filter_size': args.filter_size if args.filter_size is not None else (5,),
             'pool_size': args.pool_size if args.pool_size is not None else (1,),
@@ -459,6 +462,12 @@ class Train:
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
+        gparser.add_argument('--use-fp', default=False, action='store_true',
+                        help='use ECFP of nucleosides for modifications')
+        gparser.add_argument('--fp-radius', type=int, default=2,
+                        help='specify the radius of ECFP')
+        gparser.add_argument('--fp-bits', type=int, default=1024,
+                        help='specify the number of bits of ECFP')
         gparser.add_argument('--num-filters', type=int, action='append',
                         help='the number of CNN filters (default: 96)')
         gparser.add_argument('--filter-size', type=int, action='append',

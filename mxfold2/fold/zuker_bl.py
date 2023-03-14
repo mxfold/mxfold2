@@ -13,7 +13,7 @@ from .positional import PositionalScore
 
 class ZukerFoldBL(AbstractFold):
     def __init__(self, bl_size: int = 4, **kwargs: dict[str, Any]):
-        super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper())
+        super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper(), kwargs['use_fp'])
         bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
         self.bilinears = nn.ModuleDict({
             'helix_stacking': bilinears[0],

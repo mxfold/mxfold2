@@ -13,7 +13,7 @@ from .positional import PositionalScore
 
 class LinearFold(AbstractFold):
     def __init__(self, bl_size: int = 4, beam_size: int = 100, **kwargs):
-        super(LinearFold, self).__init__(interface.LinearFoldPositionalWrapper(beam_size=beam_size))
+        super(LinearFold, self).__init__(interface.LinearFoldPositionalWrapper(beam_size=beam_size), kwargs['use_fp'])
         bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
         self.bilinears = nn.ModuleDict({
             'helix_stacking': bilinears[0],

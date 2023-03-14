@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .embedding import OneHotEmbedding, SparseEmbedding
+from .embedding import OneHotEmbedding, SparseEmbedding, ECFPEmbedding
 from .transformer import TransformerLayer
 
 
@@ -306,7 +306,10 @@ class NeuralNet(nn.Module):
 
         self.no_split_lr = no_split_lr
         self.pair_join = pair_join
-        self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
+        if kwargs['use_fp']:
+            self.embedding = ECFPEmbedding(dim=kwargs['fp_bits'], radius=kwargs['fp_radius'])
+        else:
+            self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
         if num_transformer_layers==0:
@@ -396,7 +399,10 @@ class NeuralNet1D(nn.Module):
 
         super(NeuralNet1D, self).__init__()
 
-        self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
+        if kwargs['use_fp']:
+            self.embedding = ECFPEmbedding(dim=kwargs['fp_bits'], radius=kwargs['fp_radius'])
+        else:
+            self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
         if num_transformer_layers==0:
