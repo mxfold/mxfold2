@@ -166,7 +166,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 #else
             if (allow_paired[i][j])
             {
-                auto loss_paired_ij = opts.addtional_paired_score(i, j);
+                auto loss_paired_ij = opts.additional_paired_score(i, j);
                 bool updated=false;
                 if (allow_unpaired[i+1][j-1]) 
                 {
