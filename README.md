@@ -10,15 +10,15 @@ RNA secondary structure prediction using deep learning with thermodynamic integr
 
 ### Install from wheel
 
-We provide the wheel python packages for several platforms at [the release](https://github.com/keio-bioinformatics/mxfold2/releases). You can download an appropriate package and install it as follows:
+We provide the wheel python packages for several platforms at [the release](https://github.com/mxfold/mxfold2/releases). You can download an appropriate package and install it as follows:
 
-    % pip3 install mxfold2-0.1.1-cp38-cp38-macosx_10_15_x86_64.whl
+    % pip3 install mxfold2-0.1.2-cp310-cp310-manylinux_2_17_x86_64.whl
 
 ### Install from sdist
 
-You can build and install from the source distribution downloaded from [the release](https://github.com/keio-bioinformatics/mxfold2/releases) as follows:
+You can build and install from the source distribution downloaded from [the release](https://github.com/mxfold/mxfold2/releases) as follows:
 
-    % pip3 install mxfold2-0.1.1.tar.gz
+    % pip3 install mxfold2-0.1.2.tar.gz
 
 To build MXfold2 from the source distribution, you need a C++17 compatible compiler.
 
@@ -33,7 +33,7 @@ You can predict RNA secondary structures of given FASTA-formatted RNA sequences 
 
 By default, MXfold2 employs the parameters trained from TrainSetA and TrainSetB (see our paper).
 
-We provide other pre-trained models used in our paper. You can download [``models-0.1.0.tar.gz``](https://github.com/keio-bioinformatics/mxfold2/releases/download/v0.1.0/models-0.1.0.tar.gz) and extract the pre-trained models from it as follows:
+We provide other pre-trained models used in our paper. You can download [``models-0.1.0.tar.gz``](https://github.com/mxfold/mxfold2/releases/download/v0.1.0/models-0.1.0.tar.gz) and extract the pre-trained models from it as follows:
 
     % tar -zxvf models-0.1.0.tar.gz
 
@@ -48,7 +48,7 @@ Here, ``./models/TrainSetA.conf`` specifies a lot of parameters including hyper-
 
 ## Training
 
-MXfold2 can train its parameters from BPSEQ-formatted RNA sequences. You can also download the datasets used in our paper at [the release](https://github.com/keio-bioinformatics/mxfold2/releases/tag/v0.1.0). 
+MXfold2 can train its parameters from BPSEQ-formatted RNA sequences. You can also download the datasets used in our paper at [the release](https://github.com/mxfold/mxfold2/releases/tag/v0.1.0). 
 
     % mxfold2 train --model MixC --param model.pth --save-config model.conf data/TrainSetA.lst
 
