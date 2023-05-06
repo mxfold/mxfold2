@@ -56,13 +56,14 @@ class SparseEmbedding(nn.Module):
 
 
 class ECFPEmbedding(nn.Module):
-    def __init__(self, dim: int = 1024, radius: int = 2) -> None:
+    def __init__(self, dim: int, radius: int = 2, nbits: int = 1024) -> None:
         super(ECFPEmbedding, self).__init__()
         self.n_out = dim
+        self.linear = nn.Linear(nbits, dim)
         em = { }
         for v in supported_nucleosides.values():
             m = Chem.MolFromSmiles(v.smiles)
-            x = AllChem.GetMorganFingerprintAsBitVect(m, radius=radius, nBits=dim) 
+            x = AllChem.GetMorganFingerprintAsBitVect(m, radius=radius, nBits=nbits) 
             em[v.code.lower()] = np.asarray(x, dtype=np.float32)
         em['0'] = np.zeros_like(em['a'])
         self.embedding = defaultdict(lambda: (em['a'] + em['c'] + em['g'] + em['u']) / 4, em)
@@ -70,7 +71,7 @@ class ECFPEmbedding(nn.Module):
     def encode(self, seq: str) -> np.ndarray:
         seq = [ self.embedding[s] for s in seq.lower() ]
         seq = np.vstack(seq)
-        return seq.transpose()
+        return seq.transpose() # (nbits, len)
 
     def pad_all(self, seq: list[str], pad_size: int) -> list[str]:
         pad = 'n' * pad_size
@@ -80,6 +81,12 @@ class ECFPEmbedding(nn.Module):
         return seq
 
     def forward(self, seq: list[str]) -> torch.tensor:
-        seq2 = self.pad_all(seq, 0)
-        seq3 = [ self.encode(s) for s in seq2 ]
-        return torch.from_numpy(np.stack(seq3)) # pylint: disable=no-member
+        seq = self.pad_all(seq, 0)
+        seq = [ self.encode(s) for s in seq ]
+        seq = torch.from_numpy(np.stack(seq)) # (B, nbits, L)
+        B, _, L = seq.shape
+        seq = seq.transpose(1, 2) # (B, L, nbits)
+        seq = seq.reshape(B*L, -1) # (B * L, nbits)
+        seq = self.linear(seq) # (B * L, dim)
+        seq = seq.reshape(B, L, -1) # (B, L, dim)
+        return seq.transpose(1, 2) # (B, dim, L)

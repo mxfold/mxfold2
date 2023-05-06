@@ -22,7 +22,6 @@ class AbstractFold(nn.Module):
             self.allowed_pairs = self.allowed_pairs.lower()
         else:
             self.allowed_pairs = "aucggu"
-        print(self.allowed_pairs)
 
 
     def __deepcopy__(self, memo):
