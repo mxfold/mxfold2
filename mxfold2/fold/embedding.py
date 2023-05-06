@@ -84,6 +84,7 @@ class ECFPEmbedding(nn.Module):
         seq = self.pad_all(seq, 0)
         seq = [ self.encode(s) for s in seq ]
         seq = torch.from_numpy(np.stack(seq)) # (B, nbits, L)
+        seq = seq.to(self.linear.weight.device)
         B, _, L = seq.shape
         seq = seq.transpose(1, 2) # (B, L, nbits)
         seq = seq.reshape(B*L, -1) # (B * L, nbits)
