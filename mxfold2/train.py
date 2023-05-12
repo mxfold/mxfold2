@@ -19,6 +19,7 @@ from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from . import interface
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
@@ -337,6 +338,10 @@ class Train:
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
+
+        torch.set_num_threads(args.threads)
+        interface.set_num_threads(args.threads)
+
         optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
         loss_fn = self.build_loss_function(args.loss_func, model, args)
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
@@ -390,6 +395,8 @@ class Train:
                             help='Test data of the list of BPSEQ-formatted files')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
+        subparser.add_argument('--threads', type=int, default=1, metavar='N',
+                            help='the number of threads (default: 1)')
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',

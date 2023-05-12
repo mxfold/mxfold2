@@ -5,6 +5,9 @@
 #include <stack>
 #include <cassert>
 #include <cmath>
+#ifdef USE_OPENMP
+#include <omp.h>
+#endif
 #include "zuker.h"
 
 template < typename P, typename S >
@@ -50,6 +53,7 @@ auto
 Zuker<P, S>::
 compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 {
+    // auto wtime = omp_get_wtime();
     const auto L = seq.size();
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
     Cv_.clear();  Cv_.resize(L+1, NEG_INF);
@@ -78,6 +82,9 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 
     for (auto i=L; i>=1; i--)
     {
+#ifdef USE_OPENMP
+        #pragma omp parallel for schedule(dynamic, 1) // if (L-(i+1)>4)
+#endif
         for (auto j=i+1; j<=L; j++)
         {
 #ifdef HELIX_LENGTH
@@ -96,7 +103,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                     for (auto l=j-1; k<l && ((k-1)-(i+1)+1)+((j-1)-(l+1)+1)<=opts.max_internal; l--)
                     {
                         if (!allow_unpaired[l+1][j-1]) break;
-                        if (((k-1)-(i+1)+1)+((j-1)-(l+1)+1)==0) continue; // nothoing to do here for stacking
+                        if (((k-1)-(i+1)+1)+((j-1)-(l+1)+1)==0) continue; // nothing to do here for stacking
                         if (allow_paired[k][l])
                         {
                             auto s = Cv_[k][l] + param_->score_single_loop(i, j, k, l) + loss_paired_ij /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
@@ -159,6 +166,9 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                 if (updated)
                 {
                     split_point_c_l[j].push_back(i);
+#ifdef USE_OPENMP
+                    #pragma omp critical (split_point_c_r)
+#endif
                     split_point_c_r[i].push_back(j);
                 }
 #endif
@@ -199,6 +209,9 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                 if (updated)
                 {
                     split_point_c_l[j].push_back(i);
+#ifdef USE_OPENMP
+                    #pragma omp critical (split_point_c_r)
+#endif
                     split_point_c_r[i].push_back(j);
                 }
 #else
@@ -210,7 +223,10 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 #endif
             }
 #endif
+        }
 
+        for (auto j=i+1; j<=L; j++)
+        {
             /////////////////
 #ifdef SIMPLE_SPARSIFICATION
             for (auto u: split_point_c_l[j])
@@ -306,6 +322,8 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
         }
 #endif
     }
+
+    // std::cout << omp_get_wtime()-wtime << std::endl;
 
     return Fv_[1];
 }
