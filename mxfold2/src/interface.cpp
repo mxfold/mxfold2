@@ -2,6 +2,9 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <string>
+#ifdef USE_OPENMP
+#include <omp.h>
+#endif
 #include "fold/zuker.h"
 #include "fold/nussinov.h"
 #include "param/turner.h"
@@ -366,11 +369,20 @@ private:
     int beam_size_;
 };
 
+void set_num_threads(int n)
+{
+#ifdef USE_OPENMP
+    omp_set_num_threads(n);
+#endif
+}
+
 PYBIND11_MODULE(interface, m)
 {
     using namespace std::literals::string_literals;
     using namespace pybind11::literals;
     m.doc() = "module for RNA secondary predicton with DNN";
+
+    m.def("set_num_threads", &set_num_threads, "set number of threads for OpenMP");
 
     py::class_<ZukerWrapper<TurnerNearestNeighbor>>(m, "ZukerTurnerWrapper")
         .def(py::init<>())

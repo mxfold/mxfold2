@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.10)
 project(mxfold2 CXX)
 set(CMAKE_CXX_STANDARD 17)
 
+find_package(OpenMP)
+if(OPENMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    add_definitions(-DUSE_OPENMP)
+endif()
+
 #add_subdirectory(pybind11)
 find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(interface
@@ -21,7 +28,7 @@ pybind11_add_module(interface
     fold/linearfold/LinearFold.h
     )
 target_compile_features(interface PUBLIC cxx_std_17)
-#target_link_libraries(mxfold2)
+target_link_libraries(interface PRIVATE OpenMP::OpenMP_CXX)
 
 # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 # SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")

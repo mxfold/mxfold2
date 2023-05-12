@@ -15,6 +15,7 @@ import torch
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
+from . import interface
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
@@ -220,6 +221,9 @@ class Predict:
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
 
+        torch.set_num_threads(args.threads)
+        interface.set_num_threads(args.threads)
+
         pseudoenergy = None
         if args.shape is not None:
             pseudoenergy = self.load_shape_reactivity(args.shape, args.shape_intercept, args.shape_slope)
@@ -256,6 +260,8 @@ class Predict:
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
+        subparser.add_argument('--threads', type=int, default=1, metavar='N',
+                            help='the number of threads (default: 1)')
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--use-constraint', default=False, action='store_true')
