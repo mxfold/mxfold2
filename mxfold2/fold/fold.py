@@ -65,6 +65,7 @@ class AbstractFold(nn.Module):
 
     def forward(self, seq: list[str], 
             return_param: bool = False,
+            return_count: bool = False,
             param: Optional[list[dict[str, Any]]] = None, 
             return_partfunc: bool = False,
             max_internal_length: int = 30, max_helix_length: int = 30, 
@@ -72,8 +73,8 @@ class AbstractFold(nn.Module):
             reference: Optional[list[torch.Tensor]] = None,
             pseudoenergy: Optional[list[torch.Tensor]] = None,
             perturb: float = 0.0,
-            loss_pos_paired: float = 0.0, loss_neg_paired: float = 0.0, 
-            loss_pos_unpaired: float = 0.0, loss_neg_unpaired: float = 0.0) \
+            loss_pos_paired: float | list[float] = 0.0, loss_neg_paired: float | list[float] = 0.0, 
+            loss_pos_unpaired: float | list[float] = 0.0, loss_neg_unpaired: float | list[float] = 0.0) \
                 ->  tuple[torch.Tensor, list[str], list[list[int]]] | \
                     tuple[torch.Tensor, list[str], list[list[int]], list[float], list[np.ndarray]] | \
                     tuple[torch.Tensor, list[str], list[list[int]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -89,6 +90,16 @@ class AbstractFold(nn.Module):
                 param = param_temp
         else:
             param_without_perturb = param
+
+        if type(loss_pos_paired) is float:
+            loss_pos_paired = [ loss_pos_paired ] * len(seq)
+        if type(loss_neg_paired) is float:
+            loss_neg_paired = [ loss_neg_paired ] * len(seq)
+        if type(loss_pos_unpaired) is float:
+            loss_pos_unpaired = [ loss_pos_unpaired ] * len(seq)
+        if type(loss_neg_unpaired) is float:
+            loss_neg_unpaired = [ loss_neg_unpaired ] * len(seq)
+
         ss = []
         preds: list[str] = []
         pairs: list[list[int]] = []
@@ -109,8 +120,8 @@ class AbstractFold(nn.Module):
                             constraint=constraint[i].tolist() if constraint is not None else None, 
                             reference=reference[i].tolist() if reference is not None else None, 
                             paired_position_scores=paired_position_scores,
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                            loss_pos_paired=loss_pos_paired[i], loss_neg_paired=loss_neg_paired[i],
+                            loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i])
                 v, pred, pair = self.fold_wrapper.traceback_viterbi()
 
                 if return_partfunc:
@@ -121,12 +132,17 @@ class AbstractFold(nn.Module):
                                 constraint=constraint[i].tolist() if constraint is not None else None, 
                                 reference=reference[i].tolist() if reference is not None else None, 
                                 paired_position_scores=paired_position_scores,
-                                loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                                loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
+                                loss_pos_paired=loss_pos_paired[i], loss_neg_paired=loss_neg_paired[i],
+                                loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i])
                     pfs.append(pf)
                     bpps.append(bpp)
             if torch.is_grad_enabled():
                 v = self.calculate_differentiable_score(v, param[i], param_on_cpu)
+            if return_count:
+                return_param = True
+                for n, p in param_on_cpu.items():
+                    if n.startswith('count_'):
+                        param[i][n] = p.to(self.detect_device(param[i]))
             ss.append(v)
             preds.append(pred)
             pairs.append(pair)

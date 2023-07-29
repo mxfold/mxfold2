@@ -35,7 +35,7 @@ from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
 from .loss import (FenchelYoungLoss, FenchelYoungLossWithTurner,
-                   StructuredLoss, StructuredLossWithTurner)
+                   StructuredLoss, StructuredLossWithTurner, F1Loss)
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -274,6 +274,9 @@ class Train:
             return FenchelYoungLossWithTurner(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                                                 sl_weight=args.score_loss_weight)
 
+        if loss_func == 'f1':
+            return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+
         else:
             raise(RuntimeError('not implemented'))
 
@@ -430,10 +433,12 @@ class Train:
                             help='the weight for score loss for {hinge,fy}_mix loss (default: 1)')
         gparser.add_argument('--perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for fy, fy_mix loss (default: 0.1)')
+        gparser.add_argument('--nu', type=float, default=0.1,
+                            help='weight for distribution (default: 0.1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix'), default='hinge',
-                            help="loss fuction ('hinge', 'hinge_mix', 'fy', 'fy_mix') ")
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
+                            help="loss fuction ('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1') ")
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
