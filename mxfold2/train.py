@@ -34,8 +34,7 @@ from .fold.mix_linearfold2d import MixedLinearFold2D
 from .fold.rnafold import RNAFold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
-from .loss import (FenchelYoungLoss, FenchelYoungLossWithTurner,
-                   StructuredLoss, StructuredLossWithTurner, F1Loss)
+from .loss import F1Loss, FenchelYoungLoss, StructuredLoss
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -257,25 +256,19 @@ class Train:
 
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
-        if loss_func == 'hinge':
-            return StructuredLoss(model, 
-                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
-                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
-        if loss_func == 'hinge_mix':
-            return StructuredLossWithTurner(model,
+        if loss_func == 'hinge' or loss_func == 'hinge_mix':
+            return StructuredLoss(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
-        if loss_func == 'fy':
-            return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight)
 
-        if loss_func == 'fy_mix':
-            return FenchelYoungLossWithTurner(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+        if loss_func == 'fy' or loss_func == 'fy_mix':
+            return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                                                 sl_weight=args.score_loss_weight)
 
         if loss_func == 'f1':
-            return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight)
+            return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight)
 
         else:
             raise(RuntimeError('not implemented'))
