@@ -180,7 +180,7 @@ class F1Loss(nn.Module):
             tp, _, fp, fn = compare_bpseq(list(pairs[i]), pred_bps[i])
             f1_base = 2.*tp + fp + fn
             f1.append( (2.*tp) / f1_base if f1_base > 0 else 0. )
-            g_pos.append( (1 - f1[-1]) / f1_base if f1_base > 0 else 0. )
+            g_pos.append( (2 - f1[-1]) / f1_base if f1_base > 0 else 0. )
             g_neg.append( (0 - f1[-1]) / f1_base if f1_base > 0 else 0. )
 
         ref: torch.Tensor

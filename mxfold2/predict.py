@@ -29,6 +29,7 @@ from .fold.mix_linearfold import MixedLinearFold
 from .fold.mix_linearfold1d import MixedLinearFold1D
 from .fold.mix_linearfold2d import MixedLinearFold2D
 from .fold.rnafold import RNAFold
+from .fold.contrafold import CONTRAfold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
 
@@ -98,6 +99,13 @@ class Predict:
             else:
                 from . import param_turner2004
                 return RNAFold(param_turner2004), {}
+        
+        if args.model == 'CONTRAfold':
+            if args.param != '':
+                return CONTRAfold(), {}
+            else:
+                from . import param_contrafold202
+                return CONTRAfold(param_contrafold202), {}
         
         if args.model == 'LinearFoldV':
             if args.param != '':
@@ -275,8 +283,8 @@ class Predict:
                             help='Specify a slope used with SHAPE restraints.  Default is 1.8 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

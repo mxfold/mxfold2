@@ -7,13 +7,14 @@
 #endif
 #include "fold/zuker.h"
 #include "fold/nussinov.h"
+#include "fold/linearfold/LinearFold.h"
+#include "param/contrafold.h"
 #include "param/turner.h"
 #include "param/positional.h"
 #include "param/positional_bl.h"
 #include "param/positional_1d.h"
 #include "param/bpscore.h"
 #include "param/mix.h"
-#include "fold/linearfold/LinearFold.h"
 
 namespace py = pybind11;
 
@@ -437,6 +438,39 @@ PYBIND11_MODULE(interface, m)
             "traceback for positional nearest neighbor model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<PositionalNearestNeighbor>::compute_basepairing_probabilities,
             "Partition function with positional nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
+
+    py::class_<ZukerWrapper<CONTRAfoldNearestNeighbor>>(m, "ZukerCONTRAfoldWrapper")
+        .def(py::init<>())
+        .def("compute_viterbi", &ZukerWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with Turner model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
+        .def("traceback_viterbi", &ZukerWrapper<CONTRAfoldNearestNeighbor>::traceback_viterbi,
+            "traceback for Turner model")
+        .def("compute_basepairing_probabilities", &ZukerWrapper<CONTRAfoldNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with Turner model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 

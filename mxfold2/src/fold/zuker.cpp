@@ -1205,6 +1205,7 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
 #include "../param/positional.h"
 #include "../param/mix.h"
 #include "../param/positional_bl.h"
+#include "../param/contrafold.h"
 
 template class Zuker<TurnerNearestNeighbor>;
 template class Zuker<PositionalNearestNeighbor>;
@@ -1213,3 +1214,4 @@ template class Zuker<MixedNearestNeighbor2>;
 template class Zuker<PositionalNearestNeighborBL>;
 template class Zuker<MixedNearestNeighborBL>;
 template class Zuker<MixedNearestNeighbor1D>;
+template class Zuker<CONTRAfoldNearestNeighbor>;

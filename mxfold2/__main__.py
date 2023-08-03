@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
 
     if hasattr(args, 'param'):
-        if args.param == '':
+        if args.param == '' and args.model != 'CONTRAfold':
             sys.argv.insert(2, '@'+default_conf)
             args = parser.parse_args()
         elif args.param == 'turner2004':

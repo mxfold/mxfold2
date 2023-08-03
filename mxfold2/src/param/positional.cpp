@@ -108,7 +108,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     }
     else if (ls==0) // bulge
     {
-        auto e = score_bulge_length_[std::min<u_int16_t>(ll, MAX_BULGE_LENGTH)];
+        auto e = score_bulge_length_[std::min<u_int32_t>(ll, MAX_BULGE_LENGTH)];
         e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
         e += score_basepair_(i, j);
