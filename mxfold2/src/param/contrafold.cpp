@@ -203,7 +203,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     auto e = std::numeric_limits<ScoreType>::lowest();
 
     if (ll==0) // stack
-        return score_helix(i, j, 1);
+        return score_helix(i, j, 2);
     else if (ls==0) // bulge
     {
         auto e = cache_score_bulge_length_[std::min<u_int32_t>(ll, MAX_BULGE_LENGTH)];
@@ -222,8 +222,8 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     else // internal loop
     {
         auto e = cache_score_internal_length_[std::min<u_int32_t>(ls+ll, MAX_INTERNAL_LENGTH)];
-        e += score_internal_explicit_(std::min<u_int32_t>(ls, MAX_INTERNAL_EXPLICIT_LENGTH),
-                                        std::min<u_int32_t>(ll, MAX_INTERNAL_EXPLICIT_LENGTH));
+        if (ls<=MAX_INTERNAL_EXPLICIT_LENGTH && ll<=MAX_INTERNAL_EXPLICIT_LENGTH)
+            e += score_internal_explicit_(ls, ll);
         if (ls==ll)
             e += cache_score_internal_symmetry_[std::min<u_int32_t>(ll, MAX_INTERNAL_SYMMETRIC_LENGTH)];
         e += cache_score_internal_asymmetry_[std::min<u_int32_t>(ll-ls, MAX_INTERNAL_ASYMMETRY)];
@@ -249,7 +249,7 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
     const auto [ls, ll] = std::minmax(l1, l2);
 
     if (ll==0) // stack
-        count_helix(i, j, 1, v);
+        count_helix(i, j, 2, v);
     else if (ls==0) // bulge
     {
         for (auto k=0; k<=std::min<u_int32_t>(ll, MAX_BULGE_LENGTH); ++k)
@@ -345,7 +345,8 @@ auto
 CONTRAfoldNearestNeighbor::
 score_multi_paired(size_t i, size_t j) const -> ScoreType
 {
-    const auto L = seq2_.size()-2; auto e = score_helix_closing_(seq2_[j], seq2_[i]);
+    const auto L = seq2_.size()-2;
+    auto e = score_helix_closing_(seq2_[j], seq2_[i]);
     if (j+1<=L)
         e += score_dangle_left_(seq2_[j], seq2_[i], seq2_[j+1]);
     if (i-1>=1)

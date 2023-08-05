@@ -171,6 +171,7 @@ class Train:
             'bl_size': args.bl_size,
             'paired_opt': args.paired_opt,
             'mix_type': args.mix_type,
+            'additional_params': args.additional_params,
         }
 
         if args.model == 'Zuker':
@@ -436,13 +437,13 @@ class Train:
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
                             help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
-        gparser.add_argument('--loss-pos-unpaired', type=float, default=0,
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0.,
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--clip-grad-value', type=float, default=0,
+        gparser.add_argument('--clip-grad-value', type=float, default=0.,
                             help='gradient clipping by values (default=0, no clipping)')
-        gparser.add_argument('--clip-grad-norm', type=float, default=0,
+        gparser.add_argument('--clip-grad-norm', type=float, default=0.,
                             help='gradient clipping by norm (default=0, no clipping)')
         gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
                             help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
@@ -460,6 +461,7 @@ class Train:
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
                         help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,

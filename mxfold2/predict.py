@@ -94,25 +94,28 @@ class Predict:
 
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
-            if args.param != '':
-                return RNAFold(), {}
-            else:
+            if args.param == 'default' or args.param == 'turner2004':
+                args.param = ''
                 from . import param_turner2004
                 return RNAFold(param_turner2004), {}
+            else:
+                return RNAFold(), {}
         
         if args.model == 'CONTRAfold':
-            if args.param != '':
-                return CONTRAfold(), {}
-            else:
+            if args.param == 'default':
+                args.param = ''
                 from . import param_contrafold202
                 return CONTRAfold(param_contrafold202), {}
+            else:
+                return CONTRAfold(), {}
         
         if args.model == 'LinearFoldV':
-            if args.param != '':
-                return LinearFoldV(), {}
-            else:
+            if args.param == 'default' or args.param == 'turner2004':
+                args.param = ''
                 from . import param_turner2004
                 return LinearFoldV(param_turner2004), {}
+            else:
+                return LinearFoldV(), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -137,6 +140,7 @@ class Predict:
             'bl_size': args.bl_size,
             'paired_opt': args.paired_opt,
             'mix_type': args.mix_type,
+            'additional_params': args.additional_params,
         }
 
         if args.model == 'Zuker':
@@ -202,6 +206,9 @@ class Predict:
 
 
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
+        torch.set_num_threads(args.threads)
+        interface.set_num_threads(args.threads)
+
         test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
@@ -225,9 +232,6 @@ class Predict:
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
-
-        torch.set_num_threads(args.threads)
-        interface.set_num_threads(args.threads)
 
         pseudoenergy = None
         if args.shape is not None:
@@ -285,6 +289,7 @@ class Predict:
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
                         help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
