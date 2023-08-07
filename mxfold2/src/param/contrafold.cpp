@@ -17,12 +17,12 @@ convert_sequence(const std::string& seq) -> SeqType
     std::transform(std::begin(seq), std::end(seq), &converted_seq[1],
                 [](auto x) {
                     switch (tolower(x)) {
-                        default:  return -1; break;
                         case 'a': return 0; break;
                         case 'c': return 1; break;
                         case 'g': return 2; break;
                         case 'u':
                         case 't': return 3; break;
+                        default:  return 4; break;
                     }
                 });
 

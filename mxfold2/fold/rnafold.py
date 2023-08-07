@@ -47,9 +47,10 @@ class RNAFold(AbstractFold):
 
 
     def make_param(self, seq: list[str], perturb: float = 0) -> list[dict[str, Any]]:
+        device = next(self.parameters()).device
         param_without_perturb = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
         if perturb > 0:
-            param = { n : getattr(self, n) + torch.normal(0, perturb, size=getattr(self, n).shape) for n in dir(self) if n.startswith("score_") }
+            param = { n : getattr(self, n) + torch.normal(0, perturb, size=getattr(self, n).shape, device=device) for n in dir(self) if n.startswith("score_") }
             return ([param for _ in seq], [param_without_perturb for _ in seq])
         else:
             return [ param_without_perturb for _ in seq ]
