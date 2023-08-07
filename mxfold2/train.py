@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from . import interface
 from .dataset import BPseqDataset, FastaDataset
+from .fold.contrafold import CONTRAfold
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
 from .fold.linearfold2d import LinearFold2D
@@ -143,10 +144,28 @@ class Train:
 
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
-            return RNAFold(), {}
-
+            if args.init_param == 'default' or args.init_param == 'turner2004':
+                args.init_param = ''
+                from . import param_turner2004
+                return RNAFold(init_param=param_turner2004), {}
+            else:
+                return RNAFold(), {}
+        
+        if args.model == 'CONTRAfold':
+            if args.init_param == 'default':
+                args.init_param = ''
+                from . import param_contrafold202
+                return CONTRAfold(init_param=param_contrafold202), {}
+            else:
+                return CONTRAfold(), {}
+        
         if args.model == 'LinearFoldV':
-            return LinearFoldV(), {}
+            if args.init_param == 'default' or args.init_param == 'turner2004':
+                args.init_param = ''
+                from . import param_turner2004
+                return LinearFoldV(init_param=param_turner2004), {}
+            else:
+                return LinearFoldV(), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -459,8 +478,8 @@ class Train:
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')

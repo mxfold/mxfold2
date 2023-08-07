@@ -16,7 +16,7 @@ class CONTRAfold(AbstractFold):
         if init_param is None:
             self.score_base_pair = nn.Parameter(torch.zeros((4, 4), dtype=torch.float32))
             self.score_terminal_mismatch = nn.Parameter(torch.zeros((4, 4, 4, 4), dtype=torch.float32))
-            self.score_hairping_length = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
+            self.score_hairpin_length = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_length = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_internal_length = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_internal_explicit = nn.Parameter(torch.zeros((5, 5), dtype=torch.float32))
@@ -40,8 +40,9 @@ class CONTRAfold(AbstractFold):
 
 
     def make_param(self, seq: list[str], perturb: float = 0) -> list[dict[str, Any]]:
+        param_without_perturb = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
         if perturb > 0:
             param = { n : getattr(self, n) + torch.normal(0, perturb, size=getattr(self, n).shape) for n in dir(self) if n.startswith("score_") }
+            return ([param for _ in seq], [param_without_perturb for _ in seq])
         else:
-            param = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
-        return [ param for s in seq ]
+            return [ param_without_perturb for _ in seq ]
