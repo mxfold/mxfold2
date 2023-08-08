@@ -180,8 +180,14 @@ count_hairpin(size_t i, size_t j, ScoreType v)
     assert(i<j);
     const auto l = (j-1)-(i+1)+1;
 
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
     for (auto k=0; k<=std::min<u_int32_t>(l, MAX_HAIRPIN_LENGTH); ++k)
         count_hairpin_length_[k] += v;
+#else
+    if (l <= MAX_HAIRPIN_LENGTH)
+        for (auto k=0; k<=l; ++k)
+            count_hairpin_length_[k] += v;
+#endif
 
     if (l > 3) 
     {
@@ -252,8 +258,14 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
         count_helix(i, j, 2, v);
     else if (ls==0) // bulge
     {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         for (auto k=0; k<=std::min<u_int32_t>(ll, MAX_BULGE_LENGTH); ++k)
             count_bulge_length_[k] += v;
+#else
+        if (ll <= MAX_BULGE_LENGTH)
+            for (auto k=0; k<=ll; ++k)
+                count_bulge_length_[k] += v;
+#endif
         if (l1==1 && l2==0)
             count_bulge_0x1_(seq2_[i+1]) += v;
         else if (l1==0 && l2==1)
@@ -272,10 +284,24 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
         if (ls<=MAX_INTERNAL_EXPLICIT_LENGTH && ll<=MAX_INTERNAL_EXPLICIT_LENGTH)
             count_internal_explicit_(ls, ll) += v;
         if (ls==ll)
+        {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
             for (auto k=0; k<=std::min<u_int32_t>(ll, MAX_INTERNAL_SYMMETRIC_LENGTH); ++k)
                 count_internal_symmetry_[k] += v;
+#else
+            if (ll <= MAX_INTERNAL_SYMMETRIC_LENGTH)
+                for (auto k=0; k<=ll; ++k)
+                    count_internal_symmetry_[k] += v;
+#endif
+        }
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         for (auto k=0; k<=std::min<u_int32_t>(ll-ls, MAX_INTERNAL_ASYMMETRY); ++k)
             count_internal_asymmetry_[k] += v;
+#else
+        if (ll-ls <= MAX_INTERNAL_ASYMMETRY)
+            for (auto k=0; k<=ll-ls; ++k)
+                count_internal_asymmetry_[k] += v;
+#endif
         if (l1==1 && l2==1)
             cache_count_internal_1x1(seq2_[i+1], seq2_[j-1], v);
 
