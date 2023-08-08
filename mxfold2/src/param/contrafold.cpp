@@ -279,8 +279,14 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
     }
     else // internal loop
     {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
         for (auto k=0; k<=std::min<u_int32_t>(ls+ll, MAX_INTERNAL_LENGTH); ++k)
             count_internal_length_[k] += v;
+#else
+        if (ls+ll <= MAX_INTERNAL_LENGTH)
+            for (auto k=0; k<=ls+ll; ++k)
+                count_internal_length_[k] += v;
+#endif
         if (ls<=MAX_INTERNAL_EXPLICIT_LENGTH && ll<=MAX_INTERNAL_EXPLICIT_LENGTH)
             count_internal_explicit_(ls, ll) += v;
         if (ls==ll)
