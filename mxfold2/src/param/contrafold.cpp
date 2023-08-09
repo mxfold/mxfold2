@@ -7,6 +7,8 @@
 
 namespace py = pybind11;
 
+#define SYMMETRIC
+
 // static
 auto
 CONTRAfoldNearestNeighbor::
@@ -113,49 +115,79 @@ CONTRAfoldNearestNeighbor(const std::string& seq, pybind11::object obj) :
     for (auto i=1; i<score_internal_asymmetry_.size(); ++i)
         cache_score_internal_asymmetry_[i] = cache_score_internal_asymmetry_[i-1] + score_internal_asymmetry_[i];
 
-    for (auto i=0; i<4; ++i)
-        for (auto j=0; j<4; ++j)
+    for (auto i=0; i<cache_score_base_pair_.size(); ++i)
+        for (auto j=0; j<cache_score_base_pair_[i].size(); ++j)
+        {
+#ifdef SYMMETRIC
             cache_score_base_pair_[i][j] = i<j ? score_base_pair_(i, j) : score_base_pair_(j, i);
+#else
+            cache_score_base_pair_[i][j] = score_base_pair_(i, j);
+#endif
+        }
 
-    for (auto i=0; i<4; ++i)
-        for (auto j=0; j<4; ++j)
-            for (auto k=0; k<4; ++k)
-                for (auto l=0; l<4; ++l)
-                    cache_score_helix_stacking_[i][j][k][l] = i*1000+j*100+k*10+l < l*1000+k*100+j*10+i ? score_helix_stacking_(i, j, k, l) : score_helix_stacking_(k, l, j, i);
+    for (auto i=0; i<cache_score_helix_stacking_.size(); ++i)
+        for (auto j=0; j<cache_score_helix_stacking_[i].size(); ++j)
+            for (auto k=0; k<cache_score_helix_stacking_[i][j].size(); ++k)
+                for (auto l=0; l<cache_score_helix_stacking_[i][j][k].size(); ++l)
+                {
+#ifdef SYMMETRIC
+                    cache_score_helix_stacking_[i][j][k][l] = i*1000+j*100+k*10+l < l*1000+k*100+j*10+i ? score_helix_stacking_(i, j, k, l) : score_helix_stacking_(l, k, j, i);
+#else
+                    cache_score_helix_stacking_[i][j][k][l] = score_helix_stacking_(i, j, k, l);
+#endif
+                }
     
     for (auto i=0; i<cache_score_internal_1x1_.size(); ++i)
         for (auto j=0; j<cache_score_internal_1x1_[i].size(); ++j)
+        {
+#ifdef SYMMETRIC
             cache_score_internal_1x1_[i][j] = i<j ? score_internal_1x1_(i, j) : score_internal_1x1_(j, i);
+#else
+            cache_score_internal_1x1_[i][j] = score_internal_1x1_(i, j);
+#endif
+        }
 }
 
 void
 CONTRAfoldNearestNeighbor::
 cache_count_base_pair(short x, short y, ScoreType v)
 {
+#ifdef SYMMETRIC
     if (x<y)
         count_base_pair_(x, y) += v;
     else
         count_base_pair_(y, x) += v;
+#else
+    count_base_pair_(x, y) += v;
+#endif
 }
 
 void
 CONTRAfoldNearestNeighbor::
 cache_count_helix_stacking(short x, short y, short s, short t, ScoreType v)
 {
+#ifdef SYMMETRIC
     if (x*1000+y*100+s*10+t < t*1000+s*100+y*10+x)
         count_helix_stacking_(x, y, s, t) += v;
     else
         count_helix_stacking_(t, s, y, x) += v;
+#else
+    count_helix_stacking_(x, y, s, t) += v;
+#endif
 } 
 
 void
 CONTRAfoldNearestNeighbor::
 cache_count_internal_1x1(short x, short y, ScoreType v)
 {
+#ifdef SYMMETRIC
     if (x<y)
         count_internal_1x1_(x, y) += v;
     else
         count_internal_1x1_(y, x) += v;
+#else
+    count_internal_1x1_(x, y) += v;
+#endif
 }
 
 auto
@@ -165,11 +197,8 @@ score_hairpin(size_t i, size_t j) const -> ScoreType
     assert(i<j);
     const auto l = (j-1)-(i+1)+1;
     auto e = cache_score_hairpin_length_[std::min<u_int32_t>(l, MAX_HAIRPIN_LENGTH)];
-    if (l > 3)
-    {
-        e += score_helix_closing_(seq2_[i], seq2_[j]);
-        e += score_terminal_mismatch_(seq2_[i], seq2_[j], seq2_[i+1], seq2_[j-1]);
-    }
+    e += score_helix_closing_(seq2_[i], seq2_[j]);
+    e += score_terminal_mismatch_(seq2_[i], seq2_[j], seq2_[i+1], seq2_[j-1]);
     return e;
 }
 
@@ -189,11 +218,8 @@ count_hairpin(size_t i, size_t j, ScoreType v)
             count_hairpin_length_[k] += v;
 #endif
 
-    if (l > 3) 
-    {
-        count_helix_closing_(seq2_[i], seq2_[j]) += v;
-        count_terminal_mismatch_(seq2_[i], seq2_[j], seq2_[i+1], seq2_[j-1]) += v;
-    }
+    count_helix_closing_(seq2_[i], seq2_[j]) += v;
+    count_terminal_mismatch_(seq2_[i], seq2_[j], seq2_[i+1], seq2_[j-1]) += v;
 }
 
 auto
