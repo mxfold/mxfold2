@@ -27,6 +27,7 @@ from .fold.linearfold import LinearFold
 from .fold.linearfold2d import LinearFold2D
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
+from .fold.cf_mix import CONTRAMixedFold
 from .fold.mix1d import MixedFold1D
 from .fold.mix_bl import MixedFoldBL
 from .fold.mix_linearfold import MixedLinearFold
@@ -216,6 +217,10 @@ class Train:
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
+        elif args.model == 'CFMixC':
+            from . import param_contrafold202
+            model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
+
         elif args.model == 'Mix1D':
             from . import param_turner2004
             model = MixedFold1D(init_param=param_turner2004, **config)
@@ -314,7 +319,7 @@ class Train:
                 elif isinstance(v, list) or isinstance(v, tuple):
                     for vv in v:
                         f.write('{}\n{}\n'.format(k, vv))
-                else:
+                elif v is not None:
                     f.write('{}\n{}\n'.format(k, v))
 
 
@@ -442,8 +447,8 @@ class Train:
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--score-loss-weight', type=float, default=1.,
-                            help='the weight for score loss for {hinge,fy}_mix loss (default: 1)')
+        gparser.add_argument('--score-loss-weight', type=float, default=0.,
+                            help='the weight for score loss for {hinge,fy}_mix loss (default: 0)')
         gparser.add_argument('--perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for fy, fy_mix loss (default: 0.1)')
         gparser.add_argument('--nu', type=float, default=0.1,
@@ -478,8 +483,8 @@ class Train:
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')

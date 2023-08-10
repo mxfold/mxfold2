@@ -549,6 +549,73 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none());
+
+    py::class_<ZukerWrapper<CFMixedNearestNeighbor>>(m, "CONTRAfoldMixedWrapper")
+        .def(py::init<>())
+        .def("compute_viterbi", &ZukerWrapper<CFMixedNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with CONTRAfold-mixed nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
+        .def("traceback_viterbi", &ZukerWrapper<CFMixedNearestNeighbor>::traceback_viterbi,
+            "traceback for CONTRAfold-mixed nearest neighbor model")
+        .def("compute_basepairing_probabilities", &ZukerWrapper<CFMixedNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with CONTRAfold-mixed nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
+
+    py::class_<ZukerWrapper<CFMixedNearestNeighbor2>>(m, "CONTRAfoldMixedWrapper2")
+        .def(py::init<>())
+        .def("compute_viterbi", &ZukerWrapper<CFMixedNearestNeighbor2>::compute_viterbi, 
+            "predict RNA secondary structure with CONTRAfold-mixed nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
+        .def("traceback_viterbi", &ZukerWrapper<CFMixedNearestNeighbor2>::traceback_viterbi,
+            "traceback for CONTRAfold-mixed nearest neighbor model")
+        .def("compute_basepairing_probabilities", &ZukerWrapper<CFMixedNearestNeighbor2>::compute_basepairing_probabilities,
+            "Partition function with CONTRAfold-mixed nearest neighbor model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
+
 #if 0
     py::class_<ZukerWrapper<PositionalNearestNeighborBL>>(m, "ZukerPositionalBLWrapper")
         .def(py::init<>())

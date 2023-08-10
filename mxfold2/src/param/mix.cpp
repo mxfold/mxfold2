@@ -170,11 +170,14 @@ count_external_unpaired(size_t i, size_t j, ScoreType v)
 
 // instantiation
 #include "turner.h"
+#include "contrafold.h"
 #include "positional.h"
 #include "positional_bl.h"
 #include "positional_1d.h"
 
 template class MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor, 1>;
 template class MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor, 2>;
+template class MixedNearestNeighborTempl<CONTRAfoldNearestNeighbor, PositionalNearestNeighbor, 1>;
+template class MixedNearestNeighborTempl<CONTRAfoldNearestNeighbor, PositionalNearestNeighbor, 2>;
 template class MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighborBL, 1>;
 template class MixedNearestNeighborTempl<TurnerNearestNeighbor, PositionalNearestNeighbor1D, 1>;

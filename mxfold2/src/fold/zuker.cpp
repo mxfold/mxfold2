@@ -1215,3 +1215,5 @@ template class Zuker<PositionalNearestNeighborBL>;
 template class Zuker<MixedNearestNeighborBL>;
 template class Zuker<MixedNearestNeighbor1D>;
 template class Zuker<CONTRAfoldNearestNeighbor>;
+template class Zuker<CFMixedNearestNeighbor>;
+template class Zuker<CFMixedNearestNeighbor2>;
