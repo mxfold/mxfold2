@@ -30,8 +30,8 @@ class CONTRAMixedFold(AbstractFold):
             if self.tune_cf:
                 ts = self.turner.make_param(seq, perturb)
                 ps = self.zuker.make_param(seq, perturb)
-                return ( [{'turner': t, 'positional': p} for t, p in zip(ts, ps[0])],
-                    [{'turner': t, 'positional': p} for t, p in zip(ts, ps[1])] )
+                return ( [{'turner': t, 'positional': p} for t, p in zip(ts[0], ps[0])],
+                    [{'turner': t, 'positional': p} for t, p in zip(ts[1], ps[1])] )
             else:
                 ts = self.turner.make_param(seq)
                 ps = self.zuker.make_param(seq, perturb)
