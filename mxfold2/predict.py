@@ -18,6 +18,8 @@ from torch.utils.data import DataLoader
 from . import interface
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
+from .fold.cf_mix import CONTRAMixedFold
+from .fold.contrafold import CONTRAfold
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
 from .fold.linearfold2d import LinearFold2D
@@ -29,7 +31,6 @@ from .fold.mix_linearfold import MixedLinearFold
 from .fold.mix_linearfold1d import MixedLinearFold1D
 from .fold.mix_linearfold2d import MixedLinearFold2D
 from .fold.rnafold import RNAFold
-from .fold.contrafold import CONTRAfold
 from .fold.zuker import ZukerFold
 from .fold.zuker_bl import ZukerFoldBL
 
@@ -166,6 +167,13 @@ class Predict:
             from . import param_turner2004
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
+        elif args.model == 'CFMixC':
+            from . import param_contrafold202
+            model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
+
+        elif args.model == 'CFTMixC':
+            model = CONTRAMixedFold(model_type='C', tune_cf=True, **config)
+
         elif args.model == 'Mix1D':
             from . import param_turner2004
             model = MixedFold1D(init_param=param_turner2004, **config)
@@ -287,8 +295,8 @@ class Predict:
                             help='Specify a slope used with SHAPE restraints.  Default is 1.8 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')

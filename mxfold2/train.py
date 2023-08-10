@@ -21,13 +21,13 @@ from tqdm import tqdm
 
 from . import interface
 from .dataset import BPseqDataset, FastaDataset
+from .fold.cf_mix import CONTRAMixedFold
 from .fold.contrafold import CONTRAfold
 from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
 from .fold.linearfold2d import LinearFold2D
 from .fold.linearfoldv import LinearFoldV
 from .fold.mix import MixedFold
-from .fold.cf_mix import CONTRAMixedFold
 from .fold.mix1d import MixedFold1D
 from .fold.mix_bl import MixedFoldBL
 from .fold.mix_linearfold import MixedLinearFold
@@ -220,6 +220,9 @@ class Train:
         elif args.model == 'CFMixC':
             from . import param_contrafold202
             model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
+
+        elif args.model == 'CFTMixC':
+            model = CONTRAMixedFold(model_type='C', tune_cf=True, **config)
 
         elif args.model == 'Mix1D':
             from . import param_turner2004
@@ -483,8 +486,8 @@ class Train:
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
