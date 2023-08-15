@@ -264,21 +264,30 @@ class Train:
 
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float) -> optim.Optimizer:
+        if hasattr(model, 'zuker') and hasattr(model, 'turner'):
+            optim_params = [
+                {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+                {'params': model.turner.parameters(), 'lr': lr*10, 'weight_decay': l2_weight/10},
+            ]
+        else:
+            optim_params = [
+                {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+            ]
         if optimizer == 'Adam':
-            return optim.Adam(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
+            return optim.Adam(optim_params, amsgrad=False)
         elif optimizer =='AdamW':
-            return optim.AdamW(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
+            return optim.AdamW(optim_params, amsgrad=False)
         elif optimizer == 'RMSprop':
-            return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.RMSprop(optim_params)
         elif optimizer == 'SGD':
-            return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
-            #return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.SGD(optim_params, nesterov=True, momentum=0.9)
+            #return optim.SGD(optim_params)
         elif optimizer == 'ASGD':
-            return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.ASGD(optim_params)
         elif optimizer == 'AdaBelief':
-            return po.AdaBelief(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return po.AdaBelief(optim_params)
         elif optimizer == 'Lion':
-            return po.Lion(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return po.Lion(optim_params)
         else:
             raise(RuntimeError('not implemented'))
 
