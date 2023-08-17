@@ -30,7 +30,7 @@ class StructuredLoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            if getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
+            if False: #getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
                 self.turner = self.model.turner
             else:
                 from . import param_turner2004
@@ -93,7 +93,7 @@ class FenchelYoungLoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            if getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
+            if False: #getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
                 self.turner = self.model.turner
             else:
                 from . import param_turner2004
@@ -153,7 +153,7 @@ class F1Loss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            if getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
+            if False: #getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
                 self.turner = self.model.turner
             else:
                 from . import param_turner2004

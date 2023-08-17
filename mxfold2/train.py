@@ -264,15 +264,18 @@ class Train:
 
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float) -> optim.Optimizer:
-        if hasattr(model, 'zuker') and hasattr(model, 'turner'):
-            optim_params = [
-                {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-                {'params': model.turner.parameters(), 'lr': lr*10, 'weight_decay': l2_weight/10},
-            ]
-        else:
-            optim_params = [
-                {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-            ]
+        # if hasattr(model, 'zuker') and hasattr(model, 'turner'):
+        #     optim_params = [
+        #         {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+        #         {'params': model.turner.parameters(), 'lr': lr*10, 'weight_decay': l2_weight/10},
+        #     ]
+        # else:
+        #     optim_params = [
+        #         {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+        #     ]
+        optim_params = [
+            {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+        ]
         if optimizer == 'Adam':
             return optim.Adam(optim_params, amsgrad=False)
         elif optimizer =='AdamW':
