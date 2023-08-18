@@ -2308,10 +2308,12 @@ BeamCKYParser<P,S>::BeamCKYParser(
 
 // instantiation
 #include "../../param/turner.h"
+#include "../../param/contrafold.h"
 #include "../../param/positional_bl.h"
 #include "../../param/positional.h"
 #include "../../param/mix.h"
 template class LinearFold::BeamCKYParser<TurnerNearestNeighbor>;
+template class LinearFold::BeamCKYParser<CONTRAfoldNearestNeighbor>;
 template class LinearFold::BeamCKYParser<PositionalNearestNeighborBL>;
 template class LinearFold::BeamCKYParser<MixedNearestNeighborBL>;
 template class LinearFold::BeamCKYParser<PositionalNearestNeighbor>;

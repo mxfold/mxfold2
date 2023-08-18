@@ -24,6 +24,7 @@ from .fold.fold import AbstractFold
 from .fold.linearfold import LinearFold
 from .fold.linearfold2d import LinearFold2D
 from .fold.linearfoldv import LinearFoldV
+from .fold.linearfoldc import LinearFoldC
 from .fold.mix import MixedFold
 from .fold.mix1d import MixedFold1D
 from .fold.mix_bl import MixedFoldBL
@@ -117,6 +118,14 @@ class Predict:
                 return LinearFoldV(param_turner2004), {}
             else:
                 return LinearFoldV(), {}
+
+        if args.model == 'LinearFoldC':
+            if args.param == 'default':
+                args.param = ''
+                from . import param_contrafold202
+                return LinearFoldC(param_contrafold202), {}
+            else:
+                return LinearFoldC(), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -295,8 +304,8 @@ class Predict:
                             help='Specify a slope used with SHAPE restraints.  Default is 1.8 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
