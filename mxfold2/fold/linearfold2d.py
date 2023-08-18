@@ -41,6 +41,19 @@ class LinearFold2D(AbstractFold):
             'score_helix_length': LengthLayer(31)
         })
 
+        if 'additional_params' in kwargs and kwargs['additional_params']:
+            self.fc_additional = nn.ParameterDict({
+                'score_multi_base': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_multi_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_external_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+            })
+        else:
+            self.fc_additional = { 
+                'score_multi_base': torch.zeros(1, dtype=torch.float32),
+                'score_multi_paired': torch.zeros(1, dtype=torch.float32),
+                'score_external_paired': torch.zeros(1, dtype=torch.float32), 
+            }
+
 
     def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         score_paired: torch.Tensor
@@ -96,9 +109,9 @@ class LinearFold2D(AbstractFold):
             score_base_multi = score_unpaired
             score_base_external = score_unpaired
 
-        if perturb > 0.:
-            for f in score_lengths.keys(): 
-                score_lengths[f] = score_lengths[f] + torch.normal(0., perturb, size=score_lengths[f].shape, device=device)
+        score_additional = self.fc_additional
+        if perturb > 0. and type(score_additional) is nn.ParameterDict:
+            score_additional = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_additional.items() }
 
         param = [ { 
             'score_basepair': score_basepair[i],
@@ -117,7 +130,10 @@ class LinearFold2D(AbstractFold):
             'score_internal_explicit': score_lengths['score_internal_explicit'],
             'score_internal_symmetry': score_lengths['score_internal_symmetry'],
             'score_internal_asymmetry': score_lengths['score_internal_asymmetry'],
-            'score_helix_length': score_lengths['score_helix_length']
+            'score_helix_length': score_lengths['score_helix_length'],
+            'score_multi_base': score_additional['score_multi_base'],
+            'score_multi_paired': score_additional['score_multi_paired'],
+            'score_external_paired': score_additional['score_external_paired'],
         } for i in range(B) ]
 
         return param

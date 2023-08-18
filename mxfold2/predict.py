@@ -201,6 +201,10 @@ class Predict:
         elif args.model == 'LinearFold':
             model = LinearFold(**config)
 
+        elif args.model == 'MixCLinearFold':
+            from . import param_turner2004
+            model = MixedLinearFold2D(init_param=param_turner2004, model_type='C', **config)
+
         elif args.model == 'MixedLinearFold':
             from . import param_turner2004
             model = MixedLinearFold(init_param=param_turner2004, **config)
@@ -304,8 +308,8 @@ class Predict:
                             help='Specify a slope used with SHAPE restraints.  Default is 1.8 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
