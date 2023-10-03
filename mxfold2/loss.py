@@ -30,12 +30,9 @@ class StructuredLoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            if False: #getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
-                self.turner = self.model.turner
-            else:
-                from . import param_turner2004
-                from .fold.rnafold import RNAFold
-                self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+            from . import param_turner2004
+            from .fold.rnafold import RNAFold
+            self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
 
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
@@ -93,12 +90,9 @@ class FenchelYoungLoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            if False: #getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
-                self.turner = self.model.turner
-            else:
-                from . import param_turner2004
-                from .fold.rnafold import RNAFold
-                self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+            from . import param_turner2004
+            from .fold.rnafold import RNAFold
+            self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
 
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
@@ -153,12 +147,9 @@ class F1Loss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            if False: #getattr(self.model, "turner", None) and isinstance(self.model.turner, AbstractFold):
-                self.turner = self.model.turner
-            else:
-                from . import param_turner2004
-                from .fold.rnafold import RNAFold
-                self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+            from . import param_turner2004
+            from .fold.rnafold import RNAFold
+            self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
 
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:

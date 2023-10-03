@@ -1259,10 +1259,11 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
                 //   2. generate p(i, j)
 #if defined(lv) || defined(FOR_MXFOLD2)
                 sort_keys(beamstepH, keys);
-                for (auto &item : keys) {
+                for (auto &item : keys) 
 #else
-                for (auto &item : beamstepH) {
+                for (auto &item : beamstepH) 
 #endif
+                {
                     int i = item.first;
                     // printf("%d\n", i);
                     State &state = item.second;
@@ -1291,7 +1292,7 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
                         // 1. extend h(i, j) to h(i, jnext)
                         value_type newscore;
 #ifdef FOR_MXFOLD2
-                        newscore = param_->score_hairpin(i+1, jnext+1);
+                        newscore = param_->score_hairpin(i+1, jnext+1) + opts.additional_paired_score(i+1, jnext+1);
 #elif defined(lv)
                         int tetra_hex_tri = -1;
 #ifdef SPECIAL_HP
@@ -1325,10 +1326,11 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
             //   2. generate P (i, j)
 #ifdef lv
             sort_keys(beamstepMulti, keys);
-            for (auto &item : keys) {
+            for (auto &item : keys) 
 #else
-            for(auto& item : beamstepMulti) {
+            for(auto& item : beamstepMulti) 
 #endif
+            {
                 int i = item.first;
                 State& state = item.second;
                 int nuci = nucs[i];
@@ -1399,10 +1401,11 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
 
 #if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepP, keys);
-            for (auto &item : keys) {
+            for (auto &item : keys) 
 #else
-            for(auto& item : beamstepP) {
+            for(auto& item : beamstepP) 
 #endif
+            {
                 int i = item.first;
                 State& state = item.second;
                 int nuci = nucs[i];
@@ -1580,10 +1583,11 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
                 vector<value_type> M1_scores;
 #if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepP, keys);
-            for (auto &item : keys) {
+            for (auto &item : keys)
 #else
-            for(auto& item : beamstepP) {
+            for(auto& item : beamstepP)
 #endif
+            {
                     int i = item.first;
                     State &state = item.second;
                     int nuci = nucs[i];
@@ -1686,10 +1690,11 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
             //   2. M = M2
 #if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepM2, keys);
-            for (auto &item : keys) {
+            for (auto &item : keys)
 #else
-            for(auto& item : beamstepM2) {
+            for(auto& item : beamstepM2)
 #endif
+            {
                 int i = item.first;
                 State& state = item.second;
 
@@ -1755,10 +1760,11 @@ auto BeamCKYParser<P,S>::parse(const string& seq, const Options& opts) -> Decode
             //   1. M = M + unpaired
 #if defined(lv) || defined(FOR_MXFOLD2)
             sort_keys(beamstepM, keys);
-            for (auto &item : keys) {
+            for (auto &item : keys)
 #else
-            for(auto& item : beamstepM) {
+            for(auto& item : beamstepM)
 #endif
+            {
                 int i = item.first;
                 State& state = item.second;
                 if (j < seq_length-1) {

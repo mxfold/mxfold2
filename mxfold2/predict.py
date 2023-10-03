@@ -303,9 +303,9 @@ class Predict:
                             help='output the base-pairing probability matrix to the specified directory')
         subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
-                            help='Specify an intercept used with SHAPE restraints. Default is -0.6 kcal/mol.')
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
-                            help='Specify a slope used with SHAPE restraints.  Default is 1.8 kcal/mol.')
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 

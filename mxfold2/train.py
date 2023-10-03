@@ -16,11 +16,11 @@ import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.swa_utils import SWALR, AveragedModel
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
 from . import interface
-from .dataset import BPseqDataset, FastaDataset
+from .dataset import BPseqDataset, FastaDataset, ShapeDataset
 from .fold.cf_mix import CONTRAMixedFold
 from .fold.contrafold import CONTRAfold
 from .fold.fold import AbstractFold
@@ -360,6 +360,10 @@ class Train:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)
+        if args.shape is not None:
+            shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
+            train_dataset = ConcatDataset([train_dataset] + shape_dataset)
+
         train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
@@ -452,6 +456,11 @@ class Train:
                             help='output file name of trained parameters')
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
+        subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
