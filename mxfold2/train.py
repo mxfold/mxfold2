@@ -63,32 +63,33 @@ class Train:
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs in data_loader:
-                assert('BPSEQ' in pairs)
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
-                optimizer.zero_grad()
-                loss = torch.sum(loss_fn(seqs, pairs['BPSEQ'], fname=fnames))
-                # if float(loss.item()) < 0.:
-                #     next
-                loss_total += loss.item()
-                num += n_batch
-                loss.backward()
-                # if self.verbose:
-                #     for n, p in model.named_parameters():
-                #         print(n, torch.min(p).item(), torch.max(p).item(), 
-                #             torch.min(cast(torch.Tensor, p.grad)).item(), 
-                #             torch.max(cast(torch.Tensor, p.grad)).item())
-                if clip_grad_norm > 0.0:
-                    nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
-                elif clip_grad_value > 0.0:
-                    nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
-                optimizer.step()
+                for i in range(n_batch):
+                    optimizer.zero_grad()
+                    assert(pairs['type'][i]=='BPSEQ')
+                    loss = torch.sum(loss_fn([seqs[i]], [pairs['target'][i]], fname=[fnames[i]]))
+                    # if float(loss.item()) < 0.:
+                    #     next
+                    loss_total += loss.item()
+                    running_loss += loss.item()
+                    loss.backward()
+                    # if self.verbose:
+                    #     for n, p in model.named_parameters():
+                    #         print(n, torch.min(p).item(), torch.max(p).item(), 
+                    #             torch.min(cast(torch.Tensor, p.grad)).item(), 
+                    #             torch.max(cast(torch.Tensor, p.grad)).item())
+                    if clip_grad_norm > 0.0:
+                        nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
+                    elif clip_grad_value > 0.0:
+                        nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+                    optimizer.step()
 
+                num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
 
-                running_loss += loss.item()
                 n_running_loss += n_batch
                 if n_running_loss >= 100 or num >= n_dataset:
                     running_loss /= n_running_loss
@@ -107,10 +108,10 @@ class Train:
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, pairs in data_loader:
-                assert('BPSEQ' in pairs)
                 n_batch = len(seqs)
-                loss = loss_fn(seqs, pairs['BPSEQ'], fname=fnames)
-                loss_total += loss.item()
+                for i in range(n_batch):
+                    loss = loss_fn([seqs[i]], [pairs['target'][0]], fname=[fnames[i]])
+                    loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)

@@ -34,7 +34,7 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
             # join all sequence lines to one.
             seq = "".join(s.strip() for s in faiter.__next__())
 
-            yield (headerStr, seq, {'FASTA': torch.Tensor([])})
+            yield (headerStr, seq, {'type': 'FASTA', 'target': torch.Tensor([])})
 
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
@@ -69,7 +69,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                     p.append(pair)
         
         seq = ''.join(s)
-        return (filename, seq, {'BPSEQ': torch.tensor(p)})
+        return (filename, seq, {'type': 'BPSEQ', 'target': torch.tensor(p)})
 
 
 class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
@@ -104,4 +104,4 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                     p.append(reactivity)
         
         seq = ''.join(s)
-        return (filename, seq, {'SHAPE': torch.tensor(p), 'dataset_id': dataset_id})
+        return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'dataset_id': dataset_id})

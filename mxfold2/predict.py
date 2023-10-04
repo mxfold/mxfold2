@@ -54,7 +54,10 @@ class Predict:
         with torch.no_grad():
             for headers, seqs, refs in data_loader:
                 start = time.time()
-                constraint = refs['BPSEQ'] if use_constraint and 'BPSEQ' in refs else None
+                if use_constraint:
+                    constraint = [ tgt if tp=='BPSEQ' else None for tp, tgt in zip(refs['type'], refs['target'])]
+                else:
+                    constraint = None
                 pseudoenergy = [pseudoenergy]*len(seqs) if pseudoenergy is not None else None
                 if output_bpp is None:
                     scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
@@ -62,9 +65,7 @@ class Predict:
                 else:
                     scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 elapsed_time = time.time() - start
-
-                refs = refs['BPSEQ'] if 'BPSEQ' in refs else refs['FASTA'] if 'FASTA' in refs else [None] * len(seq)
-                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs, scs, preds, bps, pfs, bpps):
+                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs['target'], scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
                         print('>'+header)
                         print(seq)

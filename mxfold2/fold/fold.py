@@ -69,7 +69,7 @@ class AbstractFold(nn.Module):
             param: Optional[list[dict[str, Any]]] = None, 
             return_partfunc: bool = False,
             max_internal_length: int = 30, max_helix_length: int = 30, 
-            constraint: Optional[list[torch.Tensor]] = None, 
+            constraint: Optional[list[Optional[torch.Tensor]]] = None, 
             reference: Optional[list[torch.Tensor]] = None,
             pseudoenergy: Optional[list[torch.Tensor]] = None,
             perturb: float = 0.0,
