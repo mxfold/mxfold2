@@ -21,23 +21,7 @@ from tqdm import tqdm
 
 from . import interface
 from .dataset import BPseqDataset, FastaDataset, ShapeDataset
-from .fold.cf_mix import CONTRAMixedFold
-from .fold.contrafold import CONTRAfold
 from .fold.fold import AbstractFold
-from .fold.linearfold import LinearFold
-from .fold.linearfold2d import LinearFold2D
-from .fold.linearfoldv import LinearFoldV
-from .fold.linearfoldc import LinearFoldC
-from .fold.mix import MixedFold
-from .fold.mix1d import MixedFold1D
-from .fold.mix_bl import MixedFoldBL
-from .fold.mix_linearfold import MixedLinearFold
-from .fold.mix_linearfold1d import MixedLinearFold1D
-from .fold.mix_linearfold2d import MixedLinearFold2D
-from .fold.rnafold import RNAFold
-from .fold.zuker import ZukerFold
-from .fold.zuker_bl import ZukerFoldBL
-from .loss import F1Loss, FenchelYoungLoss, StructuredLoss
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -62,24 +46,18 @@ class Train:
         running_loss, n_running_loss = 0, 0
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in data_loader:
+            for fnames, seqs, vals in data_loader:
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
                 for i in range(n_batch):
                     optimizer.zero_grad()
-                    assert(pairs['type'][i]=='BPSEQ')
-                    loss = torch.sum(loss_fn([seqs[i]], [pairs['target'][i]], fname=[fnames[i]]))
-                    # if float(loss.item()) < 0.:
-                    #     next
+                    assert(vals['type'][i]=='BPSEQ')
+                    loss = torch.sum(loss_fn(seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                     loss_total += loss.item()
                     running_loss += loss.item()
                     loss.backward()
-                    # if self.verbose:
-                    #     for n, p in model.named_parameters():
-                    #         print(n, torch.min(p).item(), torch.max(p).item(), 
-                    #             torch.min(cast(torch.Tensor, p.grad)).item(), 
-                    #             torch.max(cast(torch.Tensor, p.grad)).item())
+
                     if clip_grad_norm > 0.0:
                         nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
                     elif clip_grad_value > 0.0:
@@ -107,10 +85,11 @@ class Train:
         loss_total, num = 0, 0
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in data_loader:
+            for fnames, seqs, vals in data_loader:
                 n_batch = len(seqs)
                 for i in range(n_batch):
-                    loss = loss_fn([seqs[i]], [pairs['target'][0]], fname=[fnames[i]])
+                    assert(vals['type'][i]=='BPSEQ')
+                    loss = loss_fn(seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1])
                     loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
@@ -147,6 +126,7 @@ class Train:
 
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
+            from .fold.rnafold import RNAFold
             if args.init_param == 'default' or args.init_param == 'turner2004':
                 args.init_param = ''
                 from . import param_turner2004
@@ -155,6 +135,7 @@ class Train:
                 return RNAFold(), {}
         
         if args.model == 'CONTRAfold':
+            from .fold.contrafold import CONTRAfold
             if args.init_param == 'default':
                 args.init_param = ''
                 from . import param_contrafold202
@@ -163,6 +144,7 @@ class Train:
                 return CONTRAfold(), {}
         
         if args.model == 'LinearFoldV':
+            from .fold.linearfoldv import LinearFoldV
             if args.init_param == 'default' or args.init_param == 'turner2004':
                 args.init_param = ''
                 from . import param_turner2004
@@ -171,6 +153,7 @@ class Train:
                 return LinearFoldV(), {}
 
         if args.model == 'LinearFoldC':
+            from .fold.linearfoldc import LinearFoldC
             if args.param == 'default':
                 args.param = ''
                 from . import param_contrafold202
@@ -205,70 +188,89 @@ class Train:
         }
 
         if args.model == 'Zuker':
+            from .fold.zuker import ZukerFold
             model = ZukerFold(model_type='M', **config)
 
         elif args.model == 'ZukerC':
+            from .fold.zuker import ZukerFold
             model = ZukerFold(model_type='C', **config)
 
         elif args.model == 'ZukerL':
+            from .fold.zuker import ZukerFold
             model = ZukerFold(model_type="L", **config)
 
         elif args.model == 'ZukerS':
+            from .fold.zuker import ZukerFold
             model = ZukerFold(model_type="S", **config)
 
         elif args.model == 'ZukerFold':
+            from .fold.zuker import ZukerFold
             model = ZukerFold(model_type='4', **config)
 
         elif args.model == 'Mix':
             from . import param_turner2004
+            from .fold.mix import MixedFold
             model = MixedFold(init_param=param_turner2004, **config)
 
         elif args.model == 'MixC':
             from . import param_turner2004
+            from .fold.mix import MixedFold
             model = MixedFold(init_param=param_turner2004, model_type='C', **config)
 
         elif args.model == 'CFMixC':
             from . import param_contrafold202
+            from .fold.cf_mix import CONTRAMixedFold
             model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
 
         elif args.model == 'CFTMixC':
+            from .fold.cf_mix import CONTRAMixedFold
             model = CONTRAMixedFold(model_type='C', tune_cf=True, **config)
 
         elif args.model == 'Mix1D':
             from . import param_turner2004
+            from .fold.mix1d import MixedFold1D
             model = MixedFold1D(init_param=param_turner2004, **config)
 
         elif args.model == 'MixedZukerFold':
             from . import param_turner2004
+            from .fold.mix import MixedFold
             model = MixedFold(init_param=param_turner2004, model_type='4', **config)
 
         elif args.model == 'ZukerBL':
+            from .fold.zuker_bl import ZukerFoldBL
             model = ZukerFoldBL(**config)
 
         elif args.model == 'MixedBL':
             from . import param_turner2004
+            from .fold.mix_bl import MixedFoldBL
             model = MixedFoldBL(init_param=param_turner2004, **config)
 
         elif args.model == 'LinearFold':
+            from .fold.linearfold import LinearFold
             model = LinearFold(**config)
 
         elif args.model == 'MixCLinearFold':
             from . import param_turner2004
+            from .fold.mix_linearfold2d import MixedLinearFold2D
             model = MixedLinearFold2D(init_param=param_turner2004, model_type='C', **config)
 
         elif args.model == 'MixedLinearFold':
             from . import param_turner2004
+            from .fold.mix_linearfold import MixedLinearFold
             model = MixedLinearFold(init_param=param_turner2004, **config)
 
         elif args.model == 'LinearFold2D':
+            from .fold.linearfold2d import LinearFold2D
             model = LinearFold2D(**config)
 
         elif args.model == 'MixedLinearFold2D':
             from . import param_turner2004
+            from .fold.mix_linearfold2d import MixedLinearFold2D
             model = MixedLinearFold2D(init_param=param_turner2004, **config)
 
         elif args.model == 'MixedLinearFold1D':
             from . import param_turner2004
+            from .fold.mix_linearfold1d import MixedLinearFold1D
             model = MixedLinearFold1D(init_param=param_turner2004, **config)
 
         else:
@@ -311,16 +313,19 @@ class Train:
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
         if loss_func == 'hinge' or loss_func == 'hinge_mix':
+            from .loss.structured_loss import StructuredLoss
             return StructuredLoss(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
 
         if loss_func == 'fy' or loss_func == 'fy_mix':
+            from .loss.fy_loss import FenchelYoungLoss
             return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                                                 sl_weight=args.score_loss_weight)
 
         if loss_func == 'f1':
+            from .loss.f1_loss import F1Loss
             return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight)
 
