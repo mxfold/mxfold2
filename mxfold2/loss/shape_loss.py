@@ -46,7 +46,9 @@ class SHAPELoss(nn.Module):
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
 
-    def forward(self, seq: list[str], targets: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
+    def forward(self, seq: list[str], targets: list[torch.Tensor],
+                fname: Optional[list[str]] = None,
+                dataset_id: Optional[list[int]] = None) -> torch.Tensor:
         pred: torch.Tensor
         pred_s: list[str]
         pred_bps: list[list[int]]
@@ -54,25 +56,27 @@ class SHAPELoss(nn.Module):
 
         pred_params, pred_counts = [], []
         for k in sorted(param[0].keys()):
+            print(k)
             if k.startswith('score_'):
                 pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
             if k.startswith('count_'):
                 pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
 
         # calculate log-likelihood
-        lls = []
+        lls, grads = [], []
         for i in range(len(seq)):
             paired = [ 1 if v > 0 else 0 for v in pred_bps[i] ]
             paired = torch.tensor(paired, dtype=torch.float32, requires_grad=True, device=pred.device)
             valid = targets[i] > -1 # to ignore missing values (-999)
             ll = torch.sum(self.paired_dist.log_prob(targets[i][valid]) * paired[valid] + self.unpaired_dist.log_prob(targets[i][valid]) * (1-paired[valid]))
             ll.backward()
-            lls.append(ll)
+            lls.append(ll.item())
+            grads.append(paired.grad)
 
         ref: torch.Tensor
         ref_s: list[str]
         ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True, 
-                                    paired_position_score=[list(self.nu*ll.grad) for ll in lls])
+                                    pseudoenergy=[-self.nu*g for g in grads])
 
         ref_counts = []
         for k in sorted(param[0].keys()):
@@ -82,7 +86,7 @@ class SHAPELoss(nn.Module):
         class ADwrapper(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *input):
-                return -lls
+                return torch.tensor([-ll for ll in lls], device=pred.device)
 
             @staticmethod
             def backward(ctx, grad_output):

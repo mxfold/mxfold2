@@ -38,9 +38,12 @@ class Train:
         pass
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                loss_fn: nn.Module | dict[str, nn.Module], 
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
                 clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
         model.train()
+        if type(loss_fn) is not dict:
+            loss_fn = {'BPSEQ': loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
@@ -52,8 +55,12 @@ class Train:
                 n_batch = len(seqs)
                 for i in range(n_batch):
                     optimizer.zero_grad()
-                    assert(vals['type'][i]=='BPSEQ')
-                    loss = torch.sum(loss_fn(seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                    if vals['type'][i]=='BPSEQ':
+                        loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                    elif vals['type'][i]=='SHAPE': 
+                        loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                    else:
+                        raise(RuntimeError('not implemented'))
                     loss_total += loss.item()
                     running_loss += loss.item()
                     loss.backward()
@@ -79,8 +86,11 @@ class Train:
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
+                loss_fn: nn.Module | dict[str, nn.Module],
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
         model.eval()
+        if type(loss_fn) is not dict:
+            loss_fn = {'BPSEQ': loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
         start = time.time()
@@ -88,8 +98,12 @@ class Train:
             for fnames, seqs, vals in data_loader:
                 n_batch = len(seqs)
                 for i in range(n_batch):
-                    assert(vals['type'][i]=='BPSEQ')
-                    loss = loss_fn(seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1])
+                    if vals['type'][i]=='BPSEQ':
+                        loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                    elif vals['type'][i]=='SHAPE': 
+                        loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                    else:
+                        raise(RuntimeError('not implemented'))
                     loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
@@ -402,7 +416,16 @@ class Train:
         interface.set_num_threads(args.threads)
 
         optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
-        loss_fn = self.build_loss_function(args.loss_func, model, args)
+
+        from .loss.shape_loss import SHAPELoss
+        loss_fn = {
+            'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
+            'SHAPE': SHAPELoss(model,
+                            xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404,
+                            perturb=args.perturb, nu=args.nu, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight) }
+
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         checkpoint_epoch = 0
