@@ -56,11 +56,16 @@ class SHAPELoss(nn.Module):
 
         pred_params, pred_counts = [], []
         for k in sorted(param[0].keys()):
-            print(k)
             if k.startswith('score_'):
                 pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            if k.startswith('count_'):
+            elif k.startswith('count_'):
                 pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            elif isinstance(param[0][k], dict):
+                for kk in sorted(param[0][k].keys()):
+                    if kk.startswith('score_'):
+                        pred_params.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                    elif kk.startswith('count_'):
+                        pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         # calculate log-likelihood
         lls, grads = [], []
@@ -68,7 +73,7 @@ class SHAPELoss(nn.Module):
             paired = [ 1 if v > 0 else 0 for v in pred_bps[i] ]
             paired = torch.tensor(paired, dtype=torch.float32, requires_grad=True, device=pred.device)
             valid = targets[i] > -1 # to ignore missing values (-999)
-            ll = torch.sum(self.paired_dist.log_prob(targets[i][valid]) * paired[valid] + self.unpaired_dist.log_prob(targets[i][valid]) * (1-paired[valid]))
+            ll = torch.mean(self.paired_dist.log_prob(targets[i][valid]) * paired[valid] + self.unpaired_dist.log_prob(targets[i][valid]) * (1-paired[valid]))
             ll.backward()
             lls.append(ll.item())
             grads.append(paired.grad)
@@ -82,6 +87,10 @@ class SHAPELoss(nn.Module):
         for k in sorted(param[0].keys()):
             if k.startswith('count_'):
                 ref_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            elif isinstance(param[0][k], dict):
+                for kk in sorted(param[0][k].keys()):
+                    if kk.startswith('count_'):
+                        ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         class ADwrapper(torch.autograd.Function):
             @staticmethod

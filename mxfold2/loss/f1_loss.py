@@ -42,8 +42,14 @@ class F1Loss(nn.Module):
         for k in sorted(param[0].keys()):
             if k.startswith('score_'):
                 pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            if k.startswith('count_'):
+            elif k.startswith('count_'):
                 pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            elif isinstance(param[0][k], dict):
+                for kk in sorted(param[0][k].keys()):
+                    if kk.startswith('score_'):
+                        pred_params.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                    elif kk.startswith('count_'):
+                        pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         # calculate F1 score
         f1, g_pos, g_neg = [], [], []
@@ -65,6 +71,10 @@ class F1Loss(nn.Module):
         for k in sorted(param[0].keys()):
             if k.startswith('count_'):
                 ref_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            elif isinstance(param[0][k], dict):
+                for kk in sorted(param[0][k].keys()):
+                    if kk.startswith('count_'):
+                        ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         class ADwrapper(torch.autograd.Function):
             @staticmethod
