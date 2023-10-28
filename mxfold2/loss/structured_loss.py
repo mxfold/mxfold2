@@ -30,7 +30,7 @@ class StructuredLoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            from . import param_turner2004
+            from .. import param_turner2004
             from ..fold.rnafold import RNAFold
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 

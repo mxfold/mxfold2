@@ -9,13 +9,14 @@ license = "MIT"
 #build = "build.py"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+#python = "^3.10"
+python = ">=3.10,<3.13"
 numpy = "*"
-torch = "^1.13"
+torch = "*"
 tqdm = "*"
 wheel = "*"
-pybind11 = "^2.10"
-pytorch-optimizer = "^2.5.0"
+pybind11 = "*"
+pytorch-optimizer = "*"
 
 [tool.poetry.dev-dependencies]
 pylint = "*"
@@ -27,14 +28,12 @@ torch-tb-profiler = "*"
 [tool.poetry.scripts]
 mxfold2 = "mxfold2.__main__:main"
 
-# [[tool.poetry.source]]
-# name = "pytorch-cu116"
-# url = "https://download.pytorch.org/whl/cu116/"
-# secondary = true
-
 [tool.poetry.build]
 script = "build.py"
 generate-setup-file = true
+
+[tool.poetry.group.dev.dependencies]
+scipy = "^1.11.3"
 
 [build-system]
 requires = ["poetry-core"]

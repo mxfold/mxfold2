@@ -5,6 +5,7 @@ import os
 import random
 import time
 from argparse import Namespace
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -40,6 +41,7 @@ class Train:
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
                 loss_fn: nn.Module | dict[str, nn.Module], 
                 data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                loss_weight = defaultdict(lambda: 1.),
                 clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
         model.train()
         if type(loss_fn) is not dict:
@@ -61,6 +63,7 @@ class Train:
                         loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
                     else:
                         raise(RuntimeError('not implemented'))
+                    loss = loss * loss_weight[vals['type'][i]]
                     loss_total += loss.item()
                     running_loss += loss.item()
                     loss.backward()
@@ -381,6 +384,7 @@ class Train:
 
         train_dataset = BPseqDataset(args.input)
         if args.shape is not None:
+            device = torch.device("cuda", args.gpu) if args.gpu>=0 else torch.device("cpu") 
             shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
 
@@ -422,10 +426,10 @@ class Train:
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
             'SHAPE': SHAPELoss(model,
                             xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404,
-                            perturb=args.perturb, nu=args.nu, 
+                            perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=args.score_loss_weight) }
-
+                            sl_weight=0.) }
+        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         checkpoint_epoch = 0
@@ -445,7 +449,7 @@ class Train:
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
-                       clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
+                        loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
             if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
@@ -486,10 +490,10 @@ class Train:
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
         subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
-        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
-                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
-        subparser.add_argument('--shape-slope', type=float, default=2.6, 
-                            help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
+        # subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+        #                     help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        # subparser.add_argument('--shape-slope', type=float, default=2.6, 
+        #                     help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
@@ -514,11 +518,15 @@ class Train:
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
         gparser.add_argument('--score-loss-weight', type=float, default=0.,
-                            help='the weight for score loss for {hinge,fy}_mix loss (default: 0)')
+                            help='the weight for score loss for {hinge,fy} loss (default: 0)')
         gparser.add_argument('--perturb', type=float, default=0.1,
-                            help='standard deviation of perturbation for fy, fy_mix loss (default: 0.1)')
+                            help='standard deviation of perturbation for fy loss (default: 0.1)')
         gparser.add_argument('--nu', type=float, default=0.1,
                             help='weight for distribution (default: 0.1)')
+        gparser.add_argument('--shape-perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for shape loss (default: 0.1)')
+        gparser.add_argument('--shape-nu', type=float, default=0.1,
+                            help='weight for distribution for shape loss (default: 0.1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
         gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
@@ -535,6 +543,8 @@ class Train:
                             help='gradient clipping by values (default=0, no clipping)')
         gparser.add_argument('--clip-grad-norm', type=float, default=0.,
                             help='gradient clipping by norm (default=0, no clipping)')
+        gparser.add_argument('--shape-loss-weight', type=float, default=1.,
+                            help='weight for SHAPE loss function (default=1)')
         gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
                             help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
         gparser.add_argument('--scheduler-step-size', type=int, default=5, help='scheduler step size (default=5)')

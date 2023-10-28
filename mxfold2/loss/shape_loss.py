@@ -41,7 +41,7 @@ class SHAPELoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         if sl_weight > 0.0:
-            from . import param_turner2004
+            from .. import param_turner2004
             from ..fold.rnafold import RNAFold
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
@@ -72,8 +72,10 @@ class SHAPELoss(nn.Module):
         for i in range(len(seq)):
             paired = [ 1 if v > 0 else 0 for v in pred_bps[i] ]
             paired = torch.tensor(paired, dtype=torch.float32, requires_grad=True, device=pred.device)
-            valid = targets[i] > -1 # to ignore missing values (-999)
-            ll = torch.mean(self.paired_dist.log_prob(targets[i][valid]) * paired[valid] + self.unpaired_dist.log_prob(targets[i][valid]) * (1-paired[valid]))
+            tgt = targets[i].to(pred.device)
+            valid = tgt > -1 # to ignore missing values (-999)
+            ll = torch.mean(self.paired_dist.log_prob(tgt[valid]) * paired[valid] 
+                            + self.unpaired_dist.log_prob(tgt[valid]).to(pred.device) * (1-paired[valid]))
             ll.backward()
             lls.append(ll.item())
             grads.append(paired.grad)
