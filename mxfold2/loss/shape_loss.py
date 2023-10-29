@@ -74,8 +74,8 @@ class SHAPELoss(nn.Module):
             paired = torch.tensor(paired, dtype=torch.float32, requires_grad=True, device=pred.device)
             tgt = targets[i].to(pred.device)
             valid = tgt > -1 # to ignore missing values (-999)
-            ll = torch.mean(self.paired_dist.log_prob(tgt[valid]) * paired[valid] 
-                            + self.unpaired_dist.log_prob(tgt[valid]).to(pred.device) * (1-paired[valid]))
+            ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[valid] 
+                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)).to(pred.device) * (1-paired[valid]))
             ll.backward()
             lls.append(ll.item())
             grads.append(paired.grad)
