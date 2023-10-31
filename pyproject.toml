@@ -6,24 +6,22 @@ authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
 repository = "https://github.com/mxfold/mxfold2"
 readme = "README.md"
 license = "MIT"
-#build = "build.py"
 
 [tool.poetry.dependencies]
-#python = "^3.10"
 python = ">=3.10,<3.13"
 numpy = "*"
 torch = "*"
 tqdm = "*"
-wheel = "*"
 pybind11 = "*"
 pytorch-optimizer = "*"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pylint = "*"
 jupyter = "*"
 pandas = "*"
 tensorboard = "*"
 torch-tb-profiler = "*"
+scipy = "^1.11.3"
 
 [tool.poetry.scripts]
 mxfold2 = "mxfold2.__main__:main"
@@ -32,9 +30,7 @@ mxfold2 = "mxfold2.__main__:main"
 script = "build.py"
 generate-setup-file = true
 
-[tool.poetry.group.dev.dependencies]
-scipy = "^1.11.3"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.6.0", "setuptools>=42", "wheel", "pybind11"]
 build-backend = "poetry.core.masonry.api"
