@@ -83,8 +83,8 @@ class Predict:
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
             from .fold.rnafold import RNAFold
-            if args.init_param == 'default' or args.init_param == 'turner2004':
-                args.init_param = ''
+            if args.param == 'default' or args.param == 'turner2004':
+                args.param = ''
                 from . import param_turner2004
                 return RNAFold(init_param=param_turner2004), {}
             else:
@@ -92,8 +92,8 @@ class Predict:
         
         if args.model == 'CONTRAfold':
             from .fold.contrafold import CONTRAfold
-            if args.init_param == 'default':
-                args.init_param = ''
+            if args.param == 'default':
+                args.param = ''
                 from . import param_contrafold202
                 return CONTRAfold(init_param=param_contrafold202), {}
             else:
@@ -101,12 +101,21 @@ class Predict:
         
         if args.model == 'LinearFoldV':
             from .fold.linearfoldv import LinearFoldV
-            if args.init_param == 'default' or args.init_param == 'turner2004':
-                args.init_param = ''
+            if args.param == 'default' or args.param == 'turner2004':
+                args.param = ''
                 from . import param_turner2004
                 return LinearFoldV(init_param=param_turner2004), {}
             else:
                 return LinearFoldV(), {}
+
+        if args.model == 'LinFoldV':
+            from .fold.linfoldv import LinFoldV
+            if args.param == 'default' or args.param == 'turner2004':
+                args.param = ''
+                from . import param_turner2004
+                return LinFoldV(init_param=param_turner2004), {}
+            else:
+                return LinFoldV(), {}
 
         if args.model == 'LinearFoldC':
             from .fold.linearfoldc import LinearFoldC
@@ -317,8 +326,8 @@ class Predict:
                             help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 
+                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinFoldV', ''LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')

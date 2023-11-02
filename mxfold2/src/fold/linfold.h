@@ -1,12 +1,12 @@
 #pragma once
 
 #include "fold.h"
+#include <unordered_map>
 
-#define HELIX_LENGTH
-#define SIMPLE_SPARSIFICATION
+// #define HELIX_LENGTH
 
 template < typename P, typename S = typename P::ScoreType >
-class Zuker : public Fold
+class LinFold : public Fold
 {
     public:
         using ScoreType = S;
@@ -14,6 +14,7 @@ class Zuker : public Fold
     private:
         enum TBType
         {
+            H_CLOSING,       // H -> ( ... )          ; hairpin candidate
 #ifdef HELIX_LENGTH
             N_HAIRPIN_LOOP,  // N -> ( ... )          ; hairpin loop
             N_INTERNAL_LOOP, // N -> ( ... C ... )    ; single loop
@@ -26,21 +27,35 @@ class Zuker : public Fold
 #else
             C_HAIRPIN_LOOP,  // C -> ( ... )          ; hairpin loop
             C_INTERNAL_LOOP, // C -> ( ... C ... )    ; single loop 
-            C_MULTI_LOOP,    // C -> ( M M1 )         ; multi loop
+            C_MULTI_LOOP,    // C -> ( M )            ; multi loop
 #endif
-            M_PAIRED,        // M -> ... C            ; multi loop candidate
-            M_BIFURCATION,   // M -> M C              ; add loop to multi loop candidate
-            M_UNPAIRED,      // M -> M .              ; extend multi loop candidate
+            M_CLOSING,        // M -> ... M2 ...       ; multi loop candidate
+            //M_UNPAIRED,      // M -> M ...            ; extend multi loop candidate
+            M2_BIFURCATION,  // M2 -> M1 C            ; add loop to multi loop candidate
+            M1_M2,           // M1 -> M2              ; multi loop candidate without unpaired 
             M1_PAIRED,       // M1 -> C               ; right-most multi loop candidate
             M1_UNPAIRED,     // M1 -> M1 .            ; extend right-most multi loop candidate
             F_START,         // F -> empty            ; start external loop
-            F_UNPAIRED,      // F -> . F              ; extend external loop
-            F_BIFURCATION    // F -> C F              ; add loop to external loop
+            F_UNPAIRED,      // F -> F .              ; extend external loop
+            F_BIFURCATION,   // F -> F C              ; add loop to external loop
+            NONE
         };
-        using TB = std::tuple<TBType, std::variant<u_int32_t, std::pair<u_int8_t, u_int8_t>>>;
+
+        struct State
+        {
+            State() : score(std::numeric_limits<ScoreType>::lowest()), manner(NONE) {}
+            State(ScoreType s, TBType t, u_int32_t k=0) : score(s), manner(t), ptr(k) {}  
+            State(ScoreType s, TBType t, u_int16_t p, u_int16_t q) : score(s), manner(t), ptr(std::make_pair(p, q)) {}
+            bool update_max(ScoreType s, TBType t, u_int32_t k=0);
+            bool update_max(ScoreType s, TBType t, u_int16_t p, u_int16_t q);
+
+            ScoreType score;
+            TBType manner;
+            std::variant<u_int32_t, std::pair<u_int16_t, u_int16_t>> ptr;
+        };
 
     public:
-        Zuker(std::unique_ptr<P>&& p);
+        LinFold(std::unique_ptr<P>&& p);
         auto compute_viterbi(const std::string& seq, const Options& opt = Options()) -> ScoreType;
         auto traceback_viterbi() -> std::vector<u_int32_t>;
         auto traceback_viterbi(const std::string& seq, const Options& opt = Options()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
@@ -50,23 +65,19 @@ class Zuker : public Fold
         const P& param_model() const { return *param_; }
 
     private:
-        bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int32_t k=0);
-        bool update_max(ScoreType& max_v, ScoreType new_v, TB& max_t, TBType tt, u_int8_t p, u_int8_t q);
+        auto beam_prune(std::unordered_map<u_int32_t, State>& state, u_int32_t beam_size) -> ScoreType;
 
     private:
         std::unique_ptr<P> param_;
-        TriMatrix<ScoreType> Cv_, Mv_, M1v_; 
-        std::vector<ScoreType> Fv_;
-        TriMatrix<TB> Ct_, Mt_, M1t_;
-        std::vector<TB> Ft_;
-        TriMatrix<ScoreType> Ci_, Mi_, M1i_; 
-        std::vector<ScoreType> Fi_;
-        TriMatrix<ScoreType> Co_, Mo_, M1o_; 
-        std::vector<ScoreType> Fo_;
+
+        std::vector<std::unordered_map<u_int32_t, State>> Hv_, Cv_, Mv_, M1v_, M2v_;
+        std::vector<State> Fv_;
+        std::vector<std::unordered_map<u_int32_t, State>> Ho_, Co_, Mo_, M1o_, M2o_; 
+        std::vector<State> Fo_;
 #ifdef HELIX_LENGTH
-        TriMatrix<ScoreType> Nv_, Ev_;
-        TriMatrix<TB> Nt_, Et_;
-        TriMatrix<ScoreType> Ni_, Ei_;
-        TriMatrix<ScoreType> No_, Eo_;
+        std::vector<std::unordered_map<u_int32_t, State>> Nv_, Ev_;
+        std::vector<std::unordered_map<u_int32_t, State>> No_, Eo_;
 #endif
+
+        std::vector<std::vector<u_int32_t>> next_pair_;
 };

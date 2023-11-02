@@ -8,6 +8,7 @@
 #include "fold/zuker.h"
 #include "fold/nussinov.h"
 #include "fold/linearfold/LinearFold.h"
+#include "fold/linfold.h"
 #include "param/contrafold.h"
 #include "param/turner.h"
 #include "param/positional.h"
@@ -368,6 +369,108 @@ private:
     std::unique_ptr<LinearFold::BeamCKYParser<ParamClass>> f_;
     typename LinearFold::BeamCKYParser<ParamClass>::Options options_;
     int beam_size_;
+};
+
+template < class ParamClass >
+class LinFoldWrapper : public FoldWrapper
+{
+public:
+    LinFoldWrapper() {}
+    
+    void set_param(const std::string& seq, py::object pa)
+    {
+        seq_ = seq;
+        auto param = std::make_unique<ParamClass>(seq, pa);
+        f_ = std::make_unique<LinFold<ParamClass>>(std::move(param));
+    }
+
+    auto set_options(int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+            py::object paired_position_scores)
+    {
+        typename LinFold<ParamClass>::Options options;
+        options.min_hairpin_loop_length(min_hairpin)
+            .max_internal_loop_length(max_internal)
+            .max_helix_length(max_helix);
+
+        for (auto i=0; i!=allowed_pairs.size(); i+=2)
+            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+
+        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+        {
+            auto c = py::cast<py::list>(constraint);
+            auto c1 = convert_constraints(c);
+            if (c1.size()>0)
+                options.constraints(c1);
+        }
+        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+        {
+            auto r = py::cast<py::list>(reference);
+            auto r1 = convert_reference(r);
+            if (r1.size() > 0)
+                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        }
+        if (py::isinstance<py::list>(paired_position_scores))
+        {
+            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
+            options.score_paired_position(sc);
+        }
+        std::swap(options, options_);
+        return options_;
+    }
+
+    auto compute_viterbi(const std::string& seq, py::object pa,
+            int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+            py::object paired_position_scores)
+    {
+        set_param(seq, pa);
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
+                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
+                paired_position_scores);
+        return f_->compute_viterbi(seq_, options_);
+    }
+
+    auto traceback_viterbi()
+    {
+        auto [e, p] = f_->traceback_viterbi(seq_, options_);
+        auto s = LinFold<ParamClass>::make_paren(p);
+        return std::make_tuple(e, s, p);
+    }
+
+#if 0
+    auto compute_basepairing_probabilities(const std::string& seq, py::object pa, 
+            int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+            py::object paired_position_scores)
+    {
+        set_param(seq, pa);
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
+                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired, 
+                paired_position_scores);
+
+        auto ret = f_->compute_inside(seq_, options_);
+        f_->compute_outside(seq_, options_);
+        auto bpp = f_->compute_basepairing_probabilities(seq_, options_);
+        py::array_t<float> bpp_a({bpp.size(), bpp[0].size()});
+        auto bpp_a2 = bpp_a.mutable_unchecked<2>();
+        for (auto i=0; i<bpp.size(); i++)
+            for (auto j=0; j<bpp[i].size(); j++)
+                bpp_a2(i, j) = bpp[i][j];
+        return std::make_pair(ret, bpp_a);
+    }
+#endif
+
+private:
+    std::string seq_;
+    std::unique_ptr<LinFold<ParamClass>> f_;
+    typename LinFold<ParamClass>::Options options_;
 };
 
 void set_num_threads(int n)
@@ -884,4 +987,24 @@ PYBIND11_MODULE(interface, m)
             "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
             "traceback for LinearFold model");
+
+    py::class_<LinFoldWrapper<TurnerNearestNeighbor>>(m, "LinFoldTurnerWrapper")
+        //.def(py::init<int>(), "constructor", "beam_size"_a=100)
+        .def(py::init())
+        .def("compute_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with LinFold-V Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none())
+        .def("traceback_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
+            "traceback for LinearFold-V");
 }
