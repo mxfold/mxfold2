@@ -3,7 +3,7 @@
 #include "fold.h"
 #include <unordered_map>
 
-// #define HELIX_LENGTH
+#define HELIX_LENGTH
 
 template < typename P, typename S = typename P::ScoreType >
 class LinFold : public Fold

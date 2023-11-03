@@ -153,6 +153,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ev_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX_E, m);
                     }
@@ -778,6 +779,7 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ei_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         Ci_[i][j] = logsumexp(Ci_[i][j], s);
                     }
@@ -994,6 +996,7 @@ compute_outside(const std::string& seq, const Options& opts)
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Co_[i][j] + param_->score_helix(i, j, m) + lp;
                         Eo_[i+(m-1)][j-(m-1)] = logsumexp(Eo_[i+(m-1)][j-(m-1)], s);
                     }

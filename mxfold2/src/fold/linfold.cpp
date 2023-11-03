@@ -125,9 +125,15 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
         if (beam_size > 0) beam_prune(Hv_[j], beam_size);
         for (const auto& [i, st]: Hv_[j])
         {
+#ifdef HELIX_LENGTH
+            // N -> ( ... )
+            auto newscore = st.score + opts.additional_paired_score(i, j);
+            Nv_[j][i].update_max(newscore, TBType::N_HAIRPIN_LOOP);
+#else
             // C -> ( ... )
             auto newscore = st.score + opts.additional_paired_score(i, j);
             Cv_[j][i].update_max(newscore, TBType::C_HAIRPIN_LOOP);
+#endif
 
             // extend H(i, j) to H(i, k)
             auto k = next_pair[seq[i-1]].size()>0 ? next_pair[seq[i-1]][j] : 0;
@@ -141,9 +147,15 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
         if (beam_size > 0) beam_prune(Mv_[j], beam_size);
         for (const auto& [i, st]: Mv_[j])
         {
+#ifdef HELIX_LENGTH
+            // N -> ( M )
+            auto newscore = st.score + param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+            Nv_[j][i].update_max(newscore, TBType::N_MULTI_LOOP);
+#else
             // C -> ( M )
             auto newscore = st.score + param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
             Cv_[j][i].update_max(newscore, TBType::C_MULTI_LOOP);
+#endif
 
             // extend M(i, j) to M(i, k)
             auto k = next_pair[seq[i-1]].size()>0 ? next_pair[seq[i-1]][j] : 0;
@@ -154,6 +166,56 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                 Mv_[k][i].update_max(newscore, TBType::M_CLOSING, l1, l2+k-j);
             }
         }
+
+#ifdef HELIX_LENGTH
+        // N: isolated closed loops
+        if (beam_size > 0) beam_prune(Nv_[j], beam_size);
+        for (const auto& [i, st]: Nv_[j])
+        {
+            // E -> N ; terminal of extended helix
+            Ev_[j][i].update_max(st.score, TBType::E_TERMINAL);
+
+            // C -> N ; isolated base-pair
+            Cv_[j][i].update_max(st.score+param_->score_helix(i, j, 1), TBType::C_TERMINAL);
+
+            // C -> ((( N ))) ; helix (< max_helix_length)
+            ScoreType lp = ScoreType(0.);
+            for (auto m=2; m<=opts.max_helix; m++)
+            {
+                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                Cv_[j+(m-1)][i-(m-1)].update_max(newscore, TBType::C_HELIX, m);
+            }
+        }
+
+        // E: extended helices
+        if (beam_size > 0) beam_prune(Ev_[j], beam_size);
+        for (const auto& [i, st]: Ev_[j])
+        {
+            // E -> ( E ) ; extended helix longer than max_helix_length
+            if (i-1>=1 && j+1<=L && opts.allow_paired(seq, i-1, j+1))
+            {
+                auto newscore = st.score + param_->score_single_loop(i-1, j+1, i, j) + opts.additional_paired_score(i-1, j+1);
+                Ev_[j+1][i-1].update_max(newscore, TBType::E_HELIX);
+            }
+
+            // C -> ((( E ))) ; helix (= max_helix_length)
+            ScoreType lp = ScoreType(0.);
+            u_int32_t m;
+            for (auto m=2; m<=opts.max_helix; m++)
+            {
+                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+            }
+            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+            {
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                Cv_[j+(m-1)][i-(m-1)].update_max(newscore, TBType::C_HELIX_E, m);
+            }
+        }
+#endif
 
         // C: closed loops
         if (beam_size > 0) beam_prune(Cv_[j], beam_size);
@@ -182,6 +244,25 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                 Fv_[j].update_max(newscore, TBType::F_BIFURCATION, i-1);
             }
 
+#ifdef HELIX_LENGTH
+            // N -> ( ... C ... )
+            if (i>1 && j<L)
+            {
+                for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) 
+                {
+                    auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                    while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                    {
+                        if (opts.allow_paired(seq, p, q) && (i-p>1 || q-j>1))
+                        {
+                            auto newscore = st.score + param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                            Nv_[q][p].update_max(newscore, TBType::N_INTERNAL_LOOP, i-p, q-j);
+                        }
+                        q = next_pair[seq[p-1]][q];
+                    }
+                }
+            }
+#else
             // C -> ( ... C ... )
             if (i>1 && j<L)
             {
@@ -199,6 +280,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                     }
                 }
             }
+#endif
         }
 
         // M2: multi loop candidates without unpaired bases
@@ -273,28 +355,27 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }
             case TBType::N_INTERNAL_LOOP: {
-                const auto [p, q] = std::get<1>(kl);
+                const auto [p, q] = std::get<1>(st.ptr);
                 const auto k = i+p;
                 const auto l = j-q;
-                tb_queue.emplace(Ct_[k][l], k, l);
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
+                assert(k < l);
+                tb_queue.emplace(Cv_[l][k], k, l);
                 pair[i] = j;
                 pair[j] = i;
                 break;
             }
             case TBType::N_MULTI_LOOP: {
-                const auto u = std::get<0>(kl);
-                tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
-                tb_queue.emplace(M1t_[u][j-1], u, j-1);
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
+                tb_queue.emplace(Mv_[j][i], i, j);
                 pair[i] = j;
                 pair[j] = i;
                 break;
             }
             case TBType::E_HELIX: {
-                tb_queue.emplace(Et_[i+1][j-1], i+1, j-1);
+                tb_queue.emplace(Ev_[j-1][i+1], i+1, j-1);
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
                 pair[i] = j;
@@ -302,16 +383,16 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }
             case TBType::E_TERMINAL: {
-                tb_queue.emplace(Nt_[i][j], i, j);
+                tb_queue.emplace(Nv_[j][i], i, j);
                 break;
             }
             case TBType::C_TERMINAL: {
-                tb_queue.emplace(Nt_[i][j], i, j);
+                tb_queue.emplace(Nv_[j][i], i, j);
                 break;
             }
             case TBType::C_HELIX: {
-                const auto m = std::get<0>(kl);
-                tb_queue.emplace(Nt_[i+(m-1)][j-(m-1)], i+(m-1), j-(m-1));
+                const auto m = std::get<0>(st.ptr);
+                tb_queue.emplace(Nv_[j-(m-1)][i+(m-1)], i+(m-1), j-(m-1));
                 for (auto k=2; k<=m; k++)
                 {
                     assert(pair[i+(k-2)] == 0);
@@ -322,8 +403,8 @@ traceback_viterbi() -> std::vector<u_int32_t>
                 break;
             }
             case TBType::C_HELIX_E: {
-                const auto m = std::get<0>(kl);
-                tb_queue.emplace(Et_[i+(m-1)][j-(m-1)], i+(m-1), j-(m-1));
+                const auto m = std::get<0>(st.ptr);
+                tb_queue.emplace(Ev_[j-(m-1)][i+(m-1)], i+(m-1), j-(m-1));
                 for (auto k=2; k<m; k++)
                 {
                     assert(pair[i+(k-2)] == 0);
@@ -430,22 +511,22 @@ traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<type
             case TBType::N_HAIRPIN_LOOP: {
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
-                e += param_->score_hairpin(i, j) + opts.additional_paired_score(i, j) /*+ loss_unpaired[i+1][j-1]*/;
+                e += param_->score_hairpin(i, j) + opts.additional_paired_score(i, j);
                 param_->count_hairpin(i, j, 1.);
                 pair[i] = j;
                 pair[j] = i;
                 break;
             }
             case TBType::N_INTERNAL_LOOP: {
-                assert(pair[i] == 0);
-                assert(pair[j] == 0);
-                const auto [p, q] = std::get<1>(kl);
+                const auto [p, q] = std::get<1>(st.ptr);
                 const auto k = i+p;
                 const auto l = j-q;
+                assert(pair[i] == 0);
+                assert(pair[j] == 0);
                 assert(k < l);
-                e += param_->score_single_loop(i, j, k, l) + opts.additional_paired_score(i, j) /*+ loss_unpaired[i+1][k-1] + loss_unpaired[l+1][j-1]*/;
+                e += param_->score_single_loop(i, j, k, l) + opts.additional_paired_score(i, j);
                 param_->count_single_loop(i, j, k, l, 1.);
-                tb_queue.emplace(Ct_[k][l], k, l);
+                tb_queue.emplace(Cv_[l][k], k, l);
                 pair[i] = j;
                 pair[j] = i;
                 break;
@@ -453,17 +534,15 @@ traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<type
             case TBType::N_MULTI_LOOP: {
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
-                const auto u = std::get<0>(kl);
                 e += param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
                 param_->count_multi_loop(i, j, 1.);
-                tb_queue.emplace(Mt_[i+1][u-1], i+1, u-1);
-                tb_queue.emplace(M1t_[u][j-1], u, j-1);
+                tb_queue.emplace(Mv_[j][i], i, j);
                 pair[i] = j;
                 pair[j] = i;
                 break;
             }
             case TBType::E_HELIX: {
-                tb_queue.emplace(Et_[i+1][j-1], i+1, j-1);
+                tb_queue.emplace(Ev_[j-1][i+1], i+1, j-1);
                 e += param_->score_single_loop(i, j, i+1, j-1) + opts.additional_paired_score(i, j);
                 param_->count_single_loop(i, j, i+1, j-1, 1.);
                 assert(pair[i] == 0);
@@ -473,18 +552,18 @@ traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<type
                 break;
             }
             case TBType::E_TERMINAL: {
-                tb_queue.emplace(Nt_[i][j], i, j);
+                tb_queue.emplace(Nv_[j][i], i, j);
                 break;
             }
             case TBType::C_TERMINAL: {
-                tb_queue.emplace(Nt_[i][j], i, j);
+                tb_queue.emplace(Nv_[j][i], i, j);
                 e += param_->score_helix(i, j, 1);
                 param_->count_helix(i, j, 1, 1.);
                 break;
             }
             case TBType::C_HELIX: {
-                const auto m = std::get<0>(kl);
-                tb_queue.emplace(Nt_[i+(m-1)][j-(m-1)], i+(m-1), j-(m-1));
+                const auto m = std::get<0>(st.ptr);
+                tb_queue.emplace(Nv_[j-(m-1)][i+(m-1)], i+(m-1), j-(m-1));
                 ScoreType lp = 0.;
                 for (auto k=2; k<=m; k++)
                 {
@@ -499,8 +578,8 @@ traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<type
                 break;
             }
             case TBType::C_HELIX_E: {
-                const auto m = std::get<0>(kl);
-                tb_queue.emplace(Et_[i+(m-1)][j-(m-1)], i+(m-1), j-(m-1));
+                const auto m = std::get<0>(st.ptr);
+                tb_queue.emplace(Ev_[j-(m-1)][i+(m-1)], i+(m-1), j-(m-1));
                 ScoreType lp = 0.;
                 for (auto k=2; k<m; k++)
                 {
