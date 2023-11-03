@@ -103,9 +103,9 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 
     const auto [next_pair, allow_unpaired_range, allow_unpaired_position] = opts.make_constraint_lin(seq /*, "acgu"s */);
 
-    Fv_[0].update_max(0, TBType::F_START);
+    Fv_[0].update_max(param_->score_external_zero(), TBType::F_START);
     if (L>0) Fv_[1].update_max(param_->score_external_unpaired(1, 1), TBType::F_UNPAIRED);
-    if (L>1) Fv_[2].update_max(param_->score_external_unpaired(1, 2), TBType::F_UNPAIRED);
+    if (L>1) Fv_[2].update_max(param_->score_external_unpaired(2, 2), TBType::F_UNPAIRED);
 
     for (auto j=1; j<=L; j++)
     {
@@ -424,11 +424,8 @@ traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<type
 
         switch (st.manner)
         {
-            case TBType::H_CLOSING: {
-                e += param_->score_hairpin(i, j);
-                param_->count_hairpin(i, j, 1.);
+            case TBType::H_CLOSING: 
                 break;
-            }
 #ifdef HELIX_LENGTH
             case TBType::N_HAIRPIN_LOOP: {
                 assert(pair[i] == 0);
@@ -521,7 +518,8 @@ traceback_viterbi(const std::string& seq, const Options& opts) -> std::pair<type
             case TBType::C_HAIRPIN_LOOP: {
                 assert(pair[i] == 0);
                 assert(pair[j] == 0);
-                e += opts.additional_paired_score(i, j);
+                e += param_->score_hairpin(i, j) + opts.additional_paired_score(i, j);
+                param_->count_hairpin(i, j, 1.);
                 pair[i] = j;
                 pair[j] = i;
                 break;

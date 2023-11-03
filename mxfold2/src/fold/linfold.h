@@ -14,23 +14,24 @@ class LinFold : public Fold
     private:
         enum TBType
         {
-            H_CLOSING,       // H -> ( ... )          ; hairpin candidate
+            H_CLOSING,       // H -> [...]            ; hairpin candidate
+                             // H -> [H ...]          ; extend hairpin candidate
 #ifdef HELIX_LENGTH
-            N_HAIRPIN_LOOP,  // N -> ( ... )          ; hairpin loop
+            N_HAIRPIN_LOOP,  // N -> [ H ]            ; hairpin loop
             N_INTERNAL_LOOP, // N -> ( ... C ... )    ; single loop
-            N_MULTI_LOOP,    // N -> ( M M1 )         ; multi loop
+            N_MULTI_LOOP,    // N -> [ M ]            ; multi loop
             E_HELIX,         // E -> ( E )            ; extended helix longer than max_helix_length
             E_TERMINAL,      // E -> N                ; terminal of extended helix
             C_TERMINAL,      // C -> N                ; isolated base-pair 
             C_HELIX,         // C -> ((( N )))        ; helix (< max_helix_length)
             C_HELIX_E,       // C -> ((( E )))        ; helix (= max_helix_length)
 #else
-            C_HAIRPIN_LOOP,  // C -> ( ... )          ; hairpin loop
+            C_HAIRPIN_LOOP,  // C -> [ H ]            ; hairpin loop
             C_INTERNAL_LOOP, // C -> ( ... C ... )    ; single loop 
-            C_MULTI_LOOP,    // C -> ( M )            ; multi loop
+            C_MULTI_LOOP,    // C -> [ M ]            ; multi loop
 #endif
-            M_CLOSING,        // M -> ... M2 ...       ; multi loop candidate
-            //M_UNPAIRED,      // M -> M ...            ; extend multi loop candidate
+            M_CLOSING,       // M -> ... M2 ...       ; multi loop candidate
+                             // M -> M ...            ; extend multi loop candidate
             M2_BIFURCATION,  // M2 -> M1 C            ; add loop to multi loop candidate
             M1_M2,           // M1 -> M2              ; multi loop candidate without unpaired 
             M1_PAIRED,       // M1 -> C               ; right-most multi loop candidate
