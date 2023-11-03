@@ -19,25 +19,28 @@
 
 namespace py = pybind11;
 
+template < class FoldClass >
 class FoldWrapper
 {
 protected:
+    using Options = typename FoldClass::Options;
+
     auto convert_constraints(py::list constraint) const
     {
-        std::vector<u_int32_t> ret(constraint.size(), Fold::Options::ANY);
+        std::vector<u_int32_t> ret(constraint.size(), Options::ANY);
         for (auto i=0; i!=constraint.size(); i++)
         {
             if (py::isinstance<py::str>(constraint[i]))
             {
                 std::string c = py::cast<py::str>(constraint[i]);
                 if (c=="x")
-                    ret[i] = Fold::Options::UNPAIRED;
+                    ret[i] = Options::UNPAIRED;
                 else if (c=="<")
-                    ret[i] = Fold::Options::PAIRED_L;
+                    ret[i] = Options::PAIRED_L;
                 else if (c==">")
-                    ret[i] = Fold::Options::PAIRED_R;
+                    ret[i] = Options::PAIRED_R;
                 else if (c=="|")
-                    ret[i] = Fold::Options::PAIRED_LR;
+                    ret[i] = Options::PAIRED_LR;
                 /* else  if (c==".") 
                     ret[i] = Fold::Options::ANY; */
             }
@@ -45,11 +48,11 @@ protected:
             {
                 auto v = py::cast<py::int_>(constraint[i]);
                 switch (static_cast<int>(v)) {
-                    case  0: ret[i] = Fold::Options::UNPAIRED; break;
-                    case -1: ret[i] = Fold::Options::ANY; break;
-                    case -2: ret[i] = Fold::Options::PAIRED_L; break;
-                    case -3: ret[i] = Fold::Options::PAIRED_R; break;
-                    case -4: ret[i] = Fold::Options::PAIRED_LR; break;
+                    case  0: ret[i] = Options::UNPAIRED; break;
+                    case -1: ret[i] = Options::ANY; break;
+                    case -2: ret[i] = Options::PAIRED_L; break;
+                    case -3: ret[i] = Options::PAIRED_R; break;
+                    case -4: ret[i] = Options::PAIRED_LR; break;
                     default: 
                         if (static_cast<int>(v)>=0) ret[i] = v;
                         break;
@@ -81,13 +84,53 @@ protected:
     {
         return convert_list<float, py::float_>(v);
     }
+
+    void set_allowed_pairs(Options& options, const std::string& allowed_pairs) const
+    {
+        for (auto i=0; i!=allowed_pairs.size(); i+=2)
+            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+    }
+
+    void set_constraints(Options& options, py::object constraint) const
+    {
+        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+        {
+            auto c = py::cast<py::list>(constraint);
+            auto c1 = this->convert_constraints(c);
+            if (c1.size()>0)
+                options.constraints(c1);
+        }
+    }
+
+    void set_margin_terms(Options& options, py::object reference,
+                    float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired) const
+    {
+        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+        {
+            auto r = py::cast<py::list>(reference);
+            auto r1 = this->convert_reference(r);
+            if (r1.size() > 0)
+                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        }
+    }
+
+    void set_score_paired_potision(Options& options, py::object paired_position_scores) const
+    {
+        if (py::isinstance<py::list>(paired_position_scores))
+        {
+            auto sc = this->convert_position_scores(py::cast<py::list>(paired_position_scores));
+            options.score_paired_position(sc);
+        }
+    }
 };
 
 template < class ParamClass >
-class ZukerWrapper : public FoldWrapper
+class ZukerWrapper : public FoldWrapper<Zuker<ParamClass>>
 {
+    using Options = typename FoldWrapper<Zuker<ParamClass>>::Options;
+
 public:
-    ZukerWrapper() {}
+    ZukerWrapper() : FoldWrapper<Zuker<ParamClass>>() {}
     
     void set_param(const std::string& seq, py::object pa)
     {
@@ -102,33 +145,14 @@ public:
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
             py::object paired_position_scores)
     {
-        typename Zuker<ParamClass>::Options options;
+        Options options;
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
-        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
-        {
-            auto c = py::cast<py::list>(constraint);
-            auto c1 = convert_constraints(c);
-            if (c1.size()>0)
-                options.constraints(c1);
-        }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
-        if (py::isinstance<py::list>(paired_position_scores))
-        {
-            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
-            options.score_paired_position(sc);
-        }
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_constraints(options, constraint);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        this->set_score_paired_potision(options, paired_position_scores);
         std::swap(options, options_);
         return options_;
     }
@@ -180,12 +204,13 @@ public:
 private:
     std::string seq_;
     std::unique_ptr<Zuker<ParamClass>> f_;
-    typename Zuker<ParamClass>::Options options_;
+    Options options_;
 };
 
 template < class ParamClass >
-class NussinovWrapper : public FoldWrapper
+class NussinovWrapper : public FoldWrapper<Nussinov<ParamClass>>
 {
+    using Options = typename FoldWrapper<Nussinov<ParamClass>>::Options;
 public:
     NussinovWrapper() {}
 
@@ -201,26 +226,11 @@ public:
                 py::object constraint, py::object reference, 
                 float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
     {
-        typename Nussinov<ParamClass>::Options options;
+        Options options;
         options.min_hairpin_loop_length(min_hairpin);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
-        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
-        {
-            auto c = py::cast<py::list>(constraint);
-            auto c1 = convert_constraints(c);
-            if (c1.size()>0)
-                options.constraints(c1);
-        }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_constraints(options, constraint);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
         std::swap(options, options_);
         return options_;
     }
@@ -248,12 +258,13 @@ public:
 private:
     std::string seq_;
     std::unique_ptr<Nussinov<ParamClass>> f_;
-    typename Nussinov<ParamClass>::Options options_;
+    Options options_;
 };
 
 template < class ParamClass >
-class LinearFoldWrapper : public FoldWrapper
+class LinearFoldWrapper : public FoldWrapper<LinearFold::BeamCKYParser<ParamClass>>
 {
+    using Options = typename FoldWrapper<LinearFold::BeamCKYParser<ParamClass>>::Options;
 public:
     LinearFoldWrapper(int beam_size = 100) : beam_size_(beam_size) {}
 
@@ -272,14 +283,13 @@ public:
             py::object paired_position_scores)
     {   // TODO: support {pos, neg}_unpaired for LinearFold
         // TODO: support allowed_pairs for LinearFold, which is needed for modifications
-        typename LinearFold::BeamCKYParser<ParamClass>::Options options;
+        Options options;
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        this->set_score_paired_potision(options, paired_position_scores);
         if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
         {
             auto c = py::cast<py::list>(constraint);
@@ -287,19 +297,6 @@ public:
             if (c1.size()>0)
                 options.constraints(c1);
         }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
-        if (py::isinstance<py::list>(paired_position_scores))
-        {
-            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
-            options.score_paired_position(sc);
-        }
-
         std::swap(options, options_);
         return options_;
     }
@@ -367,15 +364,16 @@ protected:
 private:
     std::string seq_;
     std::unique_ptr<LinearFold::BeamCKYParser<ParamClass>> f_;
-    typename LinearFold::BeamCKYParser<ParamClass>::Options options_;
+    Options options_;
     int beam_size_;
 };
 
 template < class ParamClass >
-class LinFoldWrapper : public FoldWrapper
+class LinFoldWrapper : public FoldWrapper<LinFold<ParamClass>>
 {
+    using Options = typename FoldWrapper<LinFold<ParamClass>>::Options;
 public:
-    LinFoldWrapper() {}
+    LinFoldWrapper(u_int32_t beam_size=100) : beam_size_(beam_size) {}
     
     void set_param(const std::string& seq, py::object pa)
     {
@@ -390,33 +388,14 @@ public:
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
             py::object paired_position_scores)
     {
-        typename LinFold<ParamClass>::Options options;
+        Options options;
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
-        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
-        {
-            auto c = py::cast<py::list>(constraint);
-            auto c1 = convert_constraints(c);
-            if (c1.size()>0)
-                options.constraints(c1);
-        }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
-        if (py::isinstance<py::list>(paired_position_scores))
-        {
-            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
-            options.score_paired_position(sc);
-        }
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_constraints(options, constraint);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        this->set_score_paired_potision(options, paired_position_scores);
         std::swap(options, options_);
         return options_;
     }
@@ -432,6 +411,7 @@ public:
         set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
                 constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
                 paired_position_scores);
+        options_.beam_size(beam_size_);
         return f_->compute_viterbi(seq_, options_);
     }
 
@@ -470,7 +450,8 @@ public:
 private:
     std::string seq_;
     std::unique_ptr<LinFold<ParamClass>> f_;
-    typename LinFold<ParamClass>::Options options_;
+    Options options_;
+    u_int32_t beam_size_;
 };
 
 void set_num_threads(int n)
@@ -989,8 +970,7 @@ PYBIND11_MODULE(interface, m)
             "traceback for LinearFold model");
 
     py::class_<LinFoldWrapper<TurnerNearestNeighbor>>(m, "LinFoldTurnerWrapper")
-        //.def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def(py::init())
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
         .def("compute_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
             "predict RNA secondary structure with LinFold-V Model", 
             "seq"_a, "param"_a, 

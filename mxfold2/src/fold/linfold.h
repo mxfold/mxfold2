@@ -11,6 +11,22 @@ class LinFold : public Fold
     public:
         using ScoreType = S;
 
+        struct Options : public Fold::Options {;
+            Options() : Fold::Options(), beam_size_(100) {}
+
+            Options& beam_size(u_int32_t s)
+            {
+                this->beam_size_ = s;
+                return *this;
+            }
+
+            auto beam_size() const { return beam_size_; }
+            auto make_constraint(const std::string& seq, std::string alphabests="acguACGU"s, bool canonical_only=true) const
+                -> std::tuple<std::vector<std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>>;
+
+            u_int32_t beam_size_;
+        };
+
     private:
         enum TBType
         {
@@ -55,6 +71,13 @@ class LinFold : public Fold
             std::variant<u_int32_t, std::pair<u_int16_t, u_int16_t>> ptr;
         };
 
+        struct AlphaBeta
+        {
+            AlphaBeta() : alpha(std::numeric_limits<ScoreType>::lowest()), beta(std::numeric_limits<ScoreType>::lowest()) {}
+
+            ScoreType alpha, beta;
+        };
+
     public:
         LinFold(std::unique_ptr<P>&& p);
         auto compute_viterbi(const std::string& seq, const Options& opt = Options()) -> ScoreType;
@@ -67,18 +90,20 @@ class LinFold : public Fold
 
     private:
         auto beam_prune(std::unordered_map<u_int32_t, State>& state, u_int32_t beam_size) -> ScoreType;
+        auto beam_prune(std::unordered_map<u_int32_t, AlphaBeta>& state, u_int32_t beam_size) -> ScoreType;
 
     private:
         std::unique_ptr<P> param_;
 
         std::vector<std::unordered_map<u_int32_t, State>> Hv_, Cv_, Mv_, M1v_, M2v_;
-        std::vector<State> Fv_;
-        std::vector<std::unordered_map<u_int32_t, State>> Ho_, Co_, Mo_, M1o_, M2o_; 
-        std::vector<State> Fo_;
 #ifdef HELIX_LENGTH
         std::vector<std::unordered_map<u_int32_t, State>> Nv_, Ev_;
-        std::vector<std::unordered_map<u_int32_t, State>> No_, Eo_;
 #endif
+        std::vector<State> Fv_;
 
-        std::vector<std::vector<u_int32_t>> next_pair_;
+        std::vector<std::unordered_map<u_int32_t, AlphaBeta>> Hio_, Cio_, Mio_, M1io_, M2io_; 
+#ifdef HELIX_LENGTH
+        std::vector<std::unordered_map<u_int32_t, AlphaBeta>> Nio_, Eio_;
+#endif
+        std::vector<AlphaBeta> Fio_;
 };

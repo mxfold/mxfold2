@@ -11,6 +11,55 @@
 #include "linfold.h"
 
 template < typename P, typename S >
+auto
+LinFold<P,S>::Options::
+make_constraint(const std::string& seq, std::string alphabets /*="acgu"s*/, bool canonical_only /*=true*/) const
+    -> std::tuple<std::vector<std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>>
+{
+    const auto L = seq.size();
+    //std::vector<u_int32_t> stru(L+1, Options::ANY);
+    //std::copy(std::begin(this->stru), std::end(this->stru), std::begin(stru));
+    if (stru.size() == 0)
+        stru.resize(L+1, Options::ANY);
+
+    for (auto i=L; i>=1; i--)
+    {
+        if (stru[i] > 0 && stru[i] <= L) // paired
+            if ( (canonical_only && !this->allow_paired(seq[i-1], seq[stru[i]-1])) || // delete non-canonical base-pairs
+                    (stru[i] - i <= min_hairpin) ) // delete very short hairpin
+                stru[i] = stru[stru[i]] = Options::UNPAIRED;
+    }
+
+    std::vector<bool> allow_unpaired_position(L+1, true);
+    for (auto i=1; i<=L; i++)
+        allow_unpaired_position[i] = stru[i]==Options::ANY || stru[i]==Options::UNPAIRED;
+
+    std::vector<u_int32_t> allow_unpaired_range(L+1, 0);
+    auto firstpair = L+1;
+    for (auto i=L; i>=1; i--)
+    {
+        allow_unpaired_range[i] = firstpair;
+        if (!allow_unpaired_position[i])
+            firstpair = i;
+    }
+
+    std::vector<std::vector<u_int32_t>> next_pair(256);
+    for (auto nuc: alphabets)
+    {
+        next_pair[nuc].resize(L+1, 0);
+        auto next = 0;
+        for (auto j=L; j>=1; j--)
+        {
+            next_pair[nuc][j] = next;
+            if (stru[j] != Options::UNPAIRED && this->allow_paired(seq[j-1], nuc))
+                next = j;
+        }
+    }
+
+    return { next_pair, allow_unpaired_range, allow_unpaired_position };
+}
+
+template < typename P, typename S >
 LinFold<P, S>::
 LinFold(std::unique_ptr<P>&& p)
     : param_(std::move(p))
@@ -87,7 +136,7 @@ LinFold<P, S>::
 compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 {
     // auto wtime = omp_get_wtime();
-    auto beam_size = 100; // TODO: make this parameter
+    const auto beam_size = opts.beam_size();
     const auto L = seq.size();
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
     Hv_.clear();  Hv_.resize(L+1);
@@ -101,21 +150,21 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
     Ev_.clear();  Ev_.resize(L+1);
 #endif
 
-    const auto [next_pair, allow_unpaired_range, allow_unpaired_position] = opts.make_constraint_lin(seq /*, "acgu"s */);
+    const auto [next_pair, allow_unpaired_range, allow_unpaired_position] = opts.make_constraint(seq /*, "acgu"s */);
 
     Fv_[0].update_max(param_->score_external_zero(), TBType::F_START);
     if (L>0) Fv_[1].update_max(param_->score_external_unpaired(1, 1), TBType::F_UNPAIRED);
-    if (L>1) Fv_[2].update_max(param_->score_external_unpaired(2, 2), TBType::F_UNPAIRED);
+    if (L>1) Fv_[2].update_max(param_->score_external_unpaired(1, 2), TBType::F_UNPAIRED);
 
     for (auto j=1; j<=L; j++)
     {
-        if (opts.stru[j]!=Options::UNPAIRED && opts.stru[j]!=Options::PAIRED_R)
+        if (opts.stru.size()==0 || opts.stru[j]!=Options::UNPAIRED && opts.stru[j]!=Options::PAIRED_R)
         {
             // find a smallest hairpin loop candidate H(j, k)
             auto k = next_pair[seq[j-1]].size()>0 ? next_pair[seq[j-1]][j] : 0; // nearest k paired with j
             while (k>0 && k-j<=opts.min_hairpin)
                 k = next_pair[seq[j-1]][k];
-            if (opts.stru[j]<=L && opts.stru[j]>j) k=opts.stru[j]; // use direct base-pair constraint
+            if (opts.stru.size()>0 && opts.stru[j]<=L && opts.stru[j]>j) k=opts.stru[j]; // use direct base-pair constraint
 
             if (k>0 && allow_unpaired_range[j]>=k && opts.allow_paired(seq, j, k))
                 Hv_[k][j].update_max(param_->score_hairpin(j, k), TBType::H_CLOSING);
@@ -693,8 +742,468 @@ template <typename S>
 auto
 logsumexp(S x, S y)
 {
-    if (x > y) std::swap(x, y);
-    return log1p(exp(x-y))+y;
+    return x>y ? log1p(exp(y-x))+x : log1p(exp(x-y))+y;
+}
+
+template < typename P, typename S >
+auto
+LinFold<P, S>::
+beam_prune(std::unordered_map<u_int32_t, AlphaBeta>& states, u_int32_t beam_size) -> ScoreType
+{
+    static const ScoreType NEG_INF2 = std::numeric_limits<ScoreType>::lowest()/1e10;
+    if (states.size() <= beam_size) return NEG_INF2;
+
+    std::vector<std::pair<ScoreType, u_int32_t>> v;
+    for (const auto& [i, st] : states)
+    {
+        auto k = i-1;
+        ScoreType newscore = std::numeric_limits<ScoreType>::lowest();
+        if (k==0)
+            newscore = st.alpha;
+        else if (Fio_[k].alpha > NEG_INF2)
+            newscore = Fio_[k].alpha + st.alpha;
+        v.emplace_back(newscore, i); 
+    }
+
+    std::sort(std::begin(v), std::end(v), [](const auto& x, const auto& y) { return x.first > y.first; });
+    auto th = v[std::min<u_int32_t>(beam_size, v.size())-1].first;
+    for (const auto& [s, i] : v)
+        if (s < th)
+            states.erase(i);
+
+    return th;
+}
+
+template < typename P, typename S >
+auto 
+LinFold<P, S>::
+compute_inside(const std::string& seq, const Options& opts) -> ScoreType
+{
+    // auto wtime = omp_get_wtime();
+    const auto beam_size = opts.beam_size();
+    const auto L = seq.size();
+    const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
+    Hio_.clear();  Hio_.resize(L+1);
+    Cio_.clear();  Cio_.resize(L+1);
+    Mio_.clear();  Mio_.resize(L+1);
+    M1io_.clear(); M1io_.resize(L+1);
+    M2io_.clear(); M2io_.resize(L+1);
+    Fio_.clear();  Fio_.resize(L+1);
+#ifdef HELIX_LENGTH
+    Nio_.clear();  Nio_.resize(L+1);
+    Eio_.clear();  Eio_.resize(L+1);
+#endif
+
+    const auto [next_pair, allow_unpaired_range, allow_unpaired_position] = opts.make_constraint(seq /*, "acgu"s */);
+
+    Fio_[0].alpha = logsumexp(Fio_[0].alpha, param_->score_external_zero());
+    if (L>0) Fio_[1].alpha = logsumexp(Fio_[1].alpha, param_->score_external_unpaired(1, 1));
+    if (L>1) Fio_[2].alpha = logsumexp(Fio_[2].alpha, param_->score_external_unpaired(1, 2));
+
+    for (auto j=1; j<=L; j++)
+    {
+        if (opts.stru.size()==0 || opts.stru[j]!=Options::UNPAIRED && opts.stru[j]!=Options::PAIRED_R)
+        {
+            // find a smallest hairpin loop candidate H(j, k)
+            auto k = next_pair[seq[j-1]].size()>0 ? next_pair[seq[j-1]][j] : 0; // nearest k paired with j
+            while (k>0 && k-j<=opts.min_hairpin)
+                k = next_pair[seq[j-1]][k];
+            if (opts.stru.size()>0 && opts.stru[j]<=L && opts.stru[j]>j) k=opts.stru[j]; // use direct base-pair constraint
+
+            if (k>0 && allow_unpaired_range[j]>=k && opts.allow_paired(seq, j, k))
+                Hio_[k][j].alpha = logsumexp(Hio_[j][k].alpha, param_->score_hairpin(j, k)); // TBType::H_CLOSING
+        }
+
+        // H: hairpin loops
+        if (beam_size > 0) beam_prune(Hio_[j], beam_size);
+        for (const auto& [i, st]: Hio_[j])
+        {
+#ifdef HELIX_LENGTH
+            // N -> ( ... )
+            auto newscore = st.alpha + opts.additional_paired_score(i, j);
+            Nio_[j][i].alpha = logsumexp(Nio_[j][i].alpha, newscore); // TBType::N_HAIRPIN_LOOP
+#else
+            // C -> ( ... )
+            auto newscore = st.alpha + opts.additional_paired_score(i, j);
+            Cio_[j][i].alpha = logsumexp(Cio_[j][i].alpha, newscore); // TBType::C_HAIRPIN_LOOP
+#endif
+
+            // extend H(i, j) to H(i, k)
+            auto k = next_pair[seq[i-1]].size()>0 ? next_pair[seq[i-1]][j] : 0;
+            if (k>0 && allow_unpaired_range[i]>=k && opts.allow_paired(seq, i, k))
+                Hio_[k][i].alpha = logsumexp(Hio_[k][i].alpha, param_->score_hairpin(i, k)); // TBType::H_CLOSING
+
+        }
+        if (j==1) continue; // TODO: really need this line?
+
+        // M: multi loop candidates
+        if (beam_size > 0) beam_prune(Mio_[j], beam_size);
+        for (const auto& [i, st]: Mio_[j])
+        {
+#ifdef HELIX_LENGTH
+            // N -> ( M )
+            auto newscore = st.alpha + param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+            Nio_[j][i].alpha = logsumexp(Nio_[j][i].alpha, newscore); // TBType::N_MULTI_LOOP
+#else
+            // C -> ( M )
+            auto newscore = st.alpha + param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+            Cio_[j][i].alpha = logsumexp(Cio_[j][i].alpha, newscore); // TBType::C_MULTI_LOOP
+#endif
+
+            // extend M(i, j) to M(i, k)
+            auto k = next_pair[seq[i-1]].size()>0 ? next_pair[seq[i-1]][j] : 0;
+            // auto [l1, l2] = std::get<1>(st.ptr);
+            if (k>0 && allow_unpaired_range[j]>=k && opts.allow_paired(seq, i, k))
+            {
+                auto newscore = st.alpha + param_->score_multi_unpaired(j+1, k-1);
+                Mio_[k][i].alpha = logsumexp(Mio_[k][i].alpha, newscore); // TBType::M_CLOSING
+            }
+        }
+
+#ifdef HELIX_LENGTH
+        // N: isolated closed loops
+        if (beam_size > 0) beam_prune(Nio_[j], beam_size);
+        for (const auto& [i, st]: Nio_[j])
+        {
+            // E -> N ; terminal of extended helix
+            Eio_[j][i].alpha = logsumexp(Eio_[j][i].alpha, st.alpha); // TBType::E_TERMINAL
+
+            // C -> N ; isolated base-pair
+            Cio_[j][i].alpha = logsumexp(Cio_[j][i].alpha, st.alpha+param_->score_helix(i, j, 1)); // TBType::C_TERMINAL
+
+            // C -> ((( N ))) ; helix (< max_helix_length)
+            ScoreType lp = ScoreType(0.);
+            for (auto m=2; m<=opts.max_helix; m++)
+            {
+                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                Cio_[j+(m-1)][i-(m-1)].alpha = logsumexp(Cio_[j+(m-1)][i-(m-1)].alpha, newscore); // TBType::C_HELIX
+            }
+        }
+
+        // E: extended helices
+        if (beam_size > 0) beam_prune(Eio_[j], beam_size);
+        for (const auto& [i, st]: Eio_[j])
+        {
+            // E -> ( E ) ; extended helix longer than max_helix_length
+            if (i-1>=1 && j+1<=L && opts.allow_paired(seq, i-1, j+1))
+            {
+                auto newscore = st.alpha + param_->score_single_loop(i-1, j+1, i, j) + opts.additional_paired_score(i-1, j+1);
+                Eio_[j+1][i-1].alpha = logsumexp(Eio_[j+1][i-1].alpha, newscore); // TBType::E_HELIX
+            }
+
+            // C -> ((( E ))) ; helix (= max_helix_length)
+            ScoreType lp = ScoreType(0.);
+            u_int32_t m;
+            for (auto m=2; m<=opts.max_helix; m++)
+            {
+                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+            }
+            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+            {
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                Cio_[j+(m-1)][i-(m-1)].alpha = logsumexp(Cio_[j+(m-1)][i-(m-1)].alpha, newscore); // TBType::C_HELIX_E
+            }
+        }
+#endif
+
+        // C: closed loops
+        if (beam_size > 0) beam_prune(Cio_[j], beam_size);
+        for (const auto& [i, st]: Cio_[j])
+        {
+            // M1 -> C
+            auto newscore = st.alpha + param_->score_multi_paired(i, j);
+            M1io_[j][i].alpha = logsumexp(M1io_[j][i].alpha, newscore); // TBType::M1_PAIRED
+
+            // M2 -> M1 C
+            if (i-1>1 && !M1io_[i-1].empty()) 
+            {
+                auto M1_score = st.alpha + param_->score_multi_paired(i, j); // C -> M1
+                for (const auto& [l, st_l]: M1io_[i-1])
+                    M2io_[j][l].alpha = logsumexp(M2io_[j][l].alpha, M1_score+st_l.alpha); // TBType::M2_BIFURCATION
+            }
+            
+            // F -> F C
+            if (i>=1)
+            {
+                auto newscore = Fio_[i-1].alpha + st.alpha + param_->score_external_paired(i, j);
+                Fio_[j].alpha = logsumexp(Fio_[j].alpha, newscore); // TBType::F_BIFURCATION;
+            }
+
+#ifdef HELIX_LENGTH
+            // N -> ( ... C ... )
+            if (i>1 && j<L)
+            {
+                for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) 
+                {
+                    auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                    while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                    {
+                        if (opts.allow_paired(seq, p, q) && (i-p>1 || q-j>1))
+                        {
+                            auto newscore = st.alpha + param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                            Nio_[q][p].alpha = logsumexp(Nio_[q][p].alpha, newscore); // TBType::N_INTERNAL_LOOP
+                        }
+                        q = next_pair[seq[p-1]][q];
+                    }
+                }
+            }
+#else
+            // C -> ( ... C ... )
+            if (i>1 && j<L)
+            {
+                for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) 
+                {
+                    auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                    while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                    {
+                        if (opts.allow_paired(seq, p, q))
+                        {
+                            auto newscore = st.alpha + param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                            Cio_[q][p].alpha = logsumexp(Cio_[q][p].alpha, newscore); // TBType::C_INTERNAL_LOOP
+                        }
+                        q = next_pair[seq[p-1]][q];
+                    }
+                }
+            }
+#endif
+        }
+
+        // M2: multi loop candidates without unpaired bases
+        if (beam_size>0) beam_prune(M2io_[j], beam_size);
+        for (const auto& [i, st]: M2io_[j])
+        {
+            // M1 -> M2
+            M1io_[j][i].alpha = logsumexp(M1io_[j][i].alpha, st.alpha); // TBType::M1_M2
+
+            // M -> ... M2 ...
+            for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) // TODO: is opts.max_internal OK?
+            {
+                auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                if (q>0 && allow_unpaired_range[j]>=q && opts.allow_paired(seq, p, q) /*&& ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal*/)
+                {
+                    auto newscore = param_->score_multi_unpaired(p+1, i-1) + param_->score_multi_unpaired(j+1, q-1) + st.alpha;
+                    Mio_[q][p].alpha = logsumexp(Mio_[q][p].alpha, newscore); // TBType::M_CLOSING
+                }
+            }
+        }
+
+        // M1: right-most multi loop candidates
+        if (beam_size>0) beam_prune(M1io_[j], beam_size);
+        for (const auto& [i, st]: M1io_[j])
+        {
+            // M1 -> M1 .
+            if (j+1<L+1 && allow_unpaired_position[j+1])
+            {
+                auto newscore = st.alpha + param_->score_multi_unpaired(j+1, j+1);
+                M1io_[j+1][i].alpha = logsumexp(M1io_[j+1][i].alpha, newscore); // TBType::M1_UNPAIRED
+            }
+        }
+
+        // F: external loops
+        // F -> F .
+        if (j+1<L+1 && allow_unpaired_position[j+1])
+        {
+            auto newscore = Fio_[j].alpha + param_->score_external_unpaired(j+1, j+1);
+            Fio_[j+1].alpha = logsumexp(Fio_[j+1].alpha, newscore); // TBType::F_UNPAIRED
+        }
+    }
+
+    // std::cout << omp_get_wtime()-wtime << std::endl;
+    return Fio_[L].alpha;
+}
+
+template < typename P, typename S >
+void 
+LinFold<P, S>::
+compute_outside(const std::string& seq, const Options& opts)
+{
+    const auto L = seq.size();
+    const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
+
+    const auto [next_pair, allow_unpaired_range, allow_unpaired_position] = opts.make_constraint(seq /*, "acgu"s */); // TODO: reuse these values from inside computation
+
+    Fio_[L].beta = ScoreType(0.);
+
+    for (auto j=L; j>1; j--)
+    {
+        // F: external loops
+        // F -> F .
+        if (j+1<L+1 && allow_unpaired_position[j+1])
+        {
+            auto newscore = param_->score_external_unpaired(j+1, j+1);
+            Fio_[j].beta = logsumexp(Fio_[j].beta, Fio_[j+1].beta + newscore); // TBType::F_UNPAIRED
+        }
+
+        // M1: right-most multi loop candidates
+        for (auto& [i, st]: M1io_[j])
+        {
+            // M1 -> M1 .
+            if (j+1<L+1 && allow_unpaired_position[j+1])
+            {
+                auto newscore = param_->score_multi_unpaired(j+1, j+1);
+                st.beta = logsumexp(st.beta, M1io_[j+1][i].beta + newscore); // TBType::M1_UNPAIRED
+            }
+        }
+
+        // M2: multi loop candidates without unpaired bases
+        for (auto& [i, st]: M2io_[j])
+        {
+            // M1 -> M2
+            st.beta = logsumexp(st.beta, M1io_[j][i].beta); // TBType::M1_M2
+
+            // M -> ... M2 ...
+            for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) // TODO: is opts.max_internal OK?
+            {
+                auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                if (q>0 && allow_unpaired_range[j]>=q && opts.allow_paired(seq, p, q) /*&& ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal*/)
+                {
+                    auto newscore = param_->score_multi_unpaired(p+1, i-1) + param_->score_multi_unpaired(j+1, q-1);
+                    st.beta = logsumexp(st.beta, Mio_[q][p].beta + newscore); // TBType::M_CLOSING
+                }
+            }
+        }
+
+        // C: closed loops
+        for (auto& [i, st]: Cio_[j])
+        {
+            // M1 -> C
+            auto newscore = param_->score_multi_paired(i, j);
+            st.beta = logsumexp(st.beta, M1io_[j][i].beta + newscore); // TBType::M1_PAIRED
+
+            // M2 -> M1 C
+            if (i-1>1 && !M1io_[i-1].empty()) 
+            {
+                auto M1_score = param_->score_multi_paired(i, j); // C -> M1
+                for (auto& [l, st_l]: M1io_[i-1])
+                {
+                    st.beta = logsumexp(st.beta, M2io_[j][l].beta + M1_score+st_l.alpha); // TBType::M2_BIFURCATION
+                    st_l.beta = logsumexp(st_l.beta, M2io_[j][l].beta + M1_score+st.alpha); // TBType::M2_BIFURCATION
+                }
+            }
+            
+            // F -> F C
+            if (i>=1)
+            {
+                auto newscore = param_->score_external_paired(i, j);
+                Fio_[i-1].beta = logsumexp(Fio_[i-1].beta, Fio_[j].beta + st.alpha + newscore); // TBType::F_BIFURCATION
+                st.beta = logsumexp(st.beta, Fio_[j].beta + st.alpha + newscore); // TBType::F_BIFURCATION
+            }
+
+#ifdef HELIX_LENGTH
+            // N -> ( ... C ... )
+            if (i>1 && j<L)
+            {
+                for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) 
+                {
+                    auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                    while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                    {
+                        if (opts.allow_paired(seq, p, q) && (i-p>1 || q-j>1))
+                        {
+                            auto newscore = param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                            st.beta = logsumexp(st.beta, Nio_[q][p].beta + newscore); // TBType::N_INTERNAL_LOOP
+                        }
+                        q = next_pair[seq[p-1]][q];
+                    }
+                }
+            }
+#else
+            // C -> ( ... C ... )
+            if (i>1 && j<L)
+            {
+                for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p) 
+                {
+                    auto q = next_pair[seq[p-1]].size()>0 ? next_pair[seq[p-1]][j] : 0;
+                    while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                    {
+                        if (opts.allow_paired(seq, p, q))
+                        {
+                            auto newscore = param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                            st.beta = logsumexp(st.beta, Cio_[q][p].beta + newscore); // TBType::C_INTERNAL_LOOP
+                        }
+                        q = next_pair[seq[p-1]][q];
+                    }
+                }
+            }
+#endif
+        }
+
+#ifdef HELIX_LENGTH
+        // E: extended helices
+        for (auto& [i, st]: Eio_[j])
+        {
+            // E -> ( E ) ; extended helix longer than max_helix_length
+            if (i-1>=1 && j+1<=L && opts.allow_paired(seq, i-1, j+1))
+            {
+                auto newscore = param_->score_single_loop(i-1, j+1, i, j) + opts.additional_paired_score(i-1, j+1);
+                st.beta = logsumexp(st.beta, Eio_[j+1][i-1].beta + newscore); // TBType::E_HELIX
+            }
+
+            // C -> ((( E ))) ; helix (= max_helix_length)
+            ScoreType lp = ScoreType(0.);
+            u_int32_t m;
+            for (auto m=2; m<=opts.max_helix; m++)
+            {
+                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+            }
+            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+            {
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                auto newscore = param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                st.beta = logsumexp(st.beta, Cio_[j+(m-1)][i-(m-1)].beta + newscore); // TBType::C_HELIX_E
+            }
+        }
+
+        // N: isolated closed loops
+        for (auto& [i, st]: Nio_[j])
+        {
+            // E -> N ; terminal of extended helix
+            st.beta = logsumexp(st.beta, Eio_[j][i].beta); // TBType::E_TERMINAL
+
+            // C -> N ; isolated base-pair
+            st.beta = logsumexp(st.beta, Cio_[j][i].beta + param_->score_helix(i, j, 1)); // TBType::C_TERMINAL
+
+            // C -> ((( N ))) ; helix (< max_helix_length)
+            ScoreType lp = ScoreType(0.);
+            for (auto m=2; m<=opts.max_helix; m++)
+            {
+                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                auto newscore = param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                st.beta = logsumexp(st.beta, Cio_[j+(m-1)][i-(m-1)].beta + newscore); // TBType::C_HELIX
+            }
+        }
+#endif
+        // M: multi loop candidates
+        for (auto& [i, st]: Mio_[j])
+        {
+#ifdef HELIX_LENGTH
+            // N -> ( M )
+            auto newscore = param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+            st.beta = logsumexp(st.beta, Nio_[j][i].beta + newscore); // TBType::N_MULTI_LOOP
+#else
+            // C -> ( M )
+            auto newscore = param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+            st.beta = logsumexp(st.beta, Cio_[j][i].beta + newscore); // TBType::C_MULTI_LOOP
+#endif
+
+            // extend M(i, j) to M(i, k)
+            auto k = next_pair[seq[i-1]].size()>0 ? next_pair[seq[i-1]][j] : 0;
+            // auto [l1, l2] = std::get<1>(st.ptr);
+            if (k>0 && allow_unpaired_range[j]>=k && opts.allow_paired(seq, i, k))
+            {
+                auto newscore = param_->score_multi_unpaired(j+1, k-1);
+                st.beta = logsumexp(st.beta, Mio_[k][i].beta + newscore); // TBType::M_CLOSING
+            }
+        }
+
+    }
+
 }
 
 // instantiation
