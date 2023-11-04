@@ -1153,14 +1153,15 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
                         lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ni_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         float p = exp(s + Co_[i][j] - log_partition_coefficient);
-                        for (auto k=2; k<m; k++)
+                        for (auto k=2; k<=m; k++)
                             bpp[i+(k-2)][j-(k-2)] += p;
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ei_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         float p = exp(s + Co_[i][j] - log_partition_coefficient);
-                        for (auto k=2; k<m; k++)
+                        for (auto k=2; k<=m; k++)
                             bpp[i+(k-2)][j-(k-2)] += p;
                     }
                 }

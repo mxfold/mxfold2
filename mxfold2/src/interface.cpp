@@ -422,7 +422,6 @@ public:
         return std::make_tuple(e, s, p);
     }
 
-#if 0
     auto compute_basepairing_probabilities(const std::string& seq, py::object pa, 
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
@@ -438,14 +437,8 @@ public:
         auto ret = f_->compute_inside(seq_, options_);
         f_->compute_outside(seq_, options_);
         auto bpp = f_->compute_basepairing_probabilities(seq_, options_);
-        py::array_t<float> bpp_a({bpp.size(), bpp[0].size()});
-        auto bpp_a2 = bpp_a.mutable_unchecked<2>();
-        for (auto i=0; i<bpp.size(); i++)
-            for (auto j=0; j<bpp[i].size(); j++)
-                bpp_a2(i, j) = bpp[i][j];
-        return std::make_pair(ret, bpp_a);
+        return std::make_pair(ret, bpp);
     }
-#endif
 
 private:
     std::string seq_;
@@ -972,7 +965,7 @@ PYBIND11_MODULE(interface, m)
     py::class_<LinFoldWrapper<TurnerNearestNeighbor>>(m, "LinFoldTurnerWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
         .def("compute_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinFold-V Model", 
+            "predict RNA secondary structure with LinFold-V model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -986,5 +979,19 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
-            "traceback for LinearFold-V");
+            "traceback for LinearFold-V")
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<TurnerNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with LinFold-V model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 }
