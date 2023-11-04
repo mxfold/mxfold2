@@ -356,7 +356,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
         for (const auto& [i, st]: M1v_[j])
         {
             // M1 -> M1 .
-            if (j+1<L+1 && allow_unpaired_position[j+1])
+            if (j+1<=L && allow_unpaired_position[j+1])
             {
                 auto newscore = st.score + param_->score_multi_unpaired(j+1, j+1);
                 M1v_[j+1][i].update_max(newscore, TBType::M1_UNPAIRED);
@@ -365,7 +365,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 
         // F: external loops
         // F -> F .
-        if (j+1<L+1 && allow_unpaired_position[j+1])
+        if (j+1<=L && allow_unpaired_position[j+1])
         {
             auto newscore = Fv_[j].score + param_->score_external_unpaired(j+1, j+1);
             Fv_[j+1].update_max(newscore, TBType::F_UNPAIRED);
@@ -996,7 +996,7 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
         for (const auto& [i, st]: M1io_[j])
         {
             // M1 -> M1 .
-            if (j+1<L+1 && allow_unpaired_position[j+1])
+            if (j+1<=L && allow_unpaired_position[j+1])
             {
                 auto newscore = st.alpha + param_->score_multi_unpaired(j+1, j+1);
                 M1io_[j+1][i].alpha = logsumexp(M1io_[j+1][i].alpha, newscore); // TBType::M1_UNPAIRED
@@ -1005,7 +1005,7 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
 
         // F: external loops
         // F -> F .
-        if (j+1<L+1 && allow_unpaired_position[j+1])
+        if (j+1<=L && allow_unpaired_position[j+1])
         {
             auto newscore = Fio_[j].alpha + param_->score_external_unpaired(j+1, j+1);
             Fio_[j+1].alpha = logsumexp(Fio_[j+1].alpha, newscore); // TBType::F_UNPAIRED
@@ -1032,7 +1032,7 @@ compute_outside(const std::string& seq, const Options& opts)
     {
         // F: external loops
         // F -> F .
-        if (j+1<L+1 && allow_unpaired_position[j+1])
+        if (j+1<=L && allow_unpaired_position[j+1])
         {
             auto newscore = param_->score_external_unpaired(j+1, j+1);
             Fio_[j].beta = logsumexp(Fio_[j].beta, Fio_[j+1].beta + newscore); // TBType::F_UNPAIRED
@@ -1042,7 +1042,7 @@ compute_outside(const std::string& seq, const Options& opts)
         for (auto& [i, st]: M1io_[j])
         {
             // M1 -> M1 .
-            if (j+1<L+1 && allow_unpaired_position[j+1])
+            if (j+1<=L && allow_unpaired_position[j+1])
             {
                 auto newscore = param_->score_multi_unpaired(j+1, j+1);
                 st.beta = logsumexp(st.beta, M1io_[j+1][i].beta + newscore); // TBType::M1_UNPAIRED
@@ -1090,7 +1090,7 @@ compute_outside(const std::string& seq, const Options& opts)
             {
                 auto newscore = param_->score_external_paired(i, j);
                 Fio_[i-1].beta = logsumexp(Fio_[i-1].beta, Fio_[j].beta + st.alpha + newscore); // TBType::F_BIFURCATION
-                st.beta = logsumexp(st.beta, Fio_[j].beta + st.alpha + newscore); // TBType::F_BIFURCATION
+                st.beta = logsumexp(st.beta, Fio_[j].beta + Fio_[i-1].alpha + newscore); // TBType::F_BIFURCATION
             }
 
 #ifdef HELIX_LENGTH
@@ -1201,9 +1201,7 @@ compute_outside(const std::string& seq, const Options& opts)
                 st.beta = logsumexp(st.beta, Mio_[k][i].beta + newscore); // TBType::M_CLOSING
             }
         }
-
     }
-
 }
 
 template < typename P, typename S >
