@@ -1,4 +1,5 @@
 #include <iostream>
+#include <algorithm>
 #include <cctype>
 #include <limits>
 #include <queue>
