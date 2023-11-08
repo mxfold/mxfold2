@@ -12,10 +12,11 @@ from .layers import LengthLayer, NeuralNet
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, model_type: str = "M", max_helix_length: int = 30, **kwargs) -> None:
+    def __init__(self, max_helix_length: int = 30, **kwargs) -> None:
         super(ZukerFold, self).__init__(interface.ZukerPositionalWrapper())
 
-        exclude_diag = True
+        exclude_diag = True # default
+        model_type = 'C' # default
         if model_type == "S":
             n_out_paired_layers = 1
             n_out_unpaired_layers = 1

@@ -1088,7 +1088,7 @@ compute_outside(const std::string& seq, const Options& opts)
 template < typename P, typename S >
 auto 
 Zuker<P, S>::
-compute_basepairing_probabilities(const std::string& seq, const Options& opts) -> std::vector<std::vector<float>>
+compute_basepairing_probabilities(const std::string& seq, const Options& opts) -> std::vector<std::vector<std::pair<u_int32_t, float>>>
 {
     const auto L = seq.size();
     std::vector<std::vector<float>> bpp(L+1, std::vector<float>(L+1, 0.0));
@@ -1201,7 +1201,17 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
         }
     }
 
-    return bpp;
+    std::vector<std::vector<std::pair<u_int32_t, float>>> bpp2(L+1);
+    for (auto i=1; i!=bpp.size(); ++i)
+    {
+        for (auto j=1; j!=bpp[i].size(); ++j)
+        {
+            auto p = bpp[i][j];
+            if (p>=0.01) bpp2[i].emplace_back(j, std::min(p, 1.0f));
+        }
+        std::sort(std::begin(bpp2[i]), std::end(bpp2[i]));
+    }
+    return bpp2;
 }
 
 // instantiation

@@ -72,59 +72,73 @@ class Predict:
                         x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
                     if output_bpp is not None:
-                        bpp = np.triu(bpp)
-                        bpp = bpp + bpp.T
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
                         fn = os.path.join(output_bpp, fn+".bpp")
-                        np.savetxt(fn, bpp, fmt='%.5f')
+                        with open(fn, "w") as f:
+                            for i in range(1, len(bpp)):
+                                print(f"{i} {seq[i-1]} ", end='', file=f)
+                                for j, p in bpp[i]:
+                                    print(f"{j}:{p:.3f}", end=' ', file=f)
+                                print(file=f)
 
 
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':
-            from .fold.rnafold import RNAFold
-            if args.param == 'default' or args.param == 'turner2004':
-                args.param = ''
-                from . import param_turner2004
-                return RNAFold(init_param=param_turner2004), {}
-            else:
-                return RNAFold(), {}
-        
-        if args.model == 'CONTRAfold':
-            from .fold.contrafold import CONTRAfold
-            if args.param == 'default':
-                args.param = ''
-                from . import param_contrafold202
-                return CONTRAfold(init_param=param_contrafold202), {}
-            else:
-                return CONTRAfold(), {}
-        
-        if args.model == 'LinearFoldV':
-            from .fold.linearfoldv import LinearFoldV
-            if args.param == 'default' or args.param == 'turner2004':
-                args.param = ''
-                from . import param_turner2004
-                return LinearFoldV(init_param=param_turner2004), {}
-            else:
-                return LinearFoldV(), {}
+            if args.fold == 'Zuker':
+                from .fold.rnafold import RNAFold
+                if args.param == 'default' or args.param == 'turner2004':
+                    args.param = ''
+                    from . import param_turner2004
+                    return RNAFold(init_param=param_turner2004), {}
+                else:
+                    return RNAFold(), {}
 
-        if args.model == 'LinFoldV':
-            from .fold.linfoldv import LinFoldV
-            if args.param == 'default' or args.param == 'turner2004':
-                args.param = ''
-                from . import param_turner2004
-                return LinFoldV(init_param=param_turner2004), {}
-            else:
-                return LinFoldV(), {}
+            elif args.fold == 'LinearFold':
+                from .fold.linearfoldv import LinearFoldV
+                if args.param == 'default' or args.param == 'turner2004':
+                    args.param = ''
+                    from . import param_turner2004
+                    return LinearFoldV(init_param=param_turner2004), {}
+                else:
+                    return LinearFoldV(), {}
 
-        if args.model == 'LinearFoldC':
-            from .fold.linearfoldc import LinearFoldC
-            if args.param == 'default':
-                args.param = ''
-                from . import param_contrafold202
-                return LinearFoldC(param_contrafold202), {}
-            else:
-                return LinearFoldC(), {}
+            elif args.fold == 'LinFold':
+                from .fold.linfoldv import LinFoldV
+                if args.param == 'default' or args.param == 'turner2004':
+                    args.param = ''
+                    from . import param_turner2004
+                    return LinFoldV(init_param=param_turner2004), {}
+                else:
+                    return LinFoldV(), {}
+        
+        elif args.model == 'CONTRAfold':
+            if args.fold == 'Zuker':
+                from .fold.contrafold import CONTRAfold
+                if args.param == 'default':
+                    args.param = ''
+                    from . import param_contrafold202
+                    return CONTRAfold(init_param=param_contrafold202), {}
+                else:
+                    return CONTRAfold(), {}
+
+            elif args.fold == 'LinearFold':
+                from .fold.linearfoldc import LinearFoldC
+                if args.param == 'default':
+                    args.param = ''
+                    from . import param_contrafold202
+                    return LinearFoldC(param_contrafold202), {}
+                else:
+                    return LinearFoldC(), {}
+
+            elif args.fold == 'LinFold':
+                from .fold.linfoldc import LinFoldC
+                if args.param == 'default':
+                    args.param = ''
+                    from . import param_contrafold202
+                    return LinFoldC(param_contrafold202), {}
+                else:
+                    return LinFoldC(), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -152,94 +166,68 @@ class Predict:
             'additional_params': args.additional_params,
         }
 
-        if args.model == 'Zuker':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='M', **config)
+        model = None
+        if args.model == 'Positional':
+            if args.fold == 'Zuker':
+                from .fold.zuker import ZukerFold
+                model = ZukerFold(**config)
 
-        elif args.model == 'ZukerC':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='C', **config)
-
-        elif args.model == 'ZukerL':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type="L", **config)
-
-        elif args.model == 'ZukerS':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type="S", **config)
-
-        elif args.model == 'ZukerFold':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='4', **config)
+            elif args.fold == 'LinearFold':
+                from .fold.linearfold import LinearFold
+                model = LinearFold(**config)
 
         elif args.model == 'Mix':
             from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, **config)
+            if args.fold == 'Zuker':
+                from .fold.mix import MixedFold
+                model = MixedFold(init_param=param_turner2004, **config)
 
-        elif args.model == 'MixC':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
+            elif args.fold == 'LinearFold':
+                from .fold.mix_linearfold import MixedLinearFold
+                model = MixedLinearFold(init_param=param_turner2004, **config)
 
-        elif args.model == 'CFMixC':
+        elif args.model == 'CFMix':
             from . import param_contrafold202
-            from .fold.cf_mix import CONTRAMixedFold
-            model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
+            if args.fold == 'Zuker':
+                from .fold.cf_mix import CONTRAMixedFold
+                model = CONTRAMixedFold(init_param=param_contrafold202, **config)
 
-        elif args.model == 'CFTMixC':
-            from .fold.cf_mix import CONTRAMixedFold
-            model = CONTRAMixedFold(model_type='C', tune_cf=True, **config)
+        elif args.model == 'CFMixT':
+            if args.fold == 'Zuker':
+                from .fold.cf_mix import CONTRAMixedFold
+                model = CONTRAMixedFold(tune_cf=True, **config)
 
         elif args.model == 'Mix1D':
             from . import param_turner2004
-            from .fold.mix1d import MixedFold1D
-            model = MixedFold1D(init_param=param_turner2004, **config)
+            if args.fold == 'Zuker':
+                from .fold.mix1d import MixedFold1D
+                model = MixedFold1D(init_param=param_turner2004, **config)
 
-        elif args.model == 'MixedZukerFold':
+            elif args.fold == 'LinearFold':
+                from .fold.mix_linearfold1d import MixedLinearFold1D
+                model = MixedLinearFold1D(init_param=param_turner2004, **config)
+
+        elif args.model == 'BL':
+            if args.fold == 'Zuker':
+                from .fold.zuker_bl import ZukerFoldBL
+                model = ZukerFoldBL(**config)
+
+            elif args.fold == 'LinearFold':
+                from .fold.linearfold_bl import LinearFoldBL
+                model = LinearFoldBL(**config)
+
+        elif args.model == 'MixBL':
             from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, model_type='4', **config)
+            if args.fold == 'Zuker':
+                from .fold.mix_bl import MixedFoldBL
+                model = MixedFoldBL(init_param=param_turner2004, **config)
 
-        elif args.model == 'ZukerBL':
-            from .fold.zuker_bl import ZukerFoldBL
-            model = ZukerFoldBL(**config)
+            elif args.fold == 'LinearFold':
+                from .fold.mix_linearfold_bl import MixedLinearFoldBL
+                model = MixedLinearFoldBL(init_param=param_turner2004, **config)
 
-        elif args.model == 'MixedBL':
-            from . import param_turner2004
-            from .fold.mix_bl import MixedFoldBL
-            model = MixedFoldBL(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold':
-            from .fold.linearfold import LinearFold
-            model = LinearFold(**config)
-
-        elif args.model == 'MixCLinearFold':
-            from . import param_turner2004
-            from .fold.mix_linearfold2d import MixedLinearFold2D
-            model = MixedLinearFold2D(init_param=param_turner2004, model_type='C', **config)
-
-        elif args.model == 'MixedLinearFold':
-            from . import param_turner2004
-            from .fold.mix_linearfold import MixedLinearFold
-            model = MixedLinearFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold2D':
-            from .fold.linearfold2d import LinearFold2D
-            model = LinearFold2D(**config)
-
-        elif args.model == 'MixedLinearFold2D':
-            from . import param_turner2004
-            from .fold.mix_linearfold2d import MixedLinearFold2D
-            model = MixedLinearFold2D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedLinearFold1D':
-            from . import param_turner2004
-            from .fold.mix_linearfold1d import MixedLinearFold1D
-            model = MixedLinearFold1D(init_param=param_turner2004, **config)
-
-        else:
-            raise(RuntimeError('not implemented'))
+        if model is None:
+            raise(RuntimeError(f'not implemented: model={args.model}, fold={args.fold}'))
 
         return model, config
 
@@ -310,6 +298,8 @@ class Predict:
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--threads', type=int, default=1, metavar='N',
                             help='the number of threads (default: 1)')
+        subparser.add_argument('--fold', choices=('Zuker', 'LinearFold', 'LinFold'), default='Zuker',
+                            help="Folding algorithm ('Zuker', 'LinearFold', 'LinFold'), default: 'Zuker'")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--use-constraint', default=False, action='store_true')
@@ -326,8 +316,8 @@ class Predict:
                             help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinFoldV', ''LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'Positional', 'Mix', 'CFMix', 'CFMixT', 'BL', 'Mix1D'), default='Turner', 
+                        help="Parameter model ('Turner', 'CONTRAfold', 'Positional', 'Mix', 'CFMix', 'CFMixT', 'BL', 'Mix1D')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--max-helix-length', type=int, default=30, 
                         help='the maximum length of helices (default: 30)')
@@ -368,7 +358,7 @@ class Predict:
         gparser.add_argument('--no-split-lr', default=False, action='store_true')
         gparser.add_argument('--bl-size', type=int, default=4,
                         help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
-        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
-        gparser.add_argument('--mix-type', choices=('add', 'average'), default='add')
+        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='symmetric')
+        gparser.add_argument('--mix-type', choices=('add', 'average'), default='average')
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))

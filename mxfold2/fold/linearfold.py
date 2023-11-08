@@ -8,24 +8,29 @@ import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractFold
-from .layers import LengthLayer, NeuralNet1D
-from .positional import PositionalScore
+from .layers import LengthLayer, NeuralNet
+
 
 class LinearFold(AbstractFold):
-    def __init__(self, bl_size: int = 4, beam_size: int = 100, **kwargs):
+    def __init__(self, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
         super(LinearFold, self).__init__(interface.LinearFoldPositionalWrapper(beam_size=beam_size))
-        bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
-        self.bilinears = nn.ModuleDict({
-            'helix_stacking': bilinears[0],
-            'mismatch_hairpin': bilinears[1],
-            'mismatch_multi': bilinears[1],
-            'mismatch_internal': bilinears[1],
-            'mismatch_external': bilinears[1],
-            'base_hairpin': bilinears[2],
-            'base_multi': bilinears[2],
-            'base_internal': bilinears[2],
-            'base_external': bilinears[2],
-        })
+
+        self.model_type = 'C'
+        if self.model_type == "C":
+            n_out_paired_layers = 3
+            n_out_unpaired_layers = 0
+            exclude_diag = False
+        elif self.model_type == "4":
+            n_out_paired_layers = 4
+            n_out_unpaired_layers = 0
+            exclude_diag = False
+            kwargs['paired_opt'] = 'symmetric'
+
+        self.net = NeuralNet(**kwargs, 
+            n_out_paired_layers=n_out_paired_layers,
+            n_out_unpaired_layers=n_out_unpaired_layers,
+            exclude_diag=exclude_diag)
+
         self.fc_length = nn.ModuleDict({
             'score_hairpin_length': LengthLayer(31),
             'score_bulge_length': LengthLayer(31),
@@ -35,68 +40,100 @@ class LinearFold(AbstractFold):
             'score_internal_asymmetry': LengthLayer(29),
             'score_helix_length': LengthLayer(31)
         })
-        self.net = NeuralNet1D(n_out=bl_size, **kwargs)
+
+        if 'additional_params' in kwargs and kwargs['additional_params']:
+            self.fc_additional = nn.ParameterDict({
+                'score_multi_base': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_multi_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_external_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+            })
+        else:
+            self.fc_additional = { 
+                'score_multi_base': torch.zeros(1, dtype=torch.float32),
+                'score_multi_paired': torch.zeros(1, dtype=torch.float32),
+                'score_external_paired': torch.zeros(1, dtype=torch.float32), 
+            }
 
 
-    def make_param(self, seq: list[str]):
+    def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        score_paired: torch.Tensor
+        score_unpaired: Optional[torch.Tensor]
+        score_paired, score_unpaired = self.net(seq)
+        score_lengths = { f: cast(LengthLayer, self.fc_length[f]).make_param() for f in self.fc_length.keys() }
+        if perturb > 0.:
+            return ( self.make_param_helper(score_paired, score_unpaired, score_lengths, perturb),
+                self.make_param_helper(score_paired, score_unpaired, score_lengths, 0.) )
+        else:
+            return self.make_param_helper(score_paired, score_unpaired, score_lengths, 0.)
+
+
+    def make_param_helper(self, score_paired: torch.Tensor, score_unpaired: Optional[torch.Tensor],
+                        score_lengths: dict[str, torch.Tensor], perturb: float) -> list[dict[str, Any]]:        
         device = next(self.parameters()).device
-        fc_length = { 
-            'score_hairpin_length': cast(LengthLayer, self.fc_length['score_hairpin_length']).make_param(),
-            'score_bulge_length': cast(LengthLayer, self.fc_length['score_bulge_length']).make_param(),
-            'score_internal_length': cast(LengthLayer, self.fc_length['score_internal_length']).make_param(),
-            'score_internal_explicit': cast(LengthLayer, self.fc_length['score_internal_explicit']).make_param(),
-            'score_internal_symmetry': cast(LengthLayer, self.fc_length['score_internal_symmetry']).make_param(),
-            'score_internal_asymmetry': cast(LengthLayer, self.fc_length['score_internal_asymmetry']).make_param(),
-            'score_helix_length': cast(LengthLayer, self.fc_length['score_helix_length']).make_param()
-        } 
-        embeddings = self.net(seq) 
+        B, N, _, _ = score_paired.shape
+        if perturb > 0.:
+            score_paired += torch.normal(0., perturb, size=score_paired.shape, device=device)
+            if score_unpaired is not None:
+                score_unpaired += torch.normal(0., perturb, size=score_unpaired.shape, device=device)
+
+        def unpair_interval(su: torch.Tensor) -> torch.Tensor:
+            su = su.view(B, 1, N)
+            su = torch.bmm(torch.ones(B, N, 1).to(device), su)
+            su = torch.bmm(torch.triu(su), torch.triu(torch.ones_like(su)))
+            return su
+
+        if self.model_type == 'C':
+            score_basepair = torch.zeros((B, N, N), device=device)
+            score_helix_stacking = score_paired[:, :, :, 0] # (B, N, N)
+            score_mismatch_external = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_internal = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_multi = score_paired[:, :, :, 1] # (B, N, N)
+            score_mismatch_hairpin = score_paired[:, :, :, 1] # (B, N, N)
+            score_unpaired = score_paired[:, :, :, 2] # (B, N, N)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
+
+        elif self.model_type == "4":
+            score_basepair = torch.zeros((B, N, N), device=device)
+            score_helix_stacking = torch.triu(score_paired[:, :, :, 0], diagonal=1) # (B, N, N)
+            score_mismatch = torch.triu(score_paired[:, :, :, 1], diagonal=1) + torch.tril(score_paired[:, :, :, 2], diagonal=-1)
+            score_mismatch_external = score_mismatch # (B, N, N)
+            score_mismatch_internal = score_mismatch # (B, N, N)
+            score_mismatch_multi = score_mismatch # (B, N, N)
+            score_mismatch_hairpin = score_mismatch# (B, N, N)
+            score_unpaired = score_paired[:, :, :, 3] # (B, N, N)
+            score_base_hairpin = score_unpaired
+            score_base_internal = score_unpaired
+            score_base_multi = score_unpaired
+            score_base_external = score_unpaired
+
+        score_additional = self.fc_additional
+        if perturb > 0. and type(score_additional) is nn.ParameterDict:
+            score_additional = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_additional.items() }
 
         param = [ { 
-            'embedding': embedding,
-            'bl_w_helix_stacking': cast(nn.Bilinear, self.bilinears['helix_stacking']).weight[0],
-            'bl_b_helix_stacking': cast(nn.Bilinear, self.bilinears['helix_stacking']).bias,
-            'bl_w_mismatch_hairpin': cast(nn.Bilinear, self.bilinears['mismatch_hairpin']).weight[0],
-            'bl_b_mismatch_hairpin': cast(nn.Bilinear, self.bilinears['mismatch_hairpin']).bias,
-            'bl_w_mismatch_multi': cast(nn.Bilinear, self.bilinears['mismatch_multi']).weight[0],
-            'bl_b_mismatch_multi': cast(nn.Bilinear, self.bilinears['mismatch_multi']).bias,
-            'bl_w_mismatch_internal': cast(nn.Bilinear, self.bilinears['mismatch_internal']).weight[0],
-            'bl_b_mismatch_internal': cast(nn.Bilinear, self.bilinears['mismatch_internal']).bias,
-            'bl_w_mismatch_external': cast(nn.Bilinear, self.bilinears['mismatch_external']).weight[0],
-            'bl_b_mismatch_external': cast(nn.Bilinear, self.bilinears['mismatch_external']).bias,
-            'bl_w_base_hairpin': cast(nn.Bilinear, self.bilinears['base_hairpin']).weight[0],
-            'bl_b_base_hairpin': cast(nn.Bilinear, self.bilinears['base_hairpin']).bias,
-            'bl_w_base_multi': cast(nn.Bilinear, self.bilinears['base_multi']).weight[0],
-            'bl_b_base_multi': cast(nn.Bilinear, self.bilinears['base_multi']).bias,
-            'bl_w_base_internal': cast(nn.Bilinear, self.bilinears['base_internal']).weight[0],
-            'bl_b_base_internal': cast(nn.Bilinear, self.bilinears['base_internal']).bias,
-            'bl_w_base_external': cast(nn.Bilinear, self.bilinears['base_external']).weight[0],
-            'bl_b_base_external': cast(nn.Bilinear, self.bilinears['base_external']).bias,
-            'score_hairpin_length': fc_length['score_hairpin_length'],
-            'score_bulge_length': fc_length['score_bulge_length'],
-            'score_internal_length': fc_length['score_internal_length'],
-            'score_internal_explicit': fc_length['score_internal_explicit'],
-            'score_internal_symmetry': fc_length['score_internal_symmetry'],
-            'score_internal_asymmetry': fc_length['score_internal_asymmetry'],
-            'score_helix_length': fc_length['score_helix_length'],
-            'cnt': PositionalScore(embedding, self.bilinears, fc_length)
-        } for embedding in embeddings ]
+            'score_basepair': score_basepair[i],
+            'score_helix_stacking': score_helix_stacking[i],
+            'score_mismatch_external': score_mismatch_external[i],
+            'score_mismatch_hairpin': score_mismatch_hairpin[i],
+            'score_mismatch_internal': score_mismatch_internal[i],
+            'score_mismatch_multi': score_mismatch_multi[i],
+            'score_base_hairpin': score_base_hairpin[i],
+            'score_base_internal': score_base_internal[i],
+            'score_base_multi': score_base_multi[i],
+            'score_base_external': score_base_external[i],
+            'score_hairpin_length': score_lengths['score_hairpin_length'],
+            'score_bulge_length': score_lengths['score_bulge_length'],
+            'score_internal_length': score_lengths['score_internal_length'],
+            'score_internal_explicit': score_lengths['score_internal_explicit'],
+            'score_internal_symmetry': score_lengths['score_internal_symmetry'],
+            'score_internal_asymmetry': score_lengths['score_internal_asymmetry'],
+            'score_helix_length': score_lengths['score_helix_length'],
+            'score_multi_base': score_additional['score_multi_base'],
+            'score_multi_paired': score_additional['score_multi_paired'],
+            'score_external_paired': score_additional['score_external_paired'],
+        } for i in range(B) ]
 
         return param
-
-
-    def detect_device(self, param):
-        return next(self.parameters()).device
-
-    def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
-        param_on_cpu = { k: v if k=='cnt' else v.to("cpu") for k, v in param.items() }
-        param_on_cpu = self.clear_count(param_on_cpu)
-        return param_on_cpu
-
-    def clear_count(self, param: dict[str, Any]) -> dict[str, Any]:
-        param['cnt'].total_energy = torch.tensor([0.], device=next(self.parameters()).device)
-        return param
-
-    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
-        s = param['cnt'].total_energy
-        s += -s.item() + v
-        return s

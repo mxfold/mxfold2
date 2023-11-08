@@ -12,11 +12,11 @@ from .zuker import ZukerFold
 
 
 class MixedFold(AbstractFold):
-    def __init__(self, init_param=None, model_type: str = 'M', 
+    def __init__(self, init_param=None, 
         max_helix_length: int = 30, **kwargs) -> None:
         super(MixedFold, self).__init__(interface.ZukerMixedWrapper() if kwargs['mix_type']=='add' else interface.ZukerMixedWrapper2())
         self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
+        self.zuker = ZukerFold(max_helix_length=max_helix_length, **kwargs)
         self.max_helix_length = max_helix_length
 
 

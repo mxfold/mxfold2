@@ -1352,5 +1352,15 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
 
 // instantiation
 #include "../param/turner.h"
-
+#include "../param/contrafold.h"
+#include "../param/positional_bl.h"
+#include "../param/positional.h"
+#include "../param/mix.h"
 template class LinFold<TurnerNearestNeighbor>;
+template class LinFold<CONTRAfoldNearestNeighbor>;
+template class LinFold<PositionalNearestNeighborBL>;
+template class LinFold<MixedNearestNeighborBL>;
+template class LinFold<PositionalNearestNeighbor>;
+template class LinFold<MixedNearestNeighbor>;
+template class LinFold<MixedNearestNeighbor2>;
+template class LinFold<MixedNearestNeighbor1D>;
