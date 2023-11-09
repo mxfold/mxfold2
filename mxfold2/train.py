@@ -23,6 +23,7 @@ from tqdm import tqdm
 from . import interface
 from .dataset import BPseqDataset, FastaDataset, ShapeDataset
 from .fold.fold import AbstractFold
+from .common import Common
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -30,13 +31,14 @@ except ImportError:
     pass
 
 
-class Train:
+class Train(Common):
     step: int = 0
     disable_progress_bar: bool
     writer: Optional[SummaryWriter]
 
     def __init__(self):
-        pass
+        super(Train, self).__init__()
+
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
                 loss_fn: nn.Module | dict[str, nn.Module], 
@@ -139,161 +141,6 @@ class Train:
         if scheduler is not None:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         return epoch
-
-
-    def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
-        if args.model == 'Turner':
-            from .fold.rnafold import RNAFold
-            if args.init_param == 'default' or args.init_param == 'turner2004':
-                args.init_param = ''
-                from . import param_turner2004
-                return RNAFold(init_param=param_turner2004), {}
-            else:
-                return RNAFold(), {}
-        
-        if args.model == 'CONTRAfold':
-            from .fold.contrafold import CONTRAfold
-            if args.init_param == 'default':
-                args.init_param = ''
-                from . import param_contrafold202
-                return CONTRAfold(init_param=param_contrafold202), {}
-            else:
-                return CONTRAfold(), {}
-        
-        if args.model == 'LinearFoldV':
-            from .fold.linearfoldv import LinearFoldV
-            if args.init_param == 'default' or args.init_param == 'turner2004':
-                args.init_param = ''
-                from . import param_turner2004
-                return LinearFoldV(init_param=param_turner2004), {}
-            else:
-                return LinearFoldV(), {}
-
-        if args.model == 'LinearFoldC':
-            from .fold.linearfoldc import LinearFoldC
-            if args.param == 'default':
-                args.param = ''
-                from . import param_contrafold202
-                return LinearFoldC(param_contrafold202), {}
-            else:
-                return LinearFoldC(), {}
-
-        config = {
-            'max_helix_length': args.max_helix_length,
-            'embed_size' : args.embed_size,
-            'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'filter_size': args.filter_size if args.filter_size is not None else (5,),
-            'pool_size': args.pool_size if args.pool_size is not None else (1,),
-            'dilation': args.dilation, 
-            'num_lstm_layers': args.num_lstm_layers, 
-            'num_lstm_units': args.num_lstm_units,
-            'num_transformer_layers': args.num_transformer_layers,
-            'num_transformer_hidden_units': args.num_transformer_hidden_units,
-            'num_transformer_att': args.num_transformer_att,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
-            'num_paired_filters': args.num_paired_filters,
-            'paired_filter_size': args.paired_filter_size,
-            'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,
-            'num_att': args.num_att,
-            'pair_join': args.pair_join,
-            'no_split_lr': args.no_split_lr,
-            'bl_size': args.bl_size,
-            'paired_opt': args.paired_opt,
-            'mix_type': args.mix_type,
-            'additional_params': args.additional_params,
-        }
-
-        if args.model == 'Zuker':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='M', **config)
-
-        elif args.model == 'ZukerC':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='C', **config)
-
-        elif args.model == 'ZukerL':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type="L", **config)
-
-        elif args.model == 'ZukerS':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type="S", **config)
-
-        elif args.model == 'ZukerFold':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='4', **config)
-
-        elif args.model == 'Mix':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixC':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
-
-        elif args.model == 'CFMixC':
-            from . import param_contrafold202
-            from .fold.cf_mix import CONTRAMixedFold
-            model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
-
-        elif args.model == 'CFTMixC':
-            from .fold.cf_mix import CONTRAMixedFold
-            model = CONTRAMixedFold(model_type='C', tune_cf=True, **config)
-
-        elif args.model == 'Mix1D':
-            from . import param_turner2004
-            from .fold.mix1d import MixedFold1D
-            model = MixedFold1D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedZukerFold':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, model_type='4', **config)
-
-        elif args.model == 'ZukerBL':
-            from .fold.zuker_bl import ZukerFoldBL
-            model = ZukerFoldBL(**config)
-
-        elif args.model == 'MixedBL':
-            from . import param_turner2004
-            from .fold.mix_bl import MixedFoldBL
-            model = MixedFoldBL(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold':
-            from .fold.linearfold import LinearFold
-            model = LinearFold(**config)
-
-        elif args.model == 'MixCLinearFold':
-            from . import param_turner2004
-            from .fold.mix_linearfold2d import MixedLinearFold2D
-            model = MixedLinearFold2D(init_param=param_turner2004, model_type='C', **config)
-
-        elif args.model == 'MixedLinearFold':
-            from . import param_turner2004
-            from .fold.mix_linearfold import MixedLinearFold
-            model = MixedLinearFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold2D':
-            from .fold.linearfold2d import LinearFold2D
-            model = LinearFold2D(**config)
-
-        elif args.model == 'MixedLinearFold2D':
-            from . import param_turner2004
-            from .fold.mix_linearfold2d import MixedLinearFold2D
-            model = MixedLinearFold2D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedLinearFold1D':
-            from . import param_turner2004
-            from .fold.mix_linearfold1d import MixedLinearFold1D
-            model = MixedLinearFold1D(init_param=param_turner2004, **config)
-
-        else:
-            raise(RuntimeError('not implemented'))
-
-        return model, config
 
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float) -> optim.Optimizer:
@@ -483,6 +330,8 @@ class Train:
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--threads', type=int, default=1, metavar='N',
                             help='the number of threads (default: 1)')
+        subparser.add_argument('--fold', choices=('Zuker', 'LinearFold', 'LinFold'), default='Zuker',
+                            help="select folding algorithm (default: 'Zuker')")
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
@@ -558,50 +407,6 @@ class Train:
                             help="SWA anneal strategy ('linear', 'cos')")
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
-        gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D')")
-        gparser.add_argument('--additional-params', default=None, action='store_true')
-        gparser.add_argument('--max-helix-length', type=int, default=30, 
-                        help='the maximum length of helices (default: 30)')
-        gparser.add_argument('--embed-size', type=int, default=0,
-                        help='the dimention of embedding (default: 0 == onehot)')
-        gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--filter-size', type=int, action='append',
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN (default: 1)')
-        gparser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution (default: 0)')
-        gparser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers (default: 0)')
-        gparser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units (default: 0)')
-        gparser.add_argument('--num-transformer-layers', type=int, default=0,
-                        help='the number of the transformer layers (default: 0)')
-        gparser.add_argument('--num-transformer-hidden-units', type=int, default=2048,
-                        help='the number of the hidden units of each transformer layer (default: 2048)')
-        gparser.add_argument('--num-transformer-att', type=int, default=8,
-                        help='the number of the attention heads of each transformer layer (default: 8)')
-        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers (default: 32)')
-        gparser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the CNN and LSTM units (default: 0.0)')
-        gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--num-att', type=int, default=0,
-                        help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
-        gparser.add_argument('--no-split-lr', default=False, action='store_true')
-        gparser.add_argument('--bl-size', type=int, default=4,
-                        help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
-        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
-        gparser.add_argument('--mix-type', choices=('add', 'average'), default='add')
+        cls.add_network_args(subparser)
 
         subparser.set_defaults(func = lambda args, conf: Train().run(args, conf))
