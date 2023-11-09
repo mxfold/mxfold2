@@ -3,6 +3,7 @@
 #include <limits>
 #include <queue>
 #include <stack>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #ifdef USE_OPENMP
