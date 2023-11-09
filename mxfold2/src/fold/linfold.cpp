@@ -225,17 +225,20 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
             // E -> N ; terminal of extended helix
             Ev_[j][i].update_max(st.score, TBType::E_TERMINAL);
 
-            // C -> N ; isolated base-pair
-            Cv_[j][i].update_max(st.score+param_->score_helix(i, j, 1), TBType::C_TERMINAL);
-
-            // C -> ((( N ))) ; helix (< max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                Cv_[j+(m-1)][i-(m-1)].update_max(newscore, TBType::C_HELIX, m);
+                // C -> N ; isolated base-pair
+                Cv_[j][i].update_max(st.score+param_->score_helix(i, j, 1), TBType::C_TERMINAL);
+
+                // C -> ((( N ))) ; helix (< max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    Cv_[j+(m-1)][i-(m-1)].update_max(newscore, TBType::C_HELIX, m);
+                }
             }
         }
 
@@ -250,19 +253,26 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                 Ev_[j+1][i-1].update_max(newscore, TBType::E_HELIX);
             }
 
-            // C -> ((( E ))) ; helix (= max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            u_int32_t m;
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                // C -> ((( E ))) ; helix (= max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                u_int32_t m;
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                }
+                if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+                {
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    Cv_[j+(m-1)][i-(m-1)].update_max(newscore, TBType::C_HELIX_E, m);
+                }
             }
-            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+            else
             {
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                Cv_[j+(m-1)][i-(m-1)].update_max(newscore, TBType::C_HELIX_E, m);
+                Cv_[j][i].update_max(st.score, TBType::C_HELIX_E, 1);
             }
         }
 #endif
@@ -869,17 +879,20 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
             // E -> N ; terminal of extended helix
             Eio_[j][i].alpha = logsumexp(Eio_[j][i].alpha, st.alpha); // TBType::E_TERMINAL
 
-            // C -> N ; isolated base-pair
-            Cio_[j][i].alpha = logsumexp(Cio_[j][i].alpha, st.alpha+param_->score_helix(i, j, 1)); // TBType::C_TERMINAL
-
-            // C -> ((( N ))) ; helix (< max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                Cio_[j+(m-1)][i-(m-1)].alpha = logsumexp(Cio_[j+(m-1)][i-(m-1)].alpha, newscore); // TBType::C_HELIX
+                // C -> N ; isolated base-pair
+                Cio_[j][i].alpha = logsumexp(Cio_[j][i].alpha, st.alpha+param_->score_helix(i, j, 1)); // TBType::C_TERMINAL
+
+                // C -> ((( N ))) ; helix (< max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    Cio_[j+(m-1)][i-(m-1)].alpha = logsumexp(Cio_[j+(m-1)][i-(m-1)].alpha, newscore); // TBType::C_HELIX
+                }
             }
         }
 
@@ -894,19 +907,26 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
                 Eio_[j+1][i-1].alpha = logsumexp(Eio_[j+1][i-1].alpha, newscore); // TBType::E_HELIX
             }
 
-            // C -> ((( E ))) ; helix (= max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            u_int32_t m;
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                // C -> ((( E ))) ; helix (= max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                u_int32_t m;
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                }
+                if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+                {
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    Cio_[j+(m-1)][i-(m-1)].alpha = logsumexp(Cio_[j+(m-1)][i-(m-1)].alpha, newscore); // TBType::C_HELIX_E
+                }
             }
-            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+            else
             {
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                Cio_[j+(m-1)][i-(m-1)].alpha = logsumexp(Cio_[j+(m-1)][i-(m-1)].alpha, newscore); // TBType::C_HELIX_E
+                Cio_[j][i].alpha = logsumexp(Cio_[j][i].alpha, st.alpha); // TBType::C_HELIX_E
             }
         }
 #endif
@@ -1144,19 +1164,26 @@ compute_outside(const std::string& seq, const Options& opts)
                 st.beta = logsumexp(st.beta, Eio_[j+1][i-1].beta + newscore); // TBType::E_HELIX
             }
 
-            // C -> ((( E ))) ; helix (= max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            u_int32_t m;
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                // C -> ((( E ))) ; helix (= max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                u_int32_t m;
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                }
+                if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+                {
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    st.beta = logsumexp(st.beta, Cio_[j+(m-1)][i-(m-1)].beta + newscore); // TBType::C_HELIX_E
+                }
             }
-            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+            else
             {
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                st.beta = logsumexp(st.beta, Cio_[j+(m-1)][i-(m-1)].beta + newscore); // TBType::C_HELIX_E
+                st.beta = logsumexp(st.beta, Cio_[j][i].beta); // TBType::C_HELIX_E
             }
         }
 
@@ -1166,17 +1193,20 @@ compute_outside(const std::string& seq, const Options& opts)
             // E -> N ; terminal of extended helix
             st.beta = logsumexp(st.beta, Eio_[j][i].beta); // TBType::E_TERMINAL
 
-            // C -> N ; isolated base-pair
-            st.beta = logsumexp(st.beta, Cio_[j][i].beta + param_->score_helix(i, j, 1)); // TBType::C_TERMINAL
-
-            // C -> ((( N ))) ; helix (< max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                st.beta = logsumexp(st.beta, Cio_[j+(m-1)][i-(m-1)].beta + newscore); // TBType::C_HELIX
+                // C -> N ; isolated base-pair
+                st.beta = logsumexp(st.beta, Cio_[j][i].beta + param_->score_helix(i, j, 1)); // TBType::C_TERMINAL
+
+                // C -> ((( N ))) ; helix (< max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    st.beta = logsumexp(st.beta, Cio_[j+(m-1)][i-(m-1)].beta + newscore); // TBType::C_HELIX
+                }
             }
         }
 #endif
@@ -1252,18 +1282,21 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
 
 #ifdef HELIX_LENGTH
         // N: isolated closed loops
-        for (const auto& [i, st]: Nio_[j])
+        if (opts.max_helix > 0)
         {
-            // C -> ((( N ))) ; helix (< max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            for (auto m=2; m<=opts.max_helix; m++)
+            for (const auto& [i, st]: Nio_[j])
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                auto p = exp(newscore + Cio_[j+(m-1)][i-(m-1)].beta - log_partition_coefficient); // TBType::C_HELIX
-                for (auto k=2; k<=m; k++)
-                    bpp[i-(k-1)][j+(k-1)] += p;
+                // C -> ((( N ))) ; helix (< max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    auto p = exp(newscore + Cio_[j+(m-1)][i-(m-1)].beta - log_partition_coefficient); // TBType::C_HELIX
+                    for (auto k=2; k<=m; k++)
+                        bpp[i-(k-1)][j+(k-1)] += p;
+                }
             }
         }
 
@@ -1277,21 +1310,24 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
                 bpp[i-1][j+1] += exp(newscore + Eio_[j+1][i-1].beta - log_partition_coefficient); // TBType::E_HELIX
             }
 
-            // C -> ((( E ))) ; helix (= max_helix_length)
-            ScoreType lp = ScoreType(0.);
-            u_int32_t m;
-            for (auto m=2; m<=opts.max_helix; m++)
+            if (opts.max_helix > 0)
             {
-                if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-            }
-            if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
-            {
-                lp += opts.additional_paired_score(i-(m-1), j+(m-1));
-                auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
-                auto p = exp(newscore + Cio_[j+(m-1)][i-(m-1)].beta - log_partition_coefficient); // TBType::C_HELIX_E
-                for (auto k=2; k<=m; k++)
-                    bpp[i-(k-1)][j+(k-1)] += p;
+                // C -> ((( E ))) ; helix (= max_helix_length)
+                ScoreType lp = ScoreType(0.);
+                u_int32_t m;
+                for (auto m=2; m<=opts.max_helix; m++)
+                {
+                    if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired(seq, i-(m-1), j+(m-1))) break;
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                }
+                if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired(seq, i-(m-1), j+(m-1)))
+                {
+                    lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                    auto newscore = st.alpha + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                    auto p = exp(newscore + Cio_[j+(m-1)][i-(m-1)].beta - log_partition_coefficient); // TBType::C_HELIX_E
+                    for (auto k=2; k<=m; k++)
+                        bpp[i-(k-1)][j+(k-1)] += p;
+                }
             }
         }
 #endif

@@ -12,8 +12,7 @@ from .fold import AbstractFold
 
 class LinFoldV(AbstractFold):
     def __init__(self, init_param=None, beam_size: int = 100):
-        #super(LinFoldV, self).__init__(interface.LinFoldTurnerWrapper(beam_size=beam_size))
-        super(LinFoldV, self).__init__(interface.LinFoldTurnerWrapper())
+        super(LinFoldV, self).__init__(interface.LinFoldTurnerWrapper(beam_size=beam_size))
         if init_param is None:
             self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
