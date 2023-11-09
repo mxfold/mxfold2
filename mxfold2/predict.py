@@ -141,15 +141,12 @@ class Predict(Common):
         # input
         subparser.add_argument('input', type=str,
                             help='FASTA-formatted file or list of BPseq files')
-
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--threads', type=int, default=1, metavar='N',
                             help='the number of threads (default: 1)')
-        subparser.add_argument('--fold', choices=('Zuker', 'LinearFold', 'LinFold'), default='Zuker',
-                            help="select folding algorithm (default: 'Zuker')")
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--use-constraint', default=False, action='store_true')
@@ -165,6 +162,7 @@ class Predict(Common):
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
                             help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
+        cls.add_fold_args(subparser)
         cls.add_network_args(subparser)
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))

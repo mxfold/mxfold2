@@ -24,18 +24,18 @@ class Common:
                 if args.param == 'default' or args.param == 'turner2004':
                     args.param = ''
                     from . import param_turner2004
-                    return LinearFoldV(init_param=param_turner2004), {}
+                    return LinearFoldV(init_param=param_turner2004, beam_size=args.beam_size), {}
                 else:
-                    return LinearFoldV(), {}
+                    return LinearFoldV(beam_size=args.beam_size), {}
 
             elif args.fold == 'LinFold':
                 from .fold.linfoldv import LinFoldV
                 if args.param == 'default' or args.param == 'turner2004':
                     args.param = ''
                     from . import param_turner2004
-                    return LinFoldV(init_param=param_turner2004), {}
+                    return LinFoldV(init_param=param_turner2004, beam_size=args.beam_size), {}
                 else:
-                    return LinFoldV(), {}
+                    return LinFoldV(beam_size=args.beam_size), {}
         
         elif args.model == 'CONTRAfold':
             if args.fold == 'Zuker':
@@ -52,18 +52,18 @@ class Common:
                 if args.param == 'default':
                     args.param = ''
                     from . import param_contrafold202
-                    return LinearFoldC(param_contrafold202), {}
+                    return LinearFoldC(param_contrafold202, beam_size=args.beam_size), {}
                 else:
-                    return LinearFoldC(), {}
+                    return LinearFoldC(beam_size=args.beam_size), {}
 
             elif args.fold == 'LinFold':
                 from .fold.linfoldc import LinFoldC
                 if args.param == 'default':
                     args.param = ''
                     from . import param_contrafold202
-                    return LinFoldC(param_contrafold202), {}
+                    return LinFoldC(param_contrafold202, beam_size=args.beam_size), {}
                 else:
-                    return LinFoldC(), {}
+                    return LinFoldC(beam_size=args.beam_size), {}
 
         config = {
             'max_helix_length': args.max_helix_length,
@@ -99,11 +99,11 @@ class Common:
 
             elif args.fold == 'LinearFold':
                 from .fold.linearfold import LinearFold
-                model = LinearFold(**config)
+                model = LinearFold(beam_size=args.beam_size, **config)
 
             elif args.fold == 'LinFold':
                 from .fold.linfold import LinFold
-                model = LinFold(**config)
+                model = LinFold(beam_size=args.beam_size, **config)
 
         elif args.model == 'Mix':
             from . import param_turner2004
@@ -113,11 +113,11 @@ class Common:
 
             elif args.fold == 'LinearFold':
                 from .fold.mix_linearfold import MixedLinearFold
-                model = MixedLinearFold(init_param=param_turner2004, **config)
+                model = MixedLinearFold(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
             elif args.fold == 'LinFold':
                 from .fold.mix_linfold import MixedLinFold
-                model = MixedLinFold(init_param=param_turner2004, **config)
+                model = MixedLinFold(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
         elif args.model == 'CFMix':
             from . import param_contrafold202
@@ -138,7 +138,7 @@ class Common:
 
             elif args.fold == 'LinearFold':
                 from .fold.mix_linearfold1d import MixedLinearFold1D
-                model = MixedLinearFold1D(init_param=param_turner2004, **config)
+                model = MixedLinearFold1D(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
         # elif args.model == 'BL':
         #     if args.fold == 'Zuker':
@@ -147,7 +147,7 @@ class Common:
 
         #     elif args.fold == 'LinearFold':
         #         from .fold.linearfold_bl import LinearFoldBL
-        #         model = LinearFoldBL(**config)
+        #         model = LinearFoldBL(beam_size=args.beam_size, **config)
 
         # elif args.model == 'MixBL':
         #     from . import param_turner2004
@@ -157,7 +157,7 @@ class Common:
 
         #     elif args.fold == 'LinearFold':
         #         from .fold.mix_linearfold_bl import MixedLinearFoldBL
-        #         model = MixedLinearFoldBL(init_param=param_turner2004, **config)
+        #         model = MixedLinearFoldBL(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
         if model is None:
             raise(RuntimeError(f'not implemented: model={args.model}, fold={args.fold}'))
@@ -165,13 +165,21 @@ class Common:
         return model, config
 
     @classmethod
+    def add_fold_args(cls, subparser):
+        gparser = subparser.add_argument_group("Folding setting")
+        gparser.add_argument('--fold', choices=('Zuker', 'LinearFold', 'LinFold'), default='Zuker',
+                            help="select folding algorithm (default: 'Zuker')")
+        gparser.add_argument('--max-helix-length', type=int, default=30, 
+                        help='the maximum length of helices (default: 30)')
+        gparser.add_argument('--beam-size', type=int, default=100,
+                        help='the beam size of LinFold algorithm (default: 100)')
+                        
+    @classmethod
     def add_network_args(cls, subparser):
         gparser = subparser.add_argument_group("Network setting")
         gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'Positional', 'Mix', 'Mix1D', 'CFMix'), default='Turner', 
                         help="select parameter model (default: 'Turner')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
-        gparser.add_argument('--max-helix-length', type=int, default=30, 
-                        help='the maximum length of helices (default: 30)')
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--num-filters', type=int, action='append',

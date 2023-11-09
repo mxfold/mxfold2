@@ -249,7 +249,7 @@ class Train(Common):
             torch.backends.cudnn.benchmark = False
 
         model, config = self.build_model(args)
-        config.update({ 'model': args.model, 'param': args.param })
+        config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
         
         if args.init_param != '':
             init_param = Path(args.init_param)
@@ -330,8 +330,6 @@ class Train(Common):
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--threads', type=int, default=1, metavar='N',
                             help='the number of threads (default: 1)')
-        subparser.add_argument('--fold', choices=('Zuker', 'LinearFold', 'LinFold'), default='Zuker',
-                            help="select folding algorithm (default: 'Zuker')")
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
@@ -359,6 +357,8 @@ class Train(Common):
                             help='enable verbose outputs for debugging')
         subparser.add_argument('--loglevel', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
+
+        cls.add_fold_args(subparser)
 
         gparser = subparser.add_argument_group("Optimizer setting")
         gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD', 'AdaBelief', 'Lion'), default='AdamW')

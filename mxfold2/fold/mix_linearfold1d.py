@@ -17,6 +17,10 @@ class MixedLinearFold1D(AbstractFold):
         self.zuker = LinearFold1D(**kwargs)
 
 
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+        return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
+
+
     def make_param(self, seq: list[str]) -> list[dict[str, dict[str, Any]]]:
         ts = self.turner.make_param(seq)
         ps = self.zuker.make_param(seq)
