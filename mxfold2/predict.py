@@ -32,9 +32,17 @@ class Predict(Common):
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
                 use_constraint: bool = False,
-                pseudoenergy: Optional[torch.tensor] = None) -> None:
+                shape_list: Optional[list[str]] = None,
+                shape_intercept: float = 0.0,
+                shape_slope: float = 0.0) -> None:
+
         res_fn = open(result, 'w') if result is not None else None
+        shape_list = [None] * len(data_loader) if shape_list is None else shape_list
+        while len(shape_list) < len(data_loader):
+            shape_list.append(None)
+
         model.eval()
+        seq_processed = 0
         with torch.no_grad():
             for headers, seqs, vals in data_loader:
                 start = time.time()
@@ -42,7 +50,11 @@ class Predict(Common):
                     constraint = [ tgt if tp=='BPSEQ' else None for tp, tgt in zip(vals['type'], vals['target'])]
                 else:
                     constraint = None
-                pseudoenergy = [pseudoenergy]*len(seqs) if pseudoenergy is not None else None
+                pseudoenergy = [ 
+                    self.load_shape_reactivity(shape_file, shape_intercept, shape_slope) \
+                        if shape_file is not None else None \
+                        for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
+                # pseudoenergy = [pseudoenergy]*len(seqs) if pseudoenergy is not None else None
                 if output_bpp is None:
                     scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                     pfs = bpps = [None] * len(preds)
@@ -110,20 +122,34 @@ class Predict(Common):
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
 
-        pseudoenergy = None
-        if args.shape is not None:
-            pseudoenergy = self.load_shape_reactivity(args.shape, args.shape_intercept, args.shape_slope)
+        shape_list = None
+        if args.shape is not None: 
+            shape_list = []
+            with open(args.shape) as f:
+                for l in f:
+                    l = l.rstrip('\n').split()
+                    shape_list.append(l[0])
+        elif args.shape_file is not None:
+            shape_list = [args.shape_file]
 
         self.predict(model=model, data_loader=test_loader, 
-                    output_bpseq=args.bpseq, output_bpp=args.bpp, pseudoenergy=pseudoenergy,
-                    result=args.result, use_constraint=args.use_constraint)
+                    output_bpseq=args.bpseq, output_bpp=args.bpp,
+                    result=args.result, use_constraint=args.use_constraint,
+                    shape_list=shape_list,
+                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope)
 
 
     def load_shape_reactivity(self, fname: str, intercept: float, slope: float) -> torch.tensor:
         r = []
         with open(fname) as f:
             for l in f:
-                idx, val = l.rstrip('\n').split()
+                l = l.rstrip('\n').split()
+                if len(l) == 2:
+                    idx, val = l
+                elif len(l) == 3:
+                    idx, _, val = l
+                else:
+                    raise(ValueError(f"Invalid SHAPE reactivity file: {fname}"))
                 idx, val = int(idx), float(val)
                 while len(r) < idx:
                     r.append(-999)
@@ -156,7 +182,8 @@ class Predict(Common):
                             help='output the prediction with BPSEQ format to the specified directory')
         subparser.add_argument('--bpp', type=str, default=None,
                             help='output the base-pairing probability matrix to the specified directory')
-        subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes the list of SHAPE reactivity files')
+        subparser.add_argument('--shape-file', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 

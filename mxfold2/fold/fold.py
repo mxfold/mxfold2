@@ -108,7 +108,7 @@ class AbstractFold(nn.Module):
         paired_position_scores = None
         for i in range(len(seq)):
             param_on_cpu = self.make_param_on_cpu(param[i])
-            if pseudoenergy is not None:
+            if pseudoenergy is not None and pseudoenergy[i] is not None:
                 paired_position_scores = (-pseudoenergy[i]).tolist() 
                 while len(paired_position_scores) < len(seq[i]):
                     paired_position_scores.append(0.0)
