@@ -139,7 +139,7 @@ class Predict(Common):
                     shape_intercept=args.shape_intercept, shape_slope=args.shape_slope)
 
 
-    def load_shape_reactivity(self, fname: str, intercept: float, slope: float) -> torch.tensor:
+    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.tensor:
         r = []
         with open(fname) as f:
             for l in f:
@@ -187,7 +187,7 @@ class Predict(Common):
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
-                            help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6.')
 
         cls.add_fold_args(subparser)
         cls.add_network_args(subparser)
