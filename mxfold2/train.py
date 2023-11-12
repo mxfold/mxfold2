@@ -46,7 +46,7 @@ class Train(Common):
                 loss_weight = defaultdict(lambda: 1.),
                 clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
         model.train()
-        if type(loss_fn) is not dict:
+        if not isinstance(loss_fn, dict):
             loss_fn = {'BPSEQ': loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0., 0
@@ -94,7 +94,7 @@ class Train(Common):
                 loss_fn: nn.Module | dict[str, nn.Module],
                 data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
         model.eval()
-        if type(loss_fn) is not dict:
+        if not isinstance(loss_fn, dict):
             loss_fn = {'BPSEQ': loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
@@ -211,7 +211,7 @@ class Train(Common):
         with open(file, 'w') as f:
             for k, v in config.items():
                 k = '--' + k.replace('_', '-')
-                if type(v) is bool: # pylint: disable=unidiomatic-typecheck
+                if isinstance(v, bool):
                     if v:
                         f.write('{}\n'.format(k))
                 elif isinstance(v, list) or isinstance(v, tuple):
@@ -231,7 +231,6 @@ class Train(Common):
 
         train_dataset = BPseqDataset(args.input)
         if args.shape is not None:
-            device = torch.device("cuda", args.gpu) if args.gpu>=0 else torch.device("cpu") 
             shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
 

@@ -4,7 +4,6 @@ from typing import Any, Optional, cast
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractFold

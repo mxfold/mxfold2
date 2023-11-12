@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import copy
 from copy import copy, deepcopy
-from typing import Any, Callable, Optional, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class AbstractFold(nn.Module):
@@ -91,13 +89,13 @@ class AbstractFold(nn.Module):
         else:
             param_without_perturb = param
 
-        if type(loss_pos_paired) is float:
+        if isinstance(loss_pos_paired, float):
             loss_pos_paired = [ loss_pos_paired ] * len(seq)
-        if type(loss_neg_paired) is float:
+        if isinstance(loss_neg_paired, float):
             loss_neg_paired = [ loss_neg_paired ] * len(seq)
-        if type(loss_pos_unpaired) is float:
+        if isinstance(loss_pos_unpaired, float):
             loss_pos_unpaired = [ loss_pos_unpaired ] * len(seq)
-        if type(loss_neg_unpaired) is float:
+        if isinstance(loss_neg_unpaired, float):
             loss_neg_unpaired = [ loss_neg_unpaired ] * len(seq)
 
         ss = []
@@ -112,6 +110,7 @@ class AbstractFold(nn.Module):
                 paired_position_scores = (-pseudoenergy[i]).tolist() 
                 while len(paired_position_scores) < len(seq[i]):
                     paired_position_scores.append(0.0)
+                print(paired_position_scores)
             with torch.no_grad():
                 self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
@@ -144,9 +143,9 @@ class AbstractFold(nn.Module):
                     if n.startswith('count_'):
                         param[i][n] = p.to(self.detect_device(param[i]))
                     elif isinstance(param[i][n], dict):
-                        for nn, pp in p.items():
-                            if nn.startswith('count_'):
-                                param[i][n][nn] = pp.to(self.detect_device(param[i]))
+                        for n2, p2 in p.items():
+                            if n2.startswith('count_'):
+                                param[i][n][n2] = p2.to(self.detect_device(param[i]))
             ss.append(v)
             preds.append(pred)
             pairs.append(pair)

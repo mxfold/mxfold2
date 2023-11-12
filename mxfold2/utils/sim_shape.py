@@ -234,10 +234,10 @@ for i in range(0, args.correct):
 react = np.mean(S, axis=0)
 
 for j, r in enumerate(seq):
-    if args.debug:
-        sys.stdout.write(
-            "\t".join([str(j + 1), r, str(react[j]), stru[j], str(bp_prof[j + 1])])
-            + "\n"
-        )
-    else:
+    # if args.debug:
+    #     sys.stdout.write(
+    #         "\t".join([str(j + 1), r, str(react[j]), stru[j], str(bp_prof[j + 1])])
+    #         + "\n"
+    #     )
+    # else:
         sys.stdout.write("\t".join([str(j + 1), r, str(react[j])]) + "\n")
