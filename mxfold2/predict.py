@@ -54,7 +54,7 @@ class Predict(Common):
                     self.load_shape_reactivity(shape_file, shape_intercept, shape_slope) \
                         if shape_file is not None else None \
                         for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
-                # pseudoenergy = [pseudoenergy]*len(seqs) if pseudoenergy is not None else None
+                seq_processed += len(seqs)
                 if output_bpp is None:
                     scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                     pfs = bpps = [None] * len(preds)

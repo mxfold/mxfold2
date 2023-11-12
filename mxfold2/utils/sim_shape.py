@@ -180,6 +180,17 @@ def calc_reactivity_sukosd(dotbracket):
         data.append(generateValue(real_pairing[i], m, o))
     return np.array(data)
 
+############################################################
+def calc_reactivity_fake(stru):
+    reactivity = []
+    for s in stru:
+        if s == ".":  # unpaired
+            p = 1.
+        else:  # paired
+            p = 0.05
+        #reactivity.append(max(min(2.0, p), 0.0))
+        reactivity.append(max(p, 0.0))
+    return np.array(reactivity)
 
 ############################################################
 ap = ArgumentParser(description="SHAPE reactivity simulator")
@@ -198,15 +209,19 @@ ap.add_argument("BPSEQ", help="input RNA sequence (BPSEQ format)")
 ap.add_argument(
     "--method",
     default="wu",
-    choices=["wu", "sukosd"],
+    choices=["wu", "sukosd", "fake"],
     help="SHAPE reactivity calculation method",
 )
 args = ap.parse_args()
 
 if args.method == "wu":
     calc_reactivity = calc_reactivity_wu
-else:
+elif args.method == "sukosd":
     calc_reactivity = calc_reactivity_sukosd
+elif args.method == "fake":
+    calc_reactivity = calc_reactivity_fake
+else:
+    raise(ValueError(f"not implemented: {args.method}"))
 
 with open(args.BPSEQ, "r") as f:
     lines = f.readlines()

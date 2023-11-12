@@ -110,7 +110,6 @@ class AbstractFold(nn.Module):
                 paired_position_scores = (-pseudoenergy[i]).tolist() 
                 while len(paired_position_scores) < len(seq[i]):
                     paired_position_scores.append(0.0)
-                print(paired_position_scores)
             with torch.no_grad():
                 self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
