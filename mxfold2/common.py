@@ -19,16 +19,7 @@ class Common:
                 else:
                     return RNAFold(), {}
 
-            elif args.fold == 'LinearFold':
-                from .fold.linearfoldv import LinearFoldV
-                if args.param == 'default' or args.param == 'turner2004':
-                    args.param = ''
-                    from . import param_turner2004
-                    return LinearFoldV(init_param=param_turner2004, beam_size=args.beam_size), {}
-                else:
-                    return LinearFoldV(beam_size=args.beam_size), {}
-
-            elif args.fold == 'LinFold':
+            elif args.fold == 'LinFold' or args.fold == 'LinearFold':
                 from .fold.linfoldv import LinFoldV
                 if args.param == 'default' or args.param == 'turner2004':
                     args.param = ''
@@ -47,16 +38,7 @@ class Common:
                 else:
                     return CONTRAfold(), {}
 
-            elif args.fold == 'LinearFold':
-                from .fold.linearfoldc import LinearFoldC
-                if args.param == 'default':
-                    args.param = ''
-                    from . import param_contrafold202
-                    return LinearFoldC(param_contrafold202, beam_size=args.beam_size), {}
-                else:
-                    return LinearFoldC(beam_size=args.beam_size), {}
-
-            elif args.fold == 'LinFold':
+            elif args.fold == 'LinFold' or args.fold == 'LinearFold':
                 from .fold.linfoldc import LinFoldC
                 if args.param == 'default':
                     args.param = ''
@@ -97,11 +79,7 @@ class Common:
                 from .fold.zuker import ZukerFold
                 model = ZukerFold(**config)
 
-            elif args.fold == 'LinearFold':
-                from .fold.linearfold import LinearFold
-                model = LinearFold(beam_size=args.beam_size, **config)
-
-            elif args.fold == 'LinFold':
+            elif args.fold == 'LinFold' or args.fold == 'LinearFold':
                 from .fold.linfold import LinFold
                 model = LinFold(beam_size=args.beam_size, **config)
 
@@ -111,11 +89,7 @@ class Common:
                 from .fold.mix import MixedFold
                 model = MixedFold(init_param=param_turner2004, **config)
 
-            elif args.fold == 'LinearFold':
-                from .fold.mix_linearfold import MixedLinearFold
-                model = MixedLinearFold(init_param=param_turner2004, beam_size=args.beam_size, **config)
-
-            elif args.fold == 'LinFold':
+            elif args.fold == 'LinFold' or args.fold == 'LinearFold':
                 from .fold.mix_linfold import MixedLinFold
                 model = MixedLinFold(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
@@ -136,9 +110,9 @@ class Common:
                 from .fold.mix1d import MixedFold1D
                 model = MixedFold1D(init_param=param_turner2004, **config)
 
-            elif args.fold == 'LinearFold':
-                from .fold.mix_linearfold1d import MixedLinearFold1D
-                model = MixedLinearFold1D(init_param=param_turner2004, beam_size=args.beam_size, **config)
+            # elif args.fold == 'LinearFold':
+            #     from .fold.mix_linearfold1d import MixedLinearFold1D
+            #     model = MixedLinearFold1D(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
         # elif args.model == 'BL':
         #     if args.fold == 'Zuker':
