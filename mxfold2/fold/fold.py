@@ -111,12 +111,15 @@ class AbstractFold(nn.Module):
                 while len(paired_position_scores) < len(seq[i]):
                     paired_position_scores.append(0.0)
             with torch.no_grad():
+                c_i = None if constraint is None else constraint[i]
+                c_i = c_i.tolist() if isinstance(c_i, torch.Tensor) else c_i
+                r_i = None if reference is None else reference[i]
+                r_i = r_i.tolist() if isinstance(r_i, torch.Tensor) else r_i
                 self.fold_wrapper.compute_viterbi(seq[i], param_on_cpu,
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             max_helix_length=max_helix_length,
                             allowed_pairs="aucggu",
-                            constraint=constraint[i].tolist() if constraint is not None else None, 
-                            reference=reference[i].tolist() if reference is not None else None, 
+                            constraint=c_i, reference=r_i, 
                             paired_position_scores=paired_position_scores,
                             loss_pos_paired=loss_pos_paired[i], loss_neg_paired=loss_neg_paired[i],
                             loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i])
