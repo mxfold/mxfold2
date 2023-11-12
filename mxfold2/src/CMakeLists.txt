@@ -25,8 +25,7 @@ pybind11_add_module(interface
     fold/zuker.cpp fold/zuker.h 
     fold/nussinov.cpp fold/nussinov.h 
     fold/trimatrix.h
-    fold/linearfold/LinearFold.cpp 
-    fold/linearfold/LinearFold.h
+    fold/linfold.cpp fold/linfold.h 
     )
 target_compile_features(interface PUBLIC cxx_std_17)
 if(OPENMP_FOUND)

@@ -30,14 +30,27 @@ allow_paired(char x, char y) const
     return allowed_pairs_[x][y];
 }
 
+bool
+Fold::Options::
+allow_paired(const std::string& seq, u_int32_t i, u_int32_t j) const
+{
+    std::tie(i, j) = std::minmax(i, j);
+    return j-i>min_hairpin 
+        && this->allow_paired(seq[i-1], seq[j-1])
+        && (stru[i]==Options::ANY || stru[i]==Options::PAIRED_L || stru[i]==Options::PAIRED_LR || stru[i]==j) 
+        && (stru[j]==Options::ANY || stru[j]==Options::PAIRED_R || stru[j]==Options::PAIRED_LR || stru[j]==i);
+}
+
 auto
 Fold::Options::
 make_constraint(const std::string& seq, bool canonical_only /*=true*/) const
     -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>
 {
     const auto L = seq.size();
-    std::vector<u_int32_t> stru(L+1, Options::ANY);
-    std::copy(std::begin(this->stru), std::end(this->stru), std::begin(stru));
+    //std::vector<u_int32_t> stru(L+1, Options::ANY);
+    //std::copy(std::begin(this->stru), std::end(this->stru), std::begin(stru));
+    if (stru.size() == 0)
+        stru.resize(L+1, Options::ANY);
 
     for (auto i=L; i>=1; i--)
         if (stru[i] > 0 && stru[i] <= L) // paired
@@ -70,7 +83,7 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/) const
         }
     }
 
-    return std::make_pair(allow_paired, allow_unpaired);
+    return { allow_paired, allow_unpaired };
 }
 
 auto 

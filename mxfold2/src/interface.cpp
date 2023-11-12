@@ -7,7 +7,7 @@
 #endif
 #include "fold/zuker.h"
 #include "fold/nussinov.h"
-#include "fold/linearfold/LinearFold.h"
+#include "fold/linfold.h"
 #include "param/contrafold.h"
 #include "param/turner.h"
 #include "param/positional.h"
@@ -18,25 +18,28 @@
 
 namespace py = pybind11;
 
+template < class FoldClass >
 class FoldWrapper
 {
 protected:
+    using Options = typename FoldClass::Options;
+
     auto convert_constraints(py::list constraint) const
     {
-        std::vector<u_int32_t> ret(constraint.size(), Fold::Options::ANY);
+        std::vector<u_int32_t> ret(constraint.size(), Options::ANY);
         for (auto i=0; i!=constraint.size(); i++)
         {
             if (py::isinstance<py::str>(constraint[i]))
             {
                 std::string c = py::cast<py::str>(constraint[i]);
                 if (c=="x")
-                    ret[i] = Fold::Options::UNPAIRED;
+                    ret[i] = Options::UNPAIRED;
                 else if (c=="<")
-                    ret[i] = Fold::Options::PAIRED_L;
+                    ret[i] = Options::PAIRED_L;
                 else if (c==">")
-                    ret[i] = Fold::Options::PAIRED_R;
+                    ret[i] = Options::PAIRED_R;
                 else if (c=="|")
-                    ret[i] = Fold::Options::PAIRED_LR;
+                    ret[i] = Options::PAIRED_LR;
                 /* else  if (c==".") 
                     ret[i] = Fold::Options::ANY; */
             }
@@ -44,11 +47,11 @@ protected:
             {
                 auto v = py::cast<py::int_>(constraint[i]);
                 switch (static_cast<int>(v)) {
-                    case  0: ret[i] = Fold::Options::UNPAIRED; break;
-                    case -1: ret[i] = Fold::Options::ANY; break;
-                    case -2: ret[i] = Fold::Options::PAIRED_L; break;
-                    case -3: ret[i] = Fold::Options::PAIRED_R; break;
-                    case -4: ret[i] = Fold::Options::PAIRED_LR; break;
+                    case  0: ret[i] = Options::UNPAIRED; break;
+                    case -1: ret[i] = Options::ANY; break;
+                    case -2: ret[i] = Options::PAIRED_L; break;
+                    case -3: ret[i] = Options::PAIRED_R; break;
+                    case -4: ret[i] = Options::PAIRED_LR; break;
                     default: 
                         if (static_cast<int>(v)>=0) ret[i] = v;
                         break;
@@ -80,13 +83,53 @@ protected:
     {
         return convert_list<float, py::float_>(v);
     }
+
+    void set_allowed_pairs(Options& options, const std::string& allowed_pairs) const
+    {
+        for (auto i=0; i!=allowed_pairs.size(); i+=2)
+            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+    }
+
+    void set_constraints(Options& options, py::object constraint) const
+    {
+        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
+        {
+            auto c = py::cast<py::list>(constraint);
+            auto c1 = this->convert_constraints(c);
+            if (c1.size()>0)
+                options.constraints(c1);
+        }
+    }
+
+    void set_margin_terms(Options& options, py::object reference,
+                    float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired) const
+    {
+        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
+        {
+            auto r = py::cast<py::list>(reference);
+            auto r1 = this->convert_reference(r);
+            if (r1.size() > 0)
+                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        }
+    }
+
+    void set_score_paired_potision(Options& options, py::object paired_position_scores) const
+    {
+        if (py::isinstance<py::list>(paired_position_scores))
+        {
+            auto sc = this->convert_position_scores(py::cast<py::list>(paired_position_scores));
+            options.score_paired_position(sc);
+        }
+    }
 };
 
 template < class ParamClass >
-class ZukerWrapper : public FoldWrapper
+class ZukerWrapper : public FoldWrapper<Zuker<ParamClass>>
 {
+    using Options = typename FoldWrapper<Zuker<ParamClass>>::Options;
+
 public:
-    ZukerWrapper() {}
+    ZukerWrapper() : FoldWrapper<Zuker<ParamClass>>() {}
     
     void set_param(const std::string& seq, py::object pa)
     {
@@ -101,33 +144,14 @@ public:
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
             py::object paired_position_scores)
     {
-        typename Zuker<ParamClass>::Options options;
+        Options options;
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
-        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
-        {
-            auto c = py::cast<py::list>(constraint);
-            auto c1 = convert_constraints(c);
-            if (c1.size()>0)
-                options.constraints(c1);
-        }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
-        if (py::isinstance<py::list>(paired_position_scores))
-        {
-            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
-            options.score_paired_position(sc);
-        }
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_constraints(options, constraint);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        this->set_score_paired_potision(options, paired_position_scores);
         std::swap(options, options_);
         return options_;
     }
@@ -168,23 +192,19 @@ public:
         auto ret = f_->compute_inside(seq_, options_);
         f_->compute_outside(seq_, options_);
         auto bpp = f_->compute_basepairing_probabilities(seq_, options_);
-        py::array_t<float> bpp_a({bpp.size(), bpp[0].size()});
-        auto bpp_a2 = bpp_a.mutable_unchecked<2>();
-        for (auto i=0; i<bpp.size(); i++)
-            for (auto j=0; j<bpp[i].size(); j++)
-                bpp_a2(i, j) = bpp[i][j];
-        return std::make_pair(ret, bpp_a);
+        return std::make_pair(ret, bpp);
     }
 
 private:
     std::string seq_;
     std::unique_ptr<Zuker<ParamClass>> f_;
-    typename Zuker<ParamClass>::Options options_;
+    Options options_;
 };
 
 template < class ParamClass >
-class NussinovWrapper : public FoldWrapper
+class NussinovWrapper : public FoldWrapper<Nussinov<ParamClass>>
 {
+    using Options = typename FoldWrapper<Nussinov<ParamClass>>::Options;
 public:
     NussinovWrapper() {}
 
@@ -200,26 +220,11 @@ public:
                 py::object constraint, py::object reference, 
                 float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired)
     {
-        typename Nussinov<ParamClass>::Options options;
+        Options options;
         options.min_hairpin_loop_length(min_hairpin);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
-        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
-        {
-            auto c = py::cast<py::list>(constraint);
-            auto c1 = convert_constraints(c);
-            if (c1.size()>0)
-                options.constraints(c1);
-        }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_constraints(options, constraint);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
         std::swap(options, options_);
         return options_;
     }
@@ -247,21 +252,21 @@ public:
 private:
     std::string seq_;
     std::unique_ptr<Nussinov<ParamClass>> f_;
-    typename Nussinov<ParamClass>::Options options_;
+    Options options_;
 };
 
 template < class ParamClass >
-class LinearFoldWrapper : public FoldWrapper
+class LinFoldWrapper : public FoldWrapper<LinFold<ParamClass>>
 {
+    using Options = typename FoldWrapper<LinFold<ParamClass>>::Options;
 public:
-    LinearFoldWrapper(int beam_size = 100) : beam_size_(beam_size) {}
-
-    void set_param(const std::string& seq, py::object pa, int beam)
+    LinFoldWrapper(u_int32_t beam_size=100) : beam_size_(beam_size) {}
+    
+    void set_param(const std::string& seq, py::object pa)
     {
         seq_ = seq;
-        std::transform(seq_.begin(), seq_.end(), seq_.begin(), ::toupper);
         auto param = std::make_unique<ParamClass>(seq, pa);
-        f_ = std::make_unique<LinearFold::BeamCKYParser<ParamClass>>(std::move(param), beam);
+        f_ = std::make_unique<LinFold<ParamClass>>(std::move(param));
     }
 
     auto set_options(int min_hairpin, int max_internal, int max_helix,
@@ -269,105 +274,64 @@ public:
             py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
             py::object paired_position_scores)
-    {   // TODO: support {pos, neg}_unpaired for LinearFold
-        // TODO: support allowed_pairs for LinearFold, which is needed for modifications
-        typename LinearFold::BeamCKYParser<ParamClass>::Options options;
+    {
+        Options options;
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
-
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
-            options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
-
-        if (/*!constraint.is_none()*/ py::isinstance<py::list>(constraint)) 
-        {
-            auto c = py::cast<py::list>(constraint);
-            auto c1 = convert_constraints(c);
-            if (c1.size()>0)
-                options.constraints(c1);
-        }
-        if (/*!reference.is_none()*/ py::isinstance<py::list>(reference))
-        {
-            auto r = py::cast<py::list>(reference);
-            auto r1 = convert_reference(r);
-            if (r1.size() > 0)
-                options.margin_terms(r1, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
-        }
-        if (py::isinstance<py::list>(paired_position_scores))
-        {
-            auto sc = convert_position_scores(py::cast<py::list>(paired_position_scores));
-            options.score_paired_position(sc);
-        }
-
+        this->set_allowed_pairs(options, allowed_pairs);
+        this->set_constraints(options, constraint);
+        this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
+        this->set_score_paired_potision(options, paired_position_scores);
         std::swap(options, options_);
         return options_;
     }
-    
-    auto compute_viterbi(const std::string& seq, py::object pa, 
+
+    auto compute_viterbi(const std::string& seq, py::object pa,
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
             py::object constraint, py::object reference, 
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
             py::object paired_position_scores)
     {
-        set_param(seq, pa, beam_size_);
+        set_param(seq, pa);
         set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
                 constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
                 paired_position_scores);
-        auto r = f_->parse(seq_, options_);
-        return r.score;
+        options_.beam_size(beam_size_);
+        return f_->compute_viterbi(seq_, options_);
     }
 
     auto traceback_viterbi()
     {
-        auto [e, p] = f_->traceback(seq_, options_);
-        auto s = LinearFold::BeamCKYParser<ParamClass>::make_paren(p);
+        auto [e, p] = f_->traceback_viterbi(seq_, options_);
+        auto s = LinFold<ParamClass>::make_paren(p);
         return std::make_tuple(e, s, p);
     }
 
-protected:
-    auto convert_constraints(py::list constraint) const
+    auto compute_basepairing_probabilities(const std::string& seq, py::object pa, 
+            int min_hairpin, int max_internal, int max_helix,
+            const std::string& allowed_pairs,
+            py::object constraint, py::object reference, 
+            float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
+            py::object paired_position_scores)
     {
-        std::vector<int> ret(constraint.size()-1, LinearFold::C_ANY);
-        for (auto i=1; i!=constraint.size(); i++)
-        {
-            if (py::isinstance<py::str>(constraint[i]))
-            {
-                std::string c = py::cast<py::str>(constraint[i]);
-                if (c=="x")
-                    ret[i-1] = LinearFold::C_UNPAIRED;
-                else if (c=="<")
-                    ret[i-1] = LinearFold::C_PAIRED_L;
-                else if (c==">")
-                    ret[i-1] = LinearFold::C_PAIRED_R;
-                else if (c=="|")
-                    ret[i-1] = LinearFold::C_PAIRED_LR;
-                /* else  if (c==".") 
-                    ret[i] = LinearFold::BeamCKYParser::C_ANY; */
-            }
-            else if (py::isinstance<py::int_>(constraint[i]))
-            {
-                auto v = static_cast<int>(py::cast<py::int_>(constraint[i]));
-                switch (v) {
-                    case  0: ret[i-1] = LinearFold::C_UNPAIRED; break;
-                    case -1: ret[i-1] = LinearFold::C_ANY; break;
-                    case -2: ret[i-1] = LinearFold::C_PAIRED_L; break;
-                    case -3: ret[i-1] = LinearFold::C_PAIRED_R; break;
-                    case -4: ret[i-1] = LinearFold::C_PAIRED_LR; break;
-                    default: 
-                        if (v>0) ret[i-1] = v-1;
-                        break;
-                }
-            }
-        }
-        return ret;
+        set_param(seq, pa);
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
+                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired, 
+                paired_position_scores);
+
+        auto ret = f_->compute_inside(seq_, options_);
+        f_->compute_outside(seq_, options_);
+        auto bpp = f_->compute_basepairing_probabilities(seq_, options_);
+        return std::make_pair(ret, bpp);
     }
 
 private:
     std::string seq_;
-    std::unique_ptr<LinearFold::BeamCKYParser<ParamClass>> f_;
-    typename LinearFold::BeamCKYParser<ParamClass>::Options options_;
-    int beam_size_;
+    std::unique_ptr<LinFold<ParamClass>> f_;
+    Options options_;
+    u_int32_t beam_size_;
 };
 
 void set_num_threads(int n)
@@ -735,10 +699,10 @@ PYBIND11_MODULE(interface, m)
         .def("traceback_viterbi", &NussinovWrapper<PositionalBasePairScore>::traceback_viterbi,
             "traceback for positional Nussinov model");
 
-    py::class_<LinearFoldWrapper<TurnerNearestNeighbor>>(m, "LinearFoldTurnerWrapper")
+    py::class_<LinFoldWrapper<TurnerNearestNeighbor>>(m, "LinFoldTurnerWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinearFold-V Model", 
+        .def("compute_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with LinFold-V model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -751,13 +715,27 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinearFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
-            "traceback for LinearFold-V");
+        .def("traceback_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
+            "traceback for LinearFold-V")
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<TurnerNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with LinFold-V model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 
-    py::class_<LinearFoldWrapper<CONTRAfoldNearestNeighbor>>(m, "LinearFoldCONTRAWrapper")
+    py::class_<LinFoldWrapper<CONTRAfoldNearestNeighbor>>(m, "LinFoldCONTRAWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinearFold-C Model", 
+        .def("compute_viterbi", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi, 
+            "predict RNA secondary structure with LinFold-C model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -770,12 +748,26 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinearFoldWrapper<CONTRAfoldNearestNeighbor>::traceback_viterbi, 
-            "traceback for LinearFold-C");
+        .def("traceback_viterbi", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::traceback_viterbi, 
+            "traceback for LinearFold-V")
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with LinFold-C model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 #if 0
-    py::class_<LinearFoldWrapper<PositionalNearestNeighborBL>>(m, "LinearFoldPositionalWrapper")
+    py::class_<LinFoldWrapper<PositionalNearestNeighborBL>>(m, "LinFoldPositionalWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<PositionalNearestNeighborBL>::compute_viterbi, 
+        .def("compute_viterbi", &LinFoldWrapper<PositionalNearestNeighborBL>::compute_viterbi, 
             "predict RNA secondary structure with LinearFold Model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
@@ -788,13 +780,10 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighborBL>::traceback_viterbi,
-            "traceback for LinearFold model");
-
-    py::class_<LinearFoldWrapper<MixedNearestNeighborBL>>(m, "LinearFoldMixedWrapper")
-        .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighborBL>::compute_viterbi, 
-            "predict RNA secondary structure with Mixed LinearFold Model", 
+        .def("traceback_viterbi", &LinFoldWrapper<PositionalNearestNeighborBL>::traceback_viterbi,
+            "traceback for LinearFold model")
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<PositionalNearestNeighborBL>::compute_basepairing_probabilities, 
+            "Partition function with Mixed LinFold Model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -806,13 +795,41 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0)
-        .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighborBL>::traceback_viterbi,
-            "traceback for Mixed LinearFold model");
+    py::class_<LinFoldWrapper<MixedNearestNeighborBL>>(m, "LinFoldMixedWrapper")
+        .def(py::init<int>(), "constructor", "beam_size"_a=100)
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighborBL>::compute_viterbi, 
+            "predict RNA secondary structure with Mixed LinFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
+        .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighborBL>::traceback_viterbi,
+            "traceback for Mixed LinearFold model")
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<MixedNearestNeighborBL>::compute_basepairing_probabilities, 
+            "Partition function with Mixed LinFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0)
 #endif
-    py::class_<LinearFoldWrapper<PositionalNearestNeighbor>>(m, "LinearFoldPositional2DWrapper")
+    py::class_<LinFoldWrapper<PositionalNearestNeighbor>>(m, "LinFoldPositionalWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<PositionalNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinearFold Model", 
+        .def("compute_viterbi", &LinFoldWrapper<PositionalNearestNeighbor>::compute_viterbi, 
+            "Predict RNA secondary structure with Mixed LinearFold Model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -825,13 +842,27 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinearFoldWrapper<PositionalNearestNeighbor>::traceback_viterbi,
-            "traceback for LinearFold model");
+        .def("traceback_viterbi", &LinFoldWrapper<PositionalNearestNeighbor>::traceback_viterbi,
+            "traceback for LinearFold model")
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<PositionalNearestNeighbor>::compute_basepairing_probabilities, 
+            "Partition function with Mixed LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 
-    py::class_<LinearFoldWrapper<MixedNearestNeighbor>>(m, "MixedLinearFoldPositional2DWrapper")
+    py::class_<LinFoldWrapper<MixedNearestNeighbor>>(m, "MixedLinFoldPositionalWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinearFold Model", 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_viterbi, 
+            "Predict RNA secondary structure with Mixed LinFold Model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -844,13 +875,27 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
-            "traceback for LinearFold model");
+        .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
+            "traceback for LinFold model")
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities, 
+            "Partition function with Mixed LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 
-    py::class_<LinearFoldWrapper<MixedNearestNeighbor2>>(m, "MixedLinearFoldPositional2DWrapper2")
+    py::class_<LinFoldWrapper<MixedNearestNeighbor2>>(m, "MixedLinFoldPositionalWrapper2")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighbor2>::compute_viterbi, 
-            "predict RNA secondary structure with LinearFold Model", 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor2>::compute_viterbi, 
+            "Predict RNA secondary structure with Mixed LinearFold Model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -863,13 +908,27 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor2>::traceback_viterbi,
-            "traceback for LinearFold model");
+        .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor2>::traceback_viterbi,
+            "traceback for Mixed LinFold model")
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor2>::compute_basepairing_probabilities, 
+            "Partition function with Mixed LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 
-    py::class_<LinearFoldWrapper<MixedNearestNeighbor1D>>(m, "MixedLinearFoldPositional1DWrapper")
+    py::class_<LinFoldWrapper<MixedNearestNeighbor1D>>(m, "MixedLinFoldPositional1DWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinearFoldWrapper<MixedNearestNeighbor1D>::compute_viterbi, 
-            "predict RNA secondary structure with LinearFold Model", 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_viterbi, 
+            "Predict RNA secondary structure with Mixed LinearFold Model", 
             "seq"_a, "param"_a, 
             "min_hairpin_length"_a=3, 
             "max_internal_length"_a=30, 
@@ -882,6 +941,20 @@ PYBIND11_MODULE(interface, m)
             "loss_pos_unpaired"_a=0.0, 
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinearFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
-            "traceback for LinearFold model");
+        .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
+            "traceback for LinFold model")
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities, 
+            "Partition function with Mixed LinearFold Model", 
+            "seq"_a, "param"_a, 
+            "min_hairpin_length"_a=3, 
+            "max_internal_length"_a=30, 
+            "max_helix_length"_a=30,
+            "allowed_pairs"_a="aucggu",
+            "constraint"_a=py::none(), 
+            "reference"_a=py::none(), 
+            "loss_pos_paired"_a=0.0, 
+            "loss_neg_paired"_a=0.0,
+            "loss_pos_unpaired"_a=0.0, 
+            "loss_neg_unpaired"_a=0.0,
+            "paired_position_scores"_a=py::none());
 }

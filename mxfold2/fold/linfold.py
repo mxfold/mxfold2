@@ -11,11 +11,12 @@ from .fold import AbstractFold
 from .layers import LengthLayer, NeuralNet
 
 
-class LinearFold2D(AbstractFold):
-    def __init__(self, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
-        super(LinearFold2D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size))
+class LinFold(AbstractFold):
+    def __init__(self, beam_size: int = 100, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
+        super(LinFold, self).__init__(interface.LinFoldPositionalWrapper(beam_size=beam_size))
 
-        self.model_type = '4' # default
+        self.max_helix_length = max_helix_length
+        self.model_type = 'C'
         if self.model_type == "C":
             n_out_paired_layers = 3
             n_out_unpaired_layers = 0
@@ -53,6 +54,10 @@ class LinearFold2D(AbstractFold):
                 'score_multi_paired': torch.zeros(1, dtype=torch.float32),
                 'score_external_paired': torch.zeros(1, dtype=torch.float32), 
             }
+
+
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+        return super(LinFold, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
     def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:

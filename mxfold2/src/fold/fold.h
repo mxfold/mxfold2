@@ -6,6 +6,7 @@
 #include <variant>
 #include <memory>
 #include "trimatrix.h"
+using namespace std::literals::string_literals;
 
 class Fold
 {
@@ -24,7 +25,7 @@ class Fold
             size_t min_hairpin;
             size_t max_internal;
             size_t max_helix;
-            std::vector<u_int32_t> stru;
+            mutable std::vector<u_int32_t> stru;
             bool use_margin;
             std::vector<u_int32_t> ref;
             float pos_paired;
@@ -106,9 +107,12 @@ class Fold
 
             auto make_constraint(const std::string& seq, bool canonical_only=true) const
                 -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
+            auto make_constraint_lin(const std::string& seq, std::string alphabests="acguACGU"s, bool canonical_only=true) const
+                -> std::tuple<std::vector<std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>>;
             auto make_additional_scores(size_t L) const
                 -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>>;
             bool allow_paired(char x, char y) const;
+            bool allow_paired(const std::string& seq, u_int32_t i, u_int32_t j) const;
         };
 
     public:

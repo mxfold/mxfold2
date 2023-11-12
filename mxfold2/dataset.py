@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from itertools import groupby
 from typing import Generator, Any
 

@@ -10,9 +10,9 @@ from .. import interface
 from .fold import AbstractFold
 
 
-class LinearFoldC(AbstractFold):
+class LinFoldC(AbstractFold):
     def __init__(self, init_param=None, beam_size: int = 100):
-        super(LinearFoldC, self).__init__(interface.LinearFoldCONTRAWrapper(beam_size=beam_size))
+        super(LinFoldC, self).__init__(interface.LinFoldCONTRAWrapper(beam_size=beam_size))
         if init_param is None:
             self.score_base_pair = nn.Parameter(torch.zeros((5, 5), dtype=torch.float32))
             self.score_terminal_mismatch = nn.Parameter(torch.zeros((5, 5, 5, 5), dtype=torch.float32))

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import math
 import os
 import random
 import time
 from argparse import Namespace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-import numpy as np
 import torch
 #import torch.nn as nn
 #import torch.nn.functional as F
@@ -19,11 +17,12 @@ from . import interface
 from .compbpseq import accuracy, compare_bpseq
 from .dataset import BPseqDataset, FastaDataset
 from .fold.fold import AbstractFold
+from .common import Common
 
 
-class Predict:
+class Predict(Common):
     def __init__(self):
-        pass
+        super(Predict, self).__init__()
 
 
     def predict(self, 
@@ -33,9 +32,17 @@ class Predict:
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
                 use_constraint: bool = False,
-                pseudoenergy: Optional[torch.tensor] = None) -> None:
+                shape_list: Optional[list[str]] = None,
+                shape_intercept: float = 0.0,
+                shape_slope: float = 0.0) -> None:
+
         res_fn = open(result, 'w') if result is not None else None
+        shape_list = [None] * len(data_loader) if shape_list is None else shape_list
+        while len(shape_list) < len(data_loader):
+            shape_list.append(None)
+
         model.eval()
+        seq_processed = 0
         with torch.no_grad():
             for headers, seqs, vals in data_loader:
                 start = time.time()
@@ -43,7 +50,11 @@ class Predict:
                     constraint = [ tgt if tp=='BPSEQ' else None for tp, tgt in zip(vals['type'], vals['target'])]
                 else:
                     constraint = None
-                pseudoenergy = [pseudoenergy]*len(seqs) if pseudoenergy is not None else None
+                pseudoenergy = [ 
+                    self.load_shape_reactivity(shape_file, shape_intercept, shape_slope) \
+                        if shape_file is not None else None \
+                        for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
+                seq_processed += len(seqs)
                 if output_bpp is None:
                     scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                     pfs = bpps = [None] * len(preds)
@@ -72,167 +83,15 @@ class Predict:
                         x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
                     if output_bpp is not None:
-                        bpp = np.triu(bpp)
-                        bpp = bpp + bpp.T
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
                         fn = os.path.join(output_bpp, fn+".bpp")
-                        np.savetxt(fn, bpp, fmt='%.5f')
-
-
-    def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
-        if args.model == 'Turner':
-            from .fold.rnafold import RNAFold
-            if args.init_param == 'default' or args.init_param == 'turner2004':
-                args.init_param = ''
-                from . import param_turner2004
-                return RNAFold(init_param=param_turner2004), {}
-            else:
-                return RNAFold(), {}
-        
-        if args.model == 'CONTRAfold':
-            from .fold.contrafold import CONTRAfold
-            if args.init_param == 'default':
-                args.init_param = ''
-                from . import param_contrafold202
-                return CONTRAfold(init_param=param_contrafold202), {}
-            else:
-                return CONTRAfold(), {}
-        
-        if args.model == 'LinearFoldV':
-            from .fold.linearfoldv import LinearFoldV
-            if args.init_param == 'default' or args.init_param == 'turner2004':
-                args.init_param = ''
-                from . import param_turner2004
-                return LinearFoldV(init_param=param_turner2004), {}
-            else:
-                return LinearFoldV(), {}
-
-        if args.model == 'LinearFoldC':
-            from .fold.linearfoldc import LinearFoldC
-            if args.param == 'default':
-                args.param = ''
-                from . import param_contrafold202
-                return LinearFoldC(param_contrafold202), {}
-            else:
-                return LinearFoldC(), {}
-
-        config = {
-            'max_helix_length': args.max_helix_length,
-            'embed_size' : args.embed_size,
-            'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'filter_size': args.filter_size if args.filter_size is not None else (5,),
-            'pool_size': args.pool_size if args.pool_size is not None else (1,),
-            'dilation': args.dilation, 
-            'num_lstm_layers': args.num_lstm_layers, 
-            'num_lstm_units': args.num_lstm_units,
-            'num_transformer_layers': args.num_transformer_layers,
-            'num_transformer_hidden_units': args.num_transformer_hidden_units,
-            'num_transformer_att': args.num_transformer_att,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
-            'num_paired_filters': args.num_paired_filters,
-            'paired_filter_size': args.paired_filter_size,
-            'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,
-            'num_att': args.num_att,
-            'pair_join': args.pair_join,
-            'no_split_lr': args.no_split_lr,
-            'bl_size': args.bl_size,
-            'paired_opt': args.paired_opt,
-            'mix_type': args.mix_type,
-            'additional_params': args.additional_params,
-        }
-
-        if args.model == 'Zuker':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='M', **config)
-
-        elif args.model == 'ZukerC':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='C', **config)
-
-        elif args.model == 'ZukerL':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type="L", **config)
-
-        elif args.model == 'ZukerS':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type="S", **config)
-
-        elif args.model == 'ZukerFold':
-            from .fold.zuker import ZukerFold
-            model = ZukerFold(model_type='4', **config)
-
-        elif args.model == 'Mix':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixC':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
-
-        elif args.model == 'CFMixC':
-            from . import param_contrafold202
-            from .fold.cf_mix import CONTRAMixedFold
-            model = CONTRAMixedFold(init_param=param_contrafold202, model_type='C', **config)
-
-        elif args.model == 'CFTMixC':
-            from .fold.cf_mix import CONTRAMixedFold
-            model = CONTRAMixedFold(model_type='C', tune_cf=True, **config)
-
-        elif args.model == 'Mix1D':
-            from . import param_turner2004
-            from .fold.mix1d import MixedFold1D
-            model = MixedFold1D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedZukerFold':
-            from . import param_turner2004
-            from .fold.mix import MixedFold
-            model = MixedFold(init_param=param_turner2004, model_type='4', **config)
-
-        elif args.model == 'ZukerBL':
-            from .fold.zuker_bl import ZukerFoldBL
-            model = ZukerFoldBL(**config)
-
-        elif args.model == 'MixedBL':
-            from . import param_turner2004
-            from .fold.mix_bl import MixedFoldBL
-            model = MixedFoldBL(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold':
-            from .fold.linearfold import LinearFold
-            model = LinearFold(**config)
-
-        elif args.model == 'MixCLinearFold':
-            from . import param_turner2004
-            from .fold.mix_linearfold2d import MixedLinearFold2D
-            model = MixedLinearFold2D(init_param=param_turner2004, model_type='C', **config)
-
-        elif args.model == 'MixedLinearFold':
-            from . import param_turner2004
-            from .fold.mix_linearfold import MixedLinearFold
-            model = MixedLinearFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold2D':
-            from .fold.linearfold2d import LinearFold2D
-            model = LinearFold2D(**config)
-
-        elif args.model == 'MixedLinearFold2D':
-            from . import param_turner2004
-            from .fold.mix_linearfold2d import MixedLinearFold2D
-            model = MixedLinearFold2D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedLinearFold1D':
-            from . import param_turner2004
-            from .fold.mix_linearfold1d import MixedLinearFold1D
-            model = MixedLinearFold1D(init_param=param_turner2004, **config)
-
-        else:
-            raise(RuntimeError('not implemented'))
-
-        return model, config
+                        with open(fn, "w") as f:
+                            for i in range(1, len(bpp)):
+                                print(f"{i} {seq[i-1]} ", end='', file=f)
+                                for j, p in bpp[i]:
+                                    print(f"{j}:{p:.3f}", end=' ', file=f)
+                                print(file=f)
 
 
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
@@ -263,20 +122,34 @@ class Predict:
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
 
-        pseudoenergy = None
-        if args.shape is not None:
-            pseudoenergy = self.load_shape_reactivity(args.shape, args.shape_intercept, args.shape_slope)
+        shape_list = None
+        if args.shape is not None: 
+            shape_list = []
+            with open(args.shape) as f:
+                for l in f:
+                    l = l.rstrip('\n').split()
+                    shape_list.append(l[0])
+        elif args.shape_file is not None:
+            shape_list = [args.shape_file]
 
         self.predict(model=model, data_loader=test_loader, 
-                    output_bpseq=args.bpseq, output_bpp=args.bpp, pseudoenergy=pseudoenergy,
-                    result=args.result, use_constraint=args.use_constraint)
+                    output_bpseq=args.bpseq, output_bpp=args.bpp,
+                    result=args.result, use_constraint=args.use_constraint,
+                    shape_list=shape_list,
+                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope)
 
 
-    def load_shape_reactivity(self, fname: str, intercept: float, slope: float) -> torch.tensor:
+    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.tensor:
         r = []
         with open(fname) as f:
             for l in f:
-                idx, val = l.rstrip('\n').split()
+                l = l.rstrip('\n').split()
+                if len(l) == 2:
+                    idx, val = l
+                elif len(l) == 3:
+                    idx, _, val = l
+                else:
+                    raise(ValueError(f"Invalid SHAPE reactivity file: {fname}"))
                 idx, val = int(idx), float(val)
                 while len(r) < idx:
                     r.append(-999)
@@ -294,7 +167,6 @@ class Predict:
         # input
         subparser.add_argument('input', type=str,
                             help='FASTA-formatted file or list of BPseq files')
-
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
@@ -310,56 +182,14 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
         subparser.add_argument('--bpp', type=str, default=None,
                             help='output the base-pairing probability matrix to the specified directory')
-        subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes the list of SHAPE reactivity files')
+        subparser.add_argument('--shape-file', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
-                            help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6.')
 
-        gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'CONTRAfold', 'ZukerC', 'ZukerFold', 'MixC', 'CFMixC', 'CFTMixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFoldC', 'LinearFold2D', 'MixCLinearFold', 'MixedLinearFold2D')")
-        gparser.add_argument('--additional-params', default=None, action='store_true')
-        gparser.add_argument('--max-helix-length', type=int, default=30, 
-                        help='the maximum length of helices (default: 30)')
-        gparser.add_argument('--embed-size', type=int, default=0,
-                        help='the dimention of embedding (default: 0 == onehot)')
-        gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--filter-size', type=int, action='append',
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN (default: 1)')
-        gparser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution (default: 0)')
-        gparser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers (default: 0)')
-        gparser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units (default: 0)')
-        gparser.add_argument('--num-transformer-layers', type=int, default=0,
-                        help='the number of the transformer layers (default: 0)')
-        gparser.add_argument('--num-transformer-hidden-units', type=int, default=2048,
-                        help='the number of the hidden units of each transformer layer (default: 2048)')
-        gparser.add_argument('--num-transformer-att', type=int, default=8,
-                        help='the number of the attention heads of each transformer layer (default: 8)')
-        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers (default: 32)')
-        gparser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the CNN and LSTM units (default: 0.0)')
-        gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--num-att', type=int, default=0,
-                        help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
-        gparser.add_argument('--no-split-lr', default=False, action='store_true')
-        gparser.add_argument('--bl-size', type=int, default=4,
-                        help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
-        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
-        gparser.add_argument('--mix-type', choices=('add', 'average'), default='add')
+        cls.add_fold_args(subparser)
+        cls.add_network_args(subparser)
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))

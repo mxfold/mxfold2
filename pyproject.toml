@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mxfold2"
-version = "0.1.2"
+version = "0.2.0"
 description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
 authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
 repository = "https://github.com/mxfold/mxfold2"
