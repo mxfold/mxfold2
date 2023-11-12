@@ -194,7 +194,27 @@ class Train(Common):
                             sl_weight=args.score_loss_weight)
 
         else:
-            raise(RuntimeError('not implemented'))
+            raise(ValueError(f'not implemented: {loss_func}'))
+
+
+    def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
+        if loss_func == 'shape':
+            from .loss.shape_loss import ShapeLoss
+            return ShapeLoss(model,
+                            xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404,
+                            perturb=args.shape_perturb, nu=args.shape_nu, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=0.)
+
+        elif loss_func == 'shape_fy':
+            from .loss.shape_fy_loss import ShapeFenchelYoungLoss
+            return ShapeFenchelYoungLoss(model,
+                            perturb=args.shape_perturb, 
+                            shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight)
+        else:
+            raise(ValueError(f'not implemented: {loss_func}'))
 
 
     def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
@@ -267,14 +287,10 @@ class Train(Common):
 
         optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
 
-        from .loss.shape_loss import SHAPELoss
         loss_fn = {
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
-            'SHAPE': SHAPELoss(model,
-                            xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404,
-                            perturb=args.shape_perturb, nu=args.shape_nu, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=0.) }
+            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args) 
+        }
         loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
@@ -359,40 +375,14 @@ class Train(Common):
 
         cls.add_fold_args(subparser)
 
-        gparser = subparser.add_argument_group("Optimizer setting")
+        gparser = subparser.add_argument_group("Setting for optimizer")
         gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD', 'AdaBelief', 'Lion'), default='AdamW')
-        gparser.add_argument('--l1-weight', type=float, default=0.,
-                            help='the weight for L1 regularization (default: 0)')
-        gparser.add_argument('--l2-weight', type=float, default=0.,
-                            help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--score-loss-weight', type=float, default=0.,
-                            help='the weight for score loss for {hinge,fy} loss (default: 0)')
-        gparser.add_argument('--perturb', type=float, default=0.1,
-                            help='standard deviation of perturbation for fy loss (default: 0.1)')
-        gparser.add_argument('--nu', type=float, default=0.1,
-                            help='weight for distribution (default: 0.1)')
-        gparser.add_argument('--shape-perturb', type=float, default=0.1,
-                            help='standard deviation of perturbation for shape loss (default: 0.1)')
-        gparser.add_argument('--shape-nu', type=float, default=0.1,
-                            help='weight for distribution for shape loss (default: 0.1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
-                            help="loss fuction ('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1') ")
-        gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
-                            help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
-        gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
-                            help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
-        gparser.add_argument('--loss-pos-unpaired', type=float, default=0.,
-                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
-                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--clip-grad-value', type=float, default=0.,
                             help='gradient clipping by values (default=0, no clipping)')
         gparser.add_argument('--clip-grad-norm', type=float, default=0.,
                             help='gradient clipping by norm (default=0, no clipping)')
-        gparser.add_argument('--shape-loss-weight', type=float, default=1.,
-                            help='weight for SHAPE loss function (default=1)')
         gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
                             help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
         gparser.add_argument('--scheduler-step-size', type=int, default=5, help='scheduler step size (default=5)')
@@ -405,6 +395,40 @@ class Train(Common):
         gparser.add_argument('--swa-anneal-strategy', choices=('linear', 'cos'), default='linear',
                             help="SWA anneal strategy ('linear', 'cos')")
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
+
+        gparser = subparser.add_argument_group("Setting for loss function")
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
+                            help="loss fuction (default: hinge)")
+        gparser.add_argument('--l1-weight', type=float, default=0.,
+                            help='the weight for L1 regularization (default: 0)')
+        gparser.add_argument('--l2-weight', type=float, default=0.,
+                            help='the weight for L2 regularization (default: 0)')
+        gparser.add_argument('--score-loss-weight', type=float, default=0.,
+                            help='the weight for score loss for {hinge,fy} loss (default: 0)')
+        gparser.add_argument('--perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for fy loss (default: 0.1)')
+        gparser.add_argument('--nu', type=float, default=0.1,
+                            help='weight for distribution (default: 0.1)')
+        gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
+                            help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
+        gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
+                            help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0.,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--shape-loss-func', choices=('shape', 'shape_fy'), default='shape',
+                            help="loss fuction for SHAPE training data (default: shape)")
+        gparser.add_argument('--shape-perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for shape loss (default: 0.1)')
+        gparser.add_argument('--shape-nu', type=float, default=0.1,
+                            help='weight for distribution for shape loss (default: 0.1)')
+        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6.')
+        gparser.add_argument('--shape-loss-weight', type=float, default=1.,
+                            help='weight for SHAPE loss function (default=1)')
 
         cls.add_network_args(subparser)
 

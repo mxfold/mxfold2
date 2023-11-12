@@ -25,13 +25,13 @@ class GeneralizedExtremeValue(torch.autograd.Function):
         v = 1 / self.sigma * (1+x) ** (-(1+1/self.xi)) * torch.exp(- (1 + x) ** (-1/self.xi))
         return torch.log(v)
 
-class SHAPELoss(nn.Module):
+class ShapeLoss(nn.Module):
     def __init__(self, model: AbstractFold, 
             xi: float = 0.774, mu: float = 0.078, sigma: float = 0.083,
             alpha: float = 1.006, beta: float = 1.404,
             perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
             sl_weight: float = 0.) -> None:
-        super(SHAPELoss, self).__init__()
+        super(ShapeLoss, self).__init__()
         self.paired_dist = GeneralizedExtremeValue(xi, mu, sigma)
         self.unpaired_dist = torch.distributions.Gamma(alpha, beta)
         self.model = model
