@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+import logging
 import numpy as np
 import torch
 import torch.nn as nn
@@ -22,7 +23,7 @@ class GeneralizedExtremeValue(torch.autograd.Function):
     def log_prob(self, x: torch.tensor) -> torch.tensor:
         x = self.xi / self.sigma * (x - self.mu)
         v = 1 / self.sigma * (1+x) ** (-(1+1/self.xi)) * torch.exp(- (1 + x) ** (-1/self.xi))
-        return torch.log(v)
+        return torch.log(v.clip(min=1e-5))
 
 
 class Wu(nn.Module):
@@ -44,12 +45,18 @@ class Wu(nn.Module):
 
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+        self.xi.data.clamp_(min=1e-2)
+        self.sigma.data.clamp_(min=1e-2)
+        self.alpha.data.clamp_(min=1e-2)
+        self.beta.data.clamp_(min=1e-2)
+        logging.debug(f'xi={self.xi}, mu={self.mu}, sigma={self.sigma}, alpha={self.alpha}, beta={self.beta}')
         lls = []
         for i in range(len(seq)):
-            tgt = targets[i]
-            valid = tgt > -1 # to ignore missing values (-999)
-            ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[i][valid] 
-                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)) * (1-paired[i][valid]))
+            valid = targets[i] > -1 # to ignore missing values (-999)
+            t = targets[i][valid].clip(min=1e-2, max=3.)
+            p = paired[i][valid]
+            ll = torch.mean(self.paired_dist.log_prob(t) * p 
+                            + self.unpaired_dist.log_prob(t) * (1-p))
             lls.append(ll)
         return torch.stack(lls)
 
@@ -71,11 +78,16 @@ class Foo(nn.Module):
 
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
+        self.p_alpha.data.clamp_(min=1e-2)
+        self.p_beta.data.clamp_(min=1e-2)
+        self.u_alpha.data.clamp_(min=1e-2)
+        self.u_beta.data.clamp_(min=1e-2)
         lls = []
         for i in range(len(seq)):
-            tgt = targets[i]
-            valid = tgt > -1 # to ignore missing values (-999)
-            ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[i][valid] 
-                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)) * (1-paired[i][valid]))
+            valid = targets[i] > -1 # to ignore missing values (-999)
+            t = targets[i][valid].clip(min=1e-2, max=3.)
+            p = paired[i][valid]
+            ll = torch.mean(self.paired_dist.log_prob(t) * p 
+                            + self.unpaired_dist.log_prob(t) * (1-p))
             lls.append(ll)
         return torch.stack(lls)

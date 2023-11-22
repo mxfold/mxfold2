@@ -124,7 +124,7 @@ class Train(Common):
                         model: AbstractFold | AveragedModel, 
                         optimizer: optim.Optimizer, 
                         scheduler,
-                        shape_model: Optional[list[nn.Module]]) -> None:
+                        shape_model: Optional[list[nn.Module]] = None) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         checkpoint = {
             'epoch': epoch,
@@ -361,7 +361,7 @@ class Train(Common):
             if test_loader is not None:
                 self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader)
             if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler)
+                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model)
 
         if args.param is not None:
             torch.save((swa_model or model).state_dict(), args.param)
