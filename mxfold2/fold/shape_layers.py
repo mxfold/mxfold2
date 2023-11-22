@@ -25,7 +25,7 @@ class GeneralizedExtremeValue(torch.autograd.Function):
         return torch.log(v)
 
 
-class Deigan(nn.Module):
+class Wu(nn.Module):
     def __init__(self,  
             xi: float = 0.774, 
             mu: float = 0.078, 
@@ -33,7 +33,7 @@ class Deigan(nn.Module):
             alpha: float = 1.006, 
             beta: float = 1.404,
             ) -> None:
-        super(Deigan, self).__init__()
+        super(Wu, self).__init__()
         self.xi = nn.Parameter(torch.tensor(xi))
         self.mu = nn.Parameter(torch.tensor(mu))
         self.sigma = nn.Parameter(torch.tensor(sigma))
@@ -45,12 +45,11 @@ class Deigan(nn.Module):
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
         lls = []
-        device = targets[0].device
         for i in range(len(seq)):
             tgt = targets[i]
             valid = tgt > -1 # to ignore missing values (-999)
             ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[i][valid] 
-                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)).to(device) * (1-paired[i][valid]))
+                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)) * (1-paired[i][valid]))
             lls.append(ll)
         return torch.stack(lls)
 
@@ -73,11 +72,10 @@ class Foo(nn.Module):
 
     def forward(self, seq: list[str], paired: list[torch.tensor], targets: list[torch.Tensor]):
         lls = []
-        device = targets[0].device
         for i in range(len(seq)):
             tgt = targets[i]
             valid = tgt > -1 # to ignore missing values (-999)
             ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[i][valid] 
-                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)).to(device) * (1-paired[i][valid]))
+                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)) * (1-paired[i][valid]))
             lls.append(ll)
         return torch.stack(lls)

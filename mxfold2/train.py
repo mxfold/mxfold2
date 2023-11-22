@@ -214,9 +214,9 @@ class Train(Common):
 
 
     def build_shape_model(self, args: Namespace) -> nn.Module:
-        if args.shape_model == 'Deigan':
-            from .fold.shape_layers import Deigan
-            return Deigan(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+        if args.shape_model == 'Wu':
+            from .fold.shape_layers import Wu
+            return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
         elif args.shape_model == 'Foo':
             from .fold.shape_layers import Foo
             return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
@@ -455,8 +455,8 @@ class Train(Common):
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--shape-model', choices=('Deigan', 'Foo'), default='Deigan',
-                            help="shape model (default: Deigan)")
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
+                            help="shape model (default: Wu)")
         gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,

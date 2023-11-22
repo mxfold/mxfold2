@@ -57,6 +57,7 @@ class ShapeNLLLoss(nn.Module):
             p = [ 1 if v > 0 else 0 for v in pred_bp ]
             p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
             paired.append(p)
+        targets = [ t.to(pred.device) for t in targets ]
         lls = self.shape_model[dataset_id](seq, paired, targets)
         lls.backward()
         grads = [ p.grad for p in paired ]
