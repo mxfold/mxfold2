@@ -122,7 +122,9 @@ class Train(Common):
 
     def save_checkpoint(self, outdir: str, epoch: int, 
                         model: AbstractFold | AveragedModel, 
-                        optimizer: optim.Optimizer, scheduler) -> None:
+                        optimizer: optim.Optimizer, 
+                        scheduler,
+                        shape_model: Optional[list[nn.Module]]) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         checkpoint = {
             'epoch': epoch,
@@ -130,20 +132,30 @@ class Train(Common):
             'optimizer_state_dict': optimizer.state_dict() }
         if scheduler is not None:
             checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+        if shape_model is not None:
+            checkpoint['shape_model_state_dict'] = [ sm.state_dict() for sm in shape_model ]
         torch.save(checkpoint, filename)
 
 
-    def resume_checkpoint(self, filename: str, model: AbstractFold, optimizer: optim.Optimizer, scheduler) -> int:
+    def resume_checkpoint(self, filename: str, 
+                        model: AbstractFold, 
+                        optimizer: optim.Optimizer, 
+                        scheduler,
+                        shape_model: Optional[list[nn.Module]]) -> int:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if scheduler is not None:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if shape_model is not None:
+            for i, sm in enumerate(shape_model):
+                sm.load_state_dict(checkpoint['shape_model_state_dict'][i])
         return epoch
 
 
-    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float) -> optim.Optimizer:
+    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
+                        shape_model: Optional[list[nn.Module]] = None) -> optim.Optimizer:
         # if hasattr(model, 'zuker') and hasattr(model, 'turner'):
         #     optim_params = [
         #         {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
@@ -156,6 +168,10 @@ class Train(Common):
         optim_params = [
             {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
         ]
+        if shape_model is not None:
+            for sm in shape_model:
+                optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
+
         if optimizer == 'Adam':
             return optim.Adam(optim_params, amsgrad=False)
         elif optimizer =='AdamW':
@@ -197,11 +213,23 @@ class Train(Common):
             raise(ValueError(f'not implemented: {loss_func}'))
 
 
-    def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
-        if loss_func == 'shape':
-            from .loss.shape_loss import ShapeLoss
-            return ShapeLoss(model,
-                            xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404,
+    def build_shape_model(self, args: Namespace) -> nn.Module:
+        if args.shape_model == 'Deigan':
+            from .fold.shape_layers import Deigan
+            return Deigan(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+        elif args.shape_model == 'Foo':
+            from .fold.shape_layers import Foo
+            return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+        else:
+            raise(ValueError(f'not implemented: {args.shape_model}'))
+
+
+    def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
+                                shape_model: Optional[nn.Module] = None) -> nn.Module:
+        if loss_func == 'shape_nll':
+            from .loss.shape_nll_loss import ShapeNLLLoss
+            return ShapeNLLLoss(model=model,
+                            shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=0.)
@@ -269,27 +297,37 @@ class Train(Common):
 
         model, config = self.build_model(args)
         config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
+
+        shape_model = None 
+        if args.shape is not None:
+            shape_model = [ self.build_shape_model(args) for _ in args.shape ]
         
         if args.init_param != '':
             init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:
                 init_param = Path(conf) / init_param
             p = torch.load(init_param)
+            if shape_model is not None and isinstance(p, dict) and 'shape_model_state_dict' in p:
+                for i, sm in enumerate(shape_model):
+                    sm.load_state_dict(p['shape_model_state_dict'][i])
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             model.load_state_dict(p)
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
+            if shape_model is not None:
+                for sm in shape_model:
+                    sm.to(torch.device("cuda", args.gpu))
 
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
-        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
+        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
 
         loss_fn = {
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
-            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args) 
+            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
         }
         loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
@@ -417,7 +455,9 @@ class Train(Common):
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--shape-loss-func', choices=('shape', 'shape_fy'), default='shape',
+        gparser.add_argument('--shape-model', choices=('Deigan', 'Foo'), default='Deigan',
+                            help="shape model (default: Deigan)")
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for shape loss (default: 0.1)')

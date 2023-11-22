@@ -51,8 +51,8 @@ class Deigan(nn.Module):
             valid = tgt > -1 # to ignore missing values (-999)
             ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[i][valid] 
                             + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)).to(device) * (1-paired[i][valid]))
-            lls.appen(ll)
-        return torch.tensor(lls, device=device)
+            lls.append(ll)
+        return torch.stack(lls)
 
 
 class Foo(nn.Module):
@@ -62,7 +62,7 @@ class Foo(nn.Module):
             u_alpha: float = 1.006, 
             u_beta: float = 1.404,
             ) -> None:
-        super(Deigan, self).__init__()
+        super(Foo, self).__init__()
         self.p_alpha = nn.Parameter(torch.tensor(p_alpha))
         self.p_beta = nn.Parameter(torch.tensor(p_beta))
         self.u_alpha = nn.Parameter(torch.tensor(u_alpha))
@@ -79,5 +79,5 @@ class Foo(nn.Module):
             valid = tgt > -1 # to ignore missing values (-999)
             ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[i][valid] 
                             + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)).to(device) * (1-paired[i][valid]))
-            lls.appen(ll)
-        return torch.tensor(lls, device=device)
+            lls.append(ll)
+        return torch.stack(lls)

@@ -9,32 +9,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd
 
-from ..compbpseq import accuracy, compare_bpseq
 from ..fold.fold import AbstractFold
 
-# from .fold.linearfold import LinearFold
 
-class GeneralizedExtremeValue(torch.autograd.Function):
-    def __init__(self, xi: float, mu: float, sigma: float):
-        self.xi = xi
-        self.mu = mu
-        self.sigma = sigma
-    
-    def log_prob(self, x: torch.tensor) -> torch.tensor:
-        x = self.xi / self.sigma * (x - self.mu)
-        v = 1 / self.sigma * (1+x) ** (-(1+1/self.xi)) * torch.exp(- (1 + x) ** (-1/self.xi))
-        return torch.log(v)
-
-class ShapeLoss(nn.Module):
+class ShapeNLLLoss(nn.Module):
     def __init__(self, model: AbstractFold, 
-            xi: float = 0.774, mu: float = 0.078, sigma: float = 0.083,
-            alpha: float = 1.006, beta: float = 1.404,
+            shape_model: list[nn.Module],
             perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
             sl_weight: float = 0.) -> None:
-        super(ShapeLoss, self).__init__()
-        self.paired_dist = GeneralizedExtremeValue(xi, mu, sigma)
-        self.unpaired_dist = torch.distributions.Gamma(alpha, beta)
+        super(ShapeNLLLoss, self).__init__()
         self.model = model
+        self.shape_model = shape_model
         self.perturb = perturb
         self.nu = nu
         self.l1_weight = l1_weight
@@ -67,18 +52,14 @@ class ShapeLoss(nn.Module):
                     elif kk.startswith('count_'):
                         pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
-        # calculate log-likelihood
-        lls, grads = [], []
-        for i in range(len(seq)):
-            paired = [ 1 if v > 0 else 0 for v in pred_bps[i] ]
-            paired = torch.tensor(paired, dtype=torch.float32, requires_grad=True, device=pred.device)
-            tgt = targets[i].to(pred.device)
-            valid = tgt > -1 # to ignore missing values (-999)
-            ll = torch.mean(self.paired_dist.log_prob(tgt[valid].clip(min=1e-2)) * paired[valid] 
-                            + self.unpaired_dist.log_prob(tgt[valid].clip(min=1e-2)).to(pred.device) * (1-paired[valid]))
-            ll.backward()
-            lls.append(ll.item())
-            grads.append(paired.grad)
+        paired = []
+        for pred_bp in pred_bps:
+            p = [ 1 if v > 0 else 0 for v in pred_bp ]
+            p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
+            paired.append(p)
+        lls = self.shape_model[dataset_id](seq, paired, targets)
+        lls.backward()
+        grads = [ p.grad for p in paired ]
 
         ref: torch.Tensor
         ref_s: list[str]
@@ -97,7 +78,7 @@ class ShapeLoss(nn.Module):
         class ADwrapper(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *input):
-                return torch.tensor([-ll for ll in lls], device=pred.device)
+                return -lls
 
             @staticmethod
             def backward(ctx, grad_output):
