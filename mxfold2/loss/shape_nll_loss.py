@@ -58,14 +58,14 @@ class ShapeNLLLoss(nn.Module):
             p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
             paired.append(p)
         targets = [ t.to(pred.device) for t in targets ]
-        lls = self.shape_model[dataset_id](seq, paired, targets)
-        lls.backward()
+        nlls = self.shape_model[dataset_id](seq, paired, targets)
+        nlls.backward()
         grads = [ p.grad for p in paired ]
 
         ref: torch.Tensor
         ref_s: list[str]
         ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True, 
-                                    pseudoenergy=[-self.nu*g for g in grads])
+                                    pseudoenergy=[self.nu*g for g in grads])
 
         ref_counts = []
         for k in sorted(param[0].keys()):
@@ -79,7 +79,7 @@ class ShapeNLLLoss(nn.Module):
         class ADwrapper(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *input):
-                return -lls
+                return nlls
 
             @staticmethod
             def backward(ctx, grad_output):

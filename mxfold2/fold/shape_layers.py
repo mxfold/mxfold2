@@ -50,15 +50,15 @@ class Wu(nn.Module):
         self.alpha.data.clamp_(min=1e-2)
         self.beta.data.clamp_(min=1e-2)
         logging.debug(f'xi={self.xi}, mu={self.mu}, sigma={self.sigma}, alpha={self.alpha}, beta={self.beta}')
-        lls = []
+        nlls = []
         for i in range(len(seq)):
             valid = targets[i] > -1 # to ignore missing values (-999)
             t = targets[i][valid].clip(min=1e-2, max=3.)
             p = paired[i][valid]
-            ll = torch.mean(self.paired_dist.log_prob(t) * p 
+            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
                             + self.unpaired_dist.log_prob(t) * (1-p))
-            lls.append(ll)
-        return torch.stack(lls)
+            nlls.append(nll)
+        return torch.stack(nlls)
 
 
 class Foo(nn.Module):
@@ -82,12 +82,12 @@ class Foo(nn.Module):
         self.p_beta.data.clamp_(min=1e-2)
         self.u_alpha.data.clamp_(min=1e-2)
         self.u_beta.data.clamp_(min=1e-2)
-        lls = []
+        nlls = []
         for i in range(len(seq)):
             valid = targets[i] > -1 # to ignore missing values (-999)
             t = targets[i][valid].clip(min=1e-2, max=3.)
             p = paired[i][valid]
-            ll = torch.mean(self.paired_dist.log_prob(t) * p 
+            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
                             + self.unpaired_dist.log_prob(t) * (1-p))
-            lls.append(ll)
-        return torch.stack(lls)
+            nlls.append(nll)
+        return torch.stack(nlls)
