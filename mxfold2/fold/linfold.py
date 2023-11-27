@@ -11,11 +11,12 @@ from .fold import AbstractFold
 from .layers import LengthLayer, NeuralNet
 
 
-class LinearFold2D(AbstractFold):
-    def __init__(self, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
-        super(LinearFold2D, self).__init__(interface.LinearFoldPositional2DWrapper(beam_size=beam_size), kwargs['use_fp'])
+class LinFold(AbstractFold):
+    def __init__(self, beam_size: int = 100, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
+        super(LinFold, self).__init__(interface.LinFoldPositionalWrapper(beam_size=beam_size), kwargs['use_fp'])
 
-        self.model_type = '4' # default
+        self.max_helix_length = max_helix_length
+        self.model_type = 'C'
         if self.model_type == "C":
             n_out_paired_layers = 3
             n_out_unpaired_layers = 0
@@ -40,6 +41,23 @@ class LinearFold2D(AbstractFold):
             'score_internal_asymmetry': LengthLayer(29),
             'score_helix_length': LengthLayer(31)
         })
+
+        if 'additional_params' in kwargs and kwargs['additional_params']:
+            self.fc_additional = nn.ParameterDict({
+                'score_multi_base': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_multi_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_external_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+            })
+        else:
+            self.fc_additional = { 
+                'score_multi_base': torch.zeros(1, dtype=torch.float32),
+                'score_multi_paired': torch.zeros(1, dtype=torch.float32),
+                'score_external_paired': torch.zeros(1, dtype=torch.float32), 
+            }
+
+
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+        return super(LinFold, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
     def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -96,9 +114,9 @@ class LinearFold2D(AbstractFold):
             score_base_multi = score_unpaired
             score_base_external = score_unpaired
 
-        if perturb > 0.:
-            for f in score_lengths.keys(): 
-                score_lengths[f] = score_lengths[f] + torch.normal(0., perturb, size=score_lengths[f].shape, device=device)
+        score_additional = self.fc_additional
+        if perturb > 0. and type(score_additional) is nn.ParameterDict:
+            score_additional = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_additional.items() }
 
         param = [ { 
             'score_basepair': score_basepair[i],
@@ -117,7 +135,10 @@ class LinearFold2D(AbstractFold):
             'score_internal_explicit': score_lengths['score_internal_explicit'],
             'score_internal_symmetry': score_lengths['score_internal_symmetry'],
             'score_internal_asymmetry': score_lengths['score_internal_asymmetry'],
-            'score_helix_length': score_lengths['score_helix_length']
+            'score_helix_length': score_lengths['score_helix_length'],
+            'score_multi_base': score_additional['score_multi_base'],
+            'score_multi_paired': score_additional['score_multi_paired'],
+            'score_external_paired': score_additional['score_external_paired'],
         } for i in range(B) ]
 
         return param

@@ -7,16 +7,21 @@ import torch
 
 from .. import interface
 from .fold import AbstractFold
-from .linearfoldv import LinearFoldV
-from .linearfold2d import LinearFold2D
+from .linfoldv import LinFoldV
+from .linfold import LinFold
 
 
-class MixedLinearFold2D(AbstractFold):
-    def __init__(self, init_param=None, beam_size: int = 100, **kwargs: dict[str, Any]) -> None:
-        super(MixedLinearFold2D, self).__init__(interface.MixedLinearFoldPositional2DWrapper(beam_size=beam_size) \
-                                                if kwargs['mix_type']=='add' else interface.MixedLinearFoldPositional2DWrapper2(beam_size=beam_size), kwargs['use_fp'])
-        self.turner = LinearFoldV(init_param=init_param)
-        self.zuker = LinearFold2D(**kwargs)
+class MixedLinFold(AbstractFold):
+    def __init__(self, init_param=None, beam_size: int = 100, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
+        super(MixedLinFold, self).__init__(interface.MixedLinFoldPositionalWrapper(beam_size=beam_size) \
+                                                if kwargs['mix_type']=='add' else interface.MixedLinFoldPositionalWrapper2(beam_size=beam_size), kwargs['use_fp'])
+        self.max_helix_length = max_helix_length
+        self.turner = LinFoldV(init_param=init_param)
+        self.zuker = LinFold(**kwargs)
+
+
+    def forward(self, seq: list[str], **kwargs):
+        return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
     def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:

@@ -13,10 +13,16 @@ from .zuker_bl import ZukerFoldBL
 from .rnafold import RNAFold
 
 class MixedFoldBL(AbstractFold):
-    def __init__(self, init_param=None, bl_size: int = 4, **kwargs: dict[str, Any]) -> None:
+    def __init__(self, init_param=None, bl_size: int = 4, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
         super(MixedFoldBL, self).__init__(interface.ZukerMixedBLWrapper(), kwargs['use_fp'])
+        self.max_helix_length = max_helix_length
         self.turner = RNAFold(init_param=init_param)
         self.positional = ZukerFoldBL(bl_size=bl_size, **kwargs)
+
+
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+        return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
+
 
     def make_param(self, seq: list[str]) -> list[dict[str, dict[str, Any]]]:
         ts = self.turner.make_param(seq)

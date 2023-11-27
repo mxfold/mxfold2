@@ -12,8 +12,10 @@ from .layers import LengthLayer, NeuralNet1D
 from .positional import PositionalScore
 
 class ZukerFoldBL(AbstractFold):
-    def __init__(self, bl_size: int = 4, **kwargs: dict[str, Any]):
+    def __init__(self, bl_size: int = 4, max_helix_length: int = 30, **kwargs: dict[str, Any]):
         super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper(), kwargs['use_fp'])
+
+        self.max_helix_length = max_helix_length
         bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
         self.bilinears = nn.ModuleDict({
             'helix_stacking': bilinears[0],
@@ -36,6 +38,10 @@ class ZukerFoldBL(AbstractFold):
             'score_helix_length': LengthLayer(31)
         })
         self.net = NeuralNet1D(n_out=bl_size, **kwargs)
+
+
+    def forward(self, seq: list[str], **kwargs: dict[str, Any]):
+        return super(ZukerFoldBL, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
     def make_param(self, seq: list[str]):

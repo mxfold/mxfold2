@@ -164,3 +164,4 @@ experiments
 .DS_Store
 poetry.lock
 models
+.tool-versions

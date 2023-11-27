@@ -24,8 +24,6 @@ def main():
         if args.param == '':
             sys.argv.insert(2, '@'+default_conf)
             args = parser.parse_args()
-        elif args.param == 'turner2004':
-            args.param = ''
 
     conf = list(filter(lambda x: x[0]=='@', sys.argv))
     conf = None if len(conf)==0 else conf[-1][1:]

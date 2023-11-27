@@ -15,15 +15,27 @@ class Zuker : public Fold
         enum TBType
         {
 #ifdef HELIX_LENGTH
-            N_HAIRPIN_LOOP, N_INTERNAL_LOOP, N_MULTI_LOOP,
-            E_HELIX, E_TERMINAL, 
-            C_TERMINAL, C_HELIX, C_HELIX_E,
+            N_HAIRPIN_LOOP,  // N -> ( ... )          ; hairpin loop
+            N_INTERNAL_LOOP, // N -> ( ... C ... )    ; single loop
+            N_MULTI_LOOP,    // N -> ( M M1 )         ; multi loop
+            E_HELIX,         // E -> ( E )            ; extended helix longer than max_helix_length
+            E_TERMINAL,      // E -> N                ; terminal of extended helix
+            C_TERMINAL,      // C -> N                ; isolated base-pair 
+            C_HELIX,         // C -> ((( N )))        ; helix (< max_helix_length)
+            C_HELIX_E,       // C -> ((( E )))        ; helix (= max_helix_length)
 #else
-            C_HAIRPIN_LOOP, C_INTERNAL_LOOP, C_MULTI_LOOP,
+            C_HAIRPIN_LOOP,  // C -> ( ... )          ; hairpin loop
+            C_INTERNAL_LOOP, // C -> ( ... C ... )    ; single loop 
+            C_MULTI_LOOP,    // C -> ( M M1 )         ; multi loop
 #endif
-            M_PAIRED, M_BIFURCATION, M_UNPAIRED,
-            M1_PAIRED, M1_UNPAIRED,
-            F_START, F_UNPAIRED, F_BIFURCATION
+            M_PAIRED,        // M -> ... C            ; multi loop candidate
+            M_BIFURCATION,   // M -> M C              ; add loop to multi loop candidate
+            M_UNPAIRED,      // M -> M .              ; extend multi loop candidate
+            M1_PAIRED,       // M1 -> C               ; right-most multi loop candidate
+            M1_UNPAIRED,     // M1 -> M1 .            ; extend right-most multi loop candidate
+            F_START,         // F -> empty            ; start external loop
+            F_UNPAIRED,      // F -> . F              ; extend external loop
+            F_BIFURCATION    // F -> C F              ; add loop to external loop
         };
         using TB = std::tuple<TBType, std::variant<u_int32_t, std::pair<u_int8_t, u_int8_t>>>;
 
@@ -34,7 +46,7 @@ class Zuker : public Fold
         auto traceback_viterbi(const std::string& seq, const Options& opt = Options()) -> std::pair<typename P::ScoreType, std::vector<u_int32_t>>;
         auto compute_inside(const std::string& seq, const Options& opt = Options()) -> ScoreType;
         void compute_outside(const std::string& seq, const Options& opt = Options());
-        auto compute_basepairing_probabilities(const std::string& seq, const Options& opt = Options()) -> std::vector<std::vector<float>>;
+        auto compute_basepairing_probabilities(const std::string& seq, const Options& opt = Options()) -> std::vector<std::vector<std::pair<u_int32_t, float>>>;
         const P& param_model() const { return *param_; }
 
     private:

@@ -5,6 +5,7 @@ import os
 import random
 import time
 from argparse import Namespace
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -16,26 +17,13 @@ import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.swa_utils import SWALR, AveragedModel
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
 from . import interface
-from .dataset import BPseqDataset, FastaDataset
+from .dataset import BPseqDataset, FastaDataset, ShapeDataset
 from .fold.fold import AbstractFold
-from .fold.linearfold import LinearFold
-from .fold.linearfold2d import LinearFold2D
-from .fold.linearfoldv import LinearFoldV
-from .fold.mix import MixedFold
-from .fold.mix1d import MixedFold1D
-from .fold.mix_bl import MixedFoldBL
-from .fold.mix_linearfold import MixedLinearFold
-from .fold.mix_linearfold1d import MixedLinearFold1D
-from .fold.mix_linearfold2d import MixedLinearFold2D
-from .fold.rnafold import RNAFold
-from .fold.zuker import ZukerFold
-from .fold.zuker_bl import ZukerFoldBL
-from .loss import (FenchelYoungLoss, FenchelYoungLossWithTurner,
-                   StructuredLoss, StructuredLossWithTurner)
+from .common import Common
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -43,50 +31,55 @@ except ImportError:
     pass
 
 
-class Train:
+class Train(Common):
     step: int = 0
     disable_progress_bar: bool
     writer: Optional[SummaryWriter]
 
     def __init__(self):
-        pass
+        super(Train, self).__init__()
+
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                loss_fn: nn.Module | dict[str, nn.Module], 
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                loss_weight = defaultdict(lambda: 1.),
                 clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
         model.train()
+        if not isinstance(loss_fn, dict):
+            loss_fn = {'BPSEQ': loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in data_loader:
-                assert('BPSEQ' in pairs)
+            for fnames, seqs, vals in data_loader:
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
-                optimizer.zero_grad()
-                loss = torch.sum(loss_fn(seqs, pairs['BPSEQ'], fname=fnames))
-                # if float(loss.item()) < 0.:
-                #     next
-                loss_total += loss.item()
-                num += n_batch
-                loss.backward()
-                # if self.verbose:
-                #     for n, p in model.named_parameters():
-                #         print(n, torch.min(p).item(), torch.max(p).item(), 
-                #             torch.min(cast(torch.Tensor, p.grad)).item(), 
-                #             torch.max(cast(torch.Tensor, p.grad)).item())
-                if clip_grad_norm > 0.0:
-                    nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
-                elif clip_grad_value > 0.0:
-                    nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
-                optimizer.step()
+                for i in range(n_batch):
+                    optimizer.zero_grad()
+                    if vals['type'][i]=='BPSEQ':
+                        loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                    elif vals['type'][i]=='SHAPE': 
+                        loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                    else:
+                        raise(RuntimeError('not implemented'))
+                    loss = loss * loss_weight[vals['type'][i]]
+                    loss_total += loss.item()
+                    running_loss += loss.item()
+                    loss.backward()
 
+                    if clip_grad_norm > 0.0:
+                        nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
+                    elif clip_grad_value > 0.0:
+                        nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+                    optimizer.step()
+
+                num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
 
-                running_loss += loss.item()
                 n_running_loss += n_batch
                 if n_running_loss >= 100 or num >= n_dataset:
                     running_loss /= n_running_loss
@@ -98,17 +91,25 @@ class Train:
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
-                loss_fn: nn.Module, data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
+                loss_fn: nn.Module | dict[str, nn.Module],
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
         model.eval()
+        if not isinstance(loss_fn, dict):
+            loss_fn = {'BPSEQ': loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in data_loader:
-                assert('BPSEQ' in pairs)
+            for fnames, seqs, vals in data_loader:
                 n_batch = len(seqs)
-                loss = loss_fn(seqs, pairs['BPSEQ'], fname=fnames)
-                loss_total += loss.item()
+                for i in range(n_batch):
+                    if vals['type'][i]=='BPSEQ':
+                        loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                    elif vals['type'][i]=='SHAPE': 
+                        loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                    else:
+                        raise(RuntimeError('not implemented'))
+                    loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
@@ -121,7 +122,9 @@ class Train:
 
     def save_checkpoint(self, outdir: str, epoch: int, 
                         model: AbstractFold | AveragedModel, 
-                        optimizer: optim.Optimizer, scheduler) -> None:
+                        optimizer: optim.Optimizer, 
+                        scheduler,
+                        shape_model: Optional[list[nn.Module]] = None) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         checkpoint = {
             'epoch': epoch,
@@ -129,156 +132,117 @@ class Train:
             'optimizer_state_dict': optimizer.state_dict() }
         if scheduler is not None:
             checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+        if shape_model is not None:
+            checkpoint['shape_model_state_dict'] = [ sm.state_dict() for sm in shape_model ]
         torch.save(checkpoint, filename)
 
 
-    def resume_checkpoint(self, filename: str, model: AbstractFold, optimizer: optim.Optimizer, scheduler) -> int:
+    def resume_checkpoint(self, filename: str, 
+                        model: AbstractFold, 
+                        optimizer: optim.Optimizer, 
+                        scheduler,
+                        shape_model: Optional[list[nn.Module]]) -> int:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if scheduler is not None:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if shape_model is not None:
+            for i, sm in enumerate(shape_model):
+                sm.load_state_dict(checkpoint['shape_model_state_dict'][i])
         return epoch
 
 
-    def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
-        if args.model == 'Turner':
-            return RNAFold(), {}
+    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
+                        shape_model: Optional[list[nn.Module]] = None) -> optim.Optimizer:
+        # if hasattr(model, 'zuker') and hasattr(model, 'turner'):
+        #     optim_params = [
+        #         {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+        #         {'params': model.turner.parameters(), 'lr': lr*10, 'weight_decay': l2_weight/10},
+        #     ]
+        # else:
+        #     optim_params = [
+        #         {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+        #     ]
+        optim_params = [
+            {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
+        ]
+        if shape_model is not None:
+            for sm in shape_model:
+                optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
 
-        if args.model == 'LinearFoldV':
-            return LinearFoldV(), {}
-
-        config = {
-            'max_helix_length': args.max_helix_length,
-            'embed_size' : args.embed_size,
-            'use_fp': args.use_fp,
-            'fp_radius': args.fp_radius,
-            'fp_bits': args.fp_bits,
-            'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'filter_size': args.filter_size if args.filter_size is not None else (5,),
-            'pool_size': args.pool_size if args.pool_size is not None else (1,),
-            'dilation': args.dilation, 
-            'num_lstm_layers': args.num_lstm_layers, 
-            'num_lstm_units': args.num_lstm_units,
-            'num_transformer_layers': args.num_transformer_layers,
-            'num_transformer_hidden_units': args.num_transformer_hidden_units,
-            'num_transformer_att': args.num_transformer_att,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
-            'num_paired_filters': args.num_paired_filters,
-            'paired_filter_size': args.paired_filter_size,
-            'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,
-            'num_att': args.num_att,
-            'pair_join': args.pair_join,
-            'no_split_lr': args.no_split_lr,
-            'bl_size': args.bl_size,
-            'paired_opt': args.paired_opt,
-            'mix_type': args.mix_type,
-        }
-
-        if args.model == 'Zuker':
-            model = ZukerFold(model_type='M', **config)
-
-        elif args.model == 'ZukerC':
-            model = ZukerFold(model_type='C', **config)
-
-        elif args.model == 'ZukerL':
-            model = ZukerFold(model_type="L", **config)
-
-        elif args.model == 'ZukerS':
-            model = ZukerFold(model_type="S", **config)
-
-        elif args.model == 'ZukerFold':
-            model = ZukerFold(model_type='4', **config)
-
-        elif args.model == 'Mix':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixC':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
-
-        elif args.model == 'Mix1D':
-            from . import param_turner2004
-            model = MixedFold1D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedZukerFold':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, model_type='4', **config)
-
-        elif args.model == 'ZukerBL':
-            model = ZukerFoldBL(**config)
-
-        elif args.model == 'MixedBL':
-            from . import param_turner2004
-            model = MixedFoldBL(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold':
-            model = LinearFold(**config)
-
-        elif args.model == 'MixedLinearFold':
-            from . import param_turner2004
-            model = MixedLinearFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'LinearFold2D':
-            model = LinearFold2D(**config)
-
-        elif args.model == 'MixedLinearFold2D':
-            from . import param_turner2004
-            model = MixedLinearFold2D(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixedLinearFold1D':
-            from . import param_turner2004
-            model = MixedLinearFold1D(init_param=param_turner2004, **config)
-
-        else:
-            raise(RuntimeError('not implemented'))
-
-        return model, config
-
-
-    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float) -> optim.Optimizer:
         if optimizer == 'Adam':
-            return optim.Adam(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
+            return optim.Adam(optim_params, amsgrad=False)
         elif optimizer =='AdamW':
-            return optim.AdamW(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
+            return optim.AdamW(optim_params, amsgrad=False)
         elif optimizer == 'RMSprop':
-            return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.RMSprop(optim_params)
         elif optimizer == 'SGD':
-            return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
-            #return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.SGD(optim_params, nesterov=True, momentum=0.9)
+            #return optim.SGD(optim_params)
         elif optimizer == 'ASGD':
-            return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return optim.ASGD(optim_params)
         elif optimizer == 'AdaBelief':
-            return po.AdaBelief(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return po.AdaBelief(optim_params)
         elif optimizer == 'Lion':
-            return po.Lion(model.parameters(), lr=lr, weight_decay=l2_weight)
+            return po.Lion(optim_params)
         else:
             raise(RuntimeError('not implemented'))
 
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
-        if loss_func == 'hinge':
-            return StructuredLoss(model, 
-                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
-                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
-        if loss_func == 'hinge_mix':
-            return StructuredLossWithTurner(model,
+        if loss_func == 'hinge' or loss_func == 'hinge_mix':
+            from .loss.structured_loss import StructuredLoss
+            return StructuredLoss(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
-        if loss_func == 'fy':
-            return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight)
 
-        if loss_func == 'fy_mix':
-            return FenchelYoungLossWithTurner(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+        if loss_func == 'fy' or loss_func == 'fy_mix':
+            from .loss.fy_loss import FenchelYoungLoss
+            return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                                                 sl_weight=args.score_loss_weight)
 
+        if loss_func == 'f1':
+            from .loss.f1_loss import F1Loss
+            return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight)
+
         else:
-            raise(RuntimeError('not implemented'))
+            raise(ValueError(f'not implemented: {loss_func}'))
+
+
+    def build_shape_model(self, args: Namespace) -> nn.Module:
+        if args.shape_model == 'Wu':
+            from .fold.shape_layers import Wu
+            return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+        elif args.shape_model == 'Foo':
+            from .fold.shape_layers import Foo
+            return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+        else:
+            raise(ValueError(f'not implemented: {args.shape_model}'))
+
+
+    def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
+                                shape_model: Optional[nn.Module] = None) -> nn.Module:
+        if loss_func == 'shape_nll':
+            from .loss.shape_nll_loss import ShapeNLLLoss
+            return ShapeNLLLoss(model=model,
+                            shape_model=shape_model,
+                            perturb=args.shape_perturb, nu=args.shape_nu, 
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=0.)
+
+        elif loss_func == 'shape_fy':
+            from .loss.shape_fy_loss import ShapeFenchelYoungLoss
+            return ShapeFenchelYoungLoss(model,
+                            perturb=args.shape_perturb, 
+                            shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight)
+        else:
+            raise(ValueError(f'not implemented: {loss_func}'))
 
 
     def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
@@ -295,13 +259,13 @@ class Train:
         with open(file, 'w') as f:
             for k, v in config.items():
                 k = '--' + k.replace('_', '-')
-                if type(v) is bool: # pylint: disable=unidiomatic-typecheck
+                if isinstance(v, bool):
                     if v:
                         f.write('{}\n'.format(k))
                 elif isinstance(v, list) or isinstance(v, tuple):
                     for vv in v:
                         f.write('{}\n{}\n'.format(k, vv))
-                else:
+                elif v is not None:
                     f.write('{}\n{}\n'.format(k, v))
 
 
@@ -314,6 +278,10 @@ class Train:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)
+        if args.shape is not None:
+            shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
+            train_dataset = ConcatDataset([train_dataset] + shape_dataset)
+
         train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
@@ -328,25 +296,40 @@ class Train:
             torch.backends.cudnn.benchmark = False
 
         model, config = self.build_model(args)
-        config.update({ 'model': args.model, 'param': args.param })
+        config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
+
+        shape_model = None 
+        if args.shape is not None:
+            shape_model = [ self.build_shape_model(args) for _ in args.shape ]
         
         if args.init_param != '':
             init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:
                 init_param = Path(conf) / init_param
             p = torch.load(init_param)
+            if shape_model is not None and isinstance(p, dict) and 'shape_model_state_dict' in p:
+                for i, sm in enumerate(shape_model):
+                    sm.load_state_dict(p['shape_model_state_dict'][i])
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             model.load_state_dict(p)
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
+            if shape_model is not None:
+                for sm in shape_model:
+                    sm.to(torch.device("cuda", args.gpu))
 
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
-        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight)
-        loss_fn = self.build_loss_function(args.loss_func, model, args)
+        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
+
+        loss_fn = {
+            'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
+            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model) 
+        }
+        loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         checkpoint_epoch = 0
@@ -366,7 +349,7 @@ class Train:
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
-                       clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
+                        loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
             if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
@@ -378,7 +361,7 @@ class Train:
             if test_loader is not None:
                 self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader)
             if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler)
+                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model)
 
         if args.param is not None:
             torch.save((swa_model or model).state_dict(), args.param)
@@ -406,6 +389,11 @@ class Train:
                             help='output file name of trained parameters')
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
+        subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
+        # subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+        #                     help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        # subparser.add_argument('--shape-slope', type=float, default=2.6, 
+        #                     help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
@@ -423,31 +411,15 @@ class Train:
         subparser.add_argument('--loglevel', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
 
-        gparser = subparser.add_argument_group("Optimizer setting")
+        cls.add_fold_args(subparser)
+
+        gparser = subparser.add_argument_group("Setting for optimizer")
         gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD', 'AdaBelief', 'Lion'), default='AdamW')
-        gparser.add_argument('--l1-weight', type=float, default=0.,
-                            help='the weight for L1 regularization (default: 0)')
-        gparser.add_argument('--l2-weight', type=float, default=0.,
-                            help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--score-loss-weight', type=float, default=1.,
-                            help='the weight for score loss for {hinge,fy}_mix loss (default: 1)')
-        gparser.add_argument('--perturb', type=float, default=0.1,
-                            help='standard deviation of perturbation for fy, fy_mix loss (default: 0.1)')
         gparser.add_argument('--lr', type=float, default=0.001,
                             help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix'), default='hinge',
-                            help="loss fuction ('hinge', 'hinge_mix', 'fy', 'fy_mix') ")
-        gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
-                            help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
-        gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
-                            help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
-        gparser.add_argument('--loss-pos-unpaired', type=float, default=0,
-                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
-                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--clip-grad-value', type=float, default=0,
+        gparser.add_argument('--clip-grad-value', type=float, default=0.,
                             help='gradient clipping by values (default=0, no clipping)')
-        gparser.add_argument('--clip-grad-norm', type=float, default=0,
+        gparser.add_argument('--clip-grad-norm', type=float, default=0.,
                             help='gradient clipping by norm (default=0, no clipping)')
         gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
                             help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
@@ -462,55 +434,42 @@ class Train:
                             help="SWA anneal strategy ('linear', 'cos')")
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
 
-        gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D'), default='Turner', 
-                        help="Folding model ('Turner', 'ZukerC', 'ZukerFold', 'MixC', 'MixedZukerFold', 'LinearFoldV', 'LinearFold2D', 'MixedLinearFold2D')")
-        gparser.add_argument('--max-helix-length', type=int, default=30, 
-                        help='the maximum length of helices (default: 30)')
-        gparser.add_argument('--embed-size', type=int, default=0,
-                        help='the dimention of embedding (default: 0 == onehot)')
-        gparser.add_argument('--use-fp', default=False, action='store_true',
-                        help='use ECFP of nucleosides for modifications')
-        gparser.add_argument('--fp-radius', type=int, default=2,
-                        help='specify the radius of ECFP')
-        gparser.add_argument('--fp-bits', type=int, default=1024,
-                        help='specify the number of bits of ECFP')
-        gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--filter-size', type=int, action='append',
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN (default: 1)')
-        gparser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution (default: 0)')
-        gparser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers (default: 0)')
-        gparser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units (default: 0)')
-        gparser.add_argument('--num-transformer-layers', type=int, default=0,
-                        help='the number of the transformer layers (default: 0)')
-        gparser.add_argument('--num-transformer-hidden-units', type=int, default=2048,
-                        help='the number of the hidden units of each transformer layer (default: 2048)')
-        gparser.add_argument('--num-transformer-att', type=int, default=8,
-                        help='the number of the attention heads of each transformer layer (default: 8)')
-        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers (default: 32)')
-        gparser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the CNN and LSTM units (default: 0.0)')
-        gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--num-att', type=int, default=0,
-                        help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
-        gparser.add_argument('--no-split-lr', default=False, action='store_true')
-        gparser.add_argument('--bl-size', type=int, default=4,
-                        help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
-        gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='0_1_1')
-        gparser.add_argument('--mix-type', choices=('add', 'average'), default='add')
+        gparser = subparser.add_argument_group("Setting for loss function")
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
+                            help="loss fuction (default: hinge)")
+        gparser.add_argument('--l1-weight', type=float, default=0.,
+                            help='the weight for L1 regularization (default: 0)')
+        gparser.add_argument('--l2-weight', type=float, default=0.,
+                            help='the weight for L2 regularization (default: 0)')
+        gparser.add_argument('--score-loss-weight', type=float, default=0.,
+                            help='the weight for score loss for {hinge,fy} loss (default: 0)')
+        gparser.add_argument('--perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for fy loss (default: 0.1)')
+        gparser.add_argument('--nu', type=float, default=0.1,
+                            help='weight for distribution (default: 0.1)')
+        gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
+                            help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
+        gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
+                            help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0.,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
+                            help="shape model (default: Wu)")
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy'), default='shape_nll',
+                            help="loss fuction for SHAPE training data (default: shape)")
+        gparser.add_argument('--shape-perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for shape loss (default: 0.1)')
+        gparser.add_argument('--shape-nu', type=float, default=0.1,
+                            help='weight for distribution for shape loss (default: 0.1)')
+        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6.')
+        gparser.add_argument('--shape-loss-weight', type=float, default=1.,
+                            help='weight for SHAPE loss function (default=1)')
+
+        cls.add_network_args(subparser)
 
         subparser.set_defaults(func = lambda args, conf: Train().run(args, conf))

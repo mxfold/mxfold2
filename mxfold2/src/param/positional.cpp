@@ -46,6 +46,13 @@ PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
     score_helix_length_(::get_unchecked<1>(obj, "score_helix_length")),
     count_helix_length_(::get_mutable_unchecked<1>(obj, "count_helix_length")),
 
+    score_multi_base_(::get_unchecked<1>(obj, "score_multi_base")),
+    count_multi_base_(::get_mutable_unchecked<1>(obj, "count_multi_base")),
+    score_multi_paired_(::get_unchecked<1>(obj, "score_multi_paired")),
+    count_multi_paired_(::get_mutable_unchecked<1>(obj, "count_multi_paired")),
+    score_external_paired_(::get_unchecked<1>(obj, "score_external_paired")),
+    count_external_paired_(::get_mutable_unchecked<1>(obj, "count_external_paired")),
+
     MAX_HAIRPIN_LENGTH(score_hairpin_length_.shape(0)-1),
     MAX_BULGE_LENGTH(score_bulge_length_.shape(0)-1),
     MAX_INTERNAL_LENGTH(score_internal_length_.shape(0)-1),
@@ -108,7 +115,7 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     }
     else if (ls==0) // bulge
     {
-        auto e = score_bulge_length_[std::min<u_int16_t>(ll, MAX_BULGE_LENGTH)];
+        auto e = score_bulge_length_[std::min<u_int32_t>(ll, MAX_BULGE_LENGTH)];
         e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
         e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
         e += score_basepair_(i, j);
@@ -212,7 +219,7 @@ auto
 PositionalNearestNeighbor::
 score_multi_loop(size_t i, size_t j) const -> ScoreType
 {
-    return score_mismatch_multi_(i, j) + score_basepair_(i, j);
+    return score_mismatch_multi_(i, j) + score_multi_base_[0] + score_multi_paired_[0] + score_basepair_(i, j);
 }
 
 void
@@ -220,6 +227,8 @@ PositionalNearestNeighbor::
 count_multi_loop(size_t i, size_t j, ScoreType v)
 {
     count_mismatch_multi_(i, j) += v;
+    count_multi_base_[0] += v;
+    count_multi_paired_[0] += v;
     count_basepair_(i, j) += v;
 }
 
@@ -227,7 +236,7 @@ auto
 PositionalNearestNeighbor::
 score_multi_paired(size_t i, size_t j) const -> ScoreType
 {
-    return score_mismatch_multi_(j, i);
+    return score_mismatch_multi_(j, i) + score_multi_paired_[0];
 }
 
 void
@@ -235,6 +244,7 @@ PositionalNearestNeighbor::
 count_multi_paired(size_t i, size_t j, ScoreType v)
 {
     count_mismatch_multi_(j, i) += v;
+    count_multi_paired_[0] += v;
 }
 
 auto
@@ -255,7 +265,7 @@ auto
 PositionalNearestNeighbor::
 score_external_paired(size_t i, size_t j) const -> ScoreType
 {
-    return score_mismatch_external_(j, i);
+    return score_mismatch_external_(j, i) + score_external_paired_[0];
 }
 
 void
@@ -263,6 +273,7 @@ PositionalNearestNeighbor::
 count_external_paired(size_t i, size_t j, ScoreType v)
 {
     count_mismatch_external_(j, i) += v;
+    count_external_paired_[0] += v;
 }
 
 auto

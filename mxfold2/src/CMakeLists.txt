@@ -14,6 +14,7 @@ find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(interface
     interface.cpp 
     param/turner.cpp param/turner.h 
+    param/contrafold.cpp param/contrafold.h 
     param/positional.cpp param/positional.h 
     param/positional_bl.cpp param/positional_bl.h 
     param/positional_1d.cpp param/positional_1d.h 
@@ -24,11 +25,14 @@ pybind11_add_module(interface
     fold/zuker.cpp fold/zuker.h 
     fold/nussinov.cpp fold/nussinov.h 
     fold/trimatrix.h
-    fold/linearfold/LinearFold.cpp 
-    fold/linearfold/LinearFold.h
+    fold/linfold.cpp fold/linfold.h 
     )
 target_compile_features(interface PUBLIC cxx_std_17)
-target_link_libraries(interface PRIVATE OpenMP::OpenMP_CXX)
+if(OPENMP_FOUND)
+    target_link_libraries(interface PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+install(TARGETS interface DESTINATION ${CMAKE_SOURCE_DIR}/..)
 
 # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 # SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")

@@ -3,6 +3,7 @@
 #include <limits>
 #include <queue>
 #include <stack>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #ifdef USE_OPENMP
@@ -153,6 +154,7 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ev_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         updated |= update_max(Cv_[i][j], s, Ct_[i][j], TBType::C_HELIX_E, m);
                     }
@@ -778,6 +780,7 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ei_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         Ci_[i][j] = logsumexp(Ci_[i][j], s);
                     }
@@ -994,6 +997,7 @@ compute_outside(const std::string& seq, const Options& opts)
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Co_[i][j] + param_->score_helix(i, j, m) + lp;
                         Eo_[i+(m-1)][j-(m-1)] = logsumexp(Eo_[i+(m-1)][j-(m-1)], s);
                     }
@@ -1085,7 +1089,7 @@ compute_outside(const std::string& seq, const Options& opts)
 template < typename P, typename S >
 auto 
 Zuker<P, S>::
-compute_basepairing_probabilities(const std::string& seq, const Options& opts) -> std::vector<std::vector<float>>
+compute_basepairing_probabilities(const std::string& seq, const Options& opts) -> std::vector<std::vector<std::pair<u_int32_t, float>>>
 {
     const auto L = seq.size();
     std::vector<std::vector<float>> bpp(L+1, std::vector<float>(L+1, 0.0));
@@ -1150,14 +1154,15 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
                         lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ni_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         float p = exp(s + Co_[i][j] - log_partition_coefficient);
-                        for (auto k=2; k<m; k++)
+                        for (auto k=2; k<=m; k++)
                             bpp[i+(k-2)][j-(k-2)] += p;
                     }
                     if (m>opts.max_helix && i+(m-1)<j-(m-1) && allow_paired[i+(m-1)][j-(m-1)]) // long helix (max_helix+1~)
                     {
+                        lp += opts.additional_paired_score(i+(m-2), j-(m-2));
                         auto s = Ei_[i+(m-1)][j-(m-1)] + param_->score_helix(i, j, m) + lp;
                         float p = exp(s + Co_[i][j] - log_partition_coefficient);
-                        for (auto k=2; k<m; k++)
+                        for (auto k=2; k<=m; k++)
                             bpp[i+(k-2)][j-(k-2)] += p;
                     }
                 }
@@ -1197,7 +1202,17 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
         }
     }
 
-    return bpp;
+    std::vector<std::vector<std::pair<u_int32_t, float>>> bpp2(L+1);
+    for (auto i=1; i!=bpp.size(); ++i)
+    {
+        for (auto j=1; j!=bpp[i].size(); ++j)
+        {
+            auto p = bpp[i][j];
+            if (p>=0.01) bpp2[i].emplace_back(j, std::min(p, 1.0f));
+        }
+        std::sort(std::begin(bpp2[i]), std::end(bpp2[i]));
+    }
+    return bpp2;
 }
 
 // instantiation
@@ -1205,6 +1220,7 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
 #include "../param/positional.h"
 #include "../param/mix.h"
 #include "../param/positional_bl.h"
+#include "../param/contrafold.h"
 
 template class Zuker<TurnerNearestNeighbor>;
 template class Zuker<PositionalNearestNeighbor>;
@@ -1213,3 +1229,6 @@ template class Zuker<MixedNearestNeighbor2>;
 template class Zuker<PositionalNearestNeighborBL>;
 template class Zuker<MixedNearestNeighborBL>;
 template class Zuker<MixedNearestNeighbor1D>;
+template class Zuker<CONTRAfoldNearestNeighbor>;
+template class Zuker<CFMixedNearestNeighbor>;
+template class Zuker<CFMixedNearestNeighbor2>;

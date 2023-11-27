@@ -4,7 +4,6 @@ from typing import Any, Optional, cast
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .. import interface
 from .fold import AbstractFold
@@ -12,10 +11,11 @@ from .layers import LengthLayer, NeuralNet
 
 
 class ZukerFold(AbstractFold):
-    def __init__(self, model_type: str = "M", max_helix_length: int = 30, **kwargs) -> None:
+    def __init__(self, max_helix_length: int = 30, **kwargs) -> None:
         super(ZukerFold, self).__init__(interface.ZukerPositionalWrapper(), kwargs['use_fp'])
 
-        exclude_diag = True
+        exclude_diag = True # default
+        model_type = 'C' # default
         if model_type == "S":
             n_out_paired_layers = 1
             n_out_unpaired_layers = 1
@@ -54,6 +54,18 @@ class ZukerFold(AbstractFold):
             'score_helix_length': LengthLayer(31)
         })
 
+        if 'additional_params' in kwargs and kwargs['additional_params']:
+            self.fc_additional = nn.ParameterDict({
+                'score_multi_base': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_multi_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+                'score_external_paired': nn.Parameter(torch.zeros(1, dtype=torch.float32)),
+            })
+        else:
+            self.fc_additional = { 
+                'score_multi_base': torch.zeros(1, dtype=torch.float32),
+                'score_multi_paired': torch.zeros(1, dtype=torch.float32),
+                'score_external_paired': torch.zeros(1, dtype=torch.float32), 
+            }
 
     def forward(self, seq: list[str], **kwargs: dict[str, Any]):
         return super(ZukerFold, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
@@ -159,8 +171,11 @@ class ZukerFold(AbstractFold):
             raise(RuntimeError("not implemented"))
 
         if perturb > 0.:
-            for f in score_lengths.keys(): 
-                score_lengths[f] = score_lengths[f] + torch.normal(0., perturb, size=score_lengths[f].shape, device=device)
+            score_lengths = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_lengths.items() }
+
+        score_additional = self.fc_additional
+        if perturb > 0. and type(score_additional) is nn.ParameterDict:
+            score_additional = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_additional.items() }
 
         param = [ { 
             'score_basepair': score_basepair[i],
@@ -179,7 +194,10 @@ class ZukerFold(AbstractFold):
             'score_internal_explicit': score_lengths['score_internal_explicit'],
             'score_internal_symmetry': score_lengths['score_internal_symmetry'],
             'score_internal_asymmetry': score_lengths['score_internal_asymmetry'],
-            'score_helix_length': score_lengths['score_helix_length']
+            'score_helix_length': score_lengths['score_helix_length'],
+            'score_multi_base': score_additional['score_multi_base'],
+            'score_multi_paired': score_additional['score_multi_paired'],
+            'score_external_paired': score_additional['score_external_paired'],
         } for i in range(B) ]
 
         return param
