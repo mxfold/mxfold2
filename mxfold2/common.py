@@ -50,6 +50,9 @@ class Common:
         config = {
             'max_helix_length': args.max_helix_length,
             'embed_size' : args.embed_size,
+            'use_fp': args.use_fp,
+            'fp_radius': args.fp_radius,
+            'fp_bits': args.fp_bits,
             'num_filters': args.num_filters if args.num_filters is not None else (96,),
             'filter_size': args.filter_size if args.filter_size is not None else (5,),
             'pool_size': args.pool_size if args.pool_size is not None else (1,),

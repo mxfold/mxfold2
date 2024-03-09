@@ -55,8 +55,8 @@ class Wu(nn.Module):
             valid = targets[i] > -1 # to ignore missing values (-999)
             t = targets[i][valid].clip(min=1e-2, max=3.)
             p = paired[i][valid]
-            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
-                            + self.unpaired_dist.log_prob(t) * (1-p))
+            nll_valids = self.paired_dist.log_prob(t) * p + self.unpaired_dist.log_prob(t) * (1-p)
+            nll = -torch.mean(nll_valids[nll_valids > 0.])
             nlls.append(nll)
         return torch.stack(nlls)
 
@@ -87,7 +87,7 @@ class Foo(nn.Module):
             valid = targets[i] > -1 # to ignore missing values (-999)
             t = targets[i][valid].clip(min=1e-2, max=3.)
             p = paired[i][valid]
-            nll = -torch.mean(self.paired_dist.log_prob(t) * p 
-                            + self.unpaired_dist.log_prob(t) * (1-p))
+            nll_valids = self.paired_dist.log_prob(t) * p + self.unpaired_dist.log_prob(t) * (1-p)
+            nll = -torch.mean(nll_valids[nll_valids < 0.])
             nlls.append(nll)
         return torch.stack(nlls)

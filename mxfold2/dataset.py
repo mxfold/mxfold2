@@ -5,6 +5,7 @@ from typing import Generator, Any
 
 import torch
 from torch.utils.data import Dataset
+import pandas as pd
 
 
 class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
@@ -104,3 +105,26 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         
         seq = ''.join(s)
         return (filename, seq, {'type': 'SHAPE', 'target': torch.tensor(p), 'dataset_id': dataset_id})
+
+
+class RibonanzaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
+    def __init__(self, csv_file: str) -> None:
+        super(Dataset, self).__init__()
+        self.csv_file = csv_file
+        self.df = pd.read_csv(csv_file)
+        ex_type = self.df['experiment_type'].unique()
+        self.dataset_id = { et: i for i, et in enumerate(ex_type) }
+
+    def  __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx) -> tuple[str, str, dict[str, torch.Tensor]]:
+        start_react = self.df.columns.get_loc('reactivity_0001')
+        df_i = self.df.iloc[idx]
+        seq_id = df_i['sequence_id']
+        seq =  df_i['sequence']
+        df_i = df_i.fillna(-999)
+        react = torch.full((len(seq)+1,), -999, dtype=torch.float32)
+        react[1:] = torch.Tensor(df_i.iloc[start_react:start_react+len(seq)].values.astype(float))
+        return (f"{self.csv_file}:{seq_id}", seq, 
+                {'type': 'SHAPE', 'target': react, 'dataset_id': self.dataset_id[df_i['experiment_type']]})

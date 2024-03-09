@@ -38,11 +38,14 @@ class ShapeFenchelYoungLoss(nn.Module):
         pred_s: list[str]
         #pred_model = self.model.duplicate()
         pred, pred_s, _, _, param_without_perturb = self.model(seq, return_param=True, perturb=self.perturb)
-        ref: torch.Tensor
-        ref_s: list[str]
+
         #ref_model = self.model.duplicate()
         pseudoenergy = [ self.calc_pseudoenergy(r) for r in targets ]
-        ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
+        with torch.no_grad():
+            _, _, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
+        ref: torch.Tensor
+        ref_s: list[str]
+        ref, ref_s, _ = self.model(seq, param=param_without_perturb, constraint=ref_stru, max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         if self.sl_weight > 0.0:

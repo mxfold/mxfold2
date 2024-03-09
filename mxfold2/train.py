@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
 from . import interface
-from .dataset import BPseqDataset, FastaDataset, ShapeDataset
+from .dataset import BPseqDataset, FastaDataset, ShapeDataset, RibonanzaDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
@@ -278,8 +278,14 @@ class Train(Common):
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
         train_dataset = BPseqDataset(args.input)
+        n_dataset_id = 0
+        if args.ribonanza is not None:
+            ribonanza_dataset = RibonanzaDataset(args.ribonanza)
+            n_dataset_id = len(ribonanza_dataset.dataset_id)
+            train_dataset = ConcatDataset([train_dataset, ribonanza_dataset])
         if args.shape is not None:
-            shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
+            shape_dataset = [ ShapeDataset(s, i+n_dataset_id) for i, s in enumerate(args.shape) ]
+            n_dataset_id += len(shape_dataset)
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
 
         train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
@@ -299,8 +305,8 @@ class Train(Common):
         config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
 
         shape_model = None 
-        if args.shape is not None:
-            shape_model = [ self.build_shape_model(args) for _ in args.shape ]
+        if args.shape is not None or args.ribonanza is not None:
+            shape_model = [ self.build_shape_model(args) for _ in range(n_dataset_id) ]
         
         if args.init_param != '':
             init_param = Path(args.init_param)
@@ -360,7 +366,7 @@ class Train(Common):
 
             if test_loader is not None:
                 self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader)
-            if args.log_dir is not None:
+            if args.log_dir is not None and (epoch % args.save_checkpoint == 0 or epoch == args.epochs):
                 self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model)
 
         if args.param is not None:
@@ -389,17 +395,18 @@ class Train(Common):
                             help='output file name of trained parameters')
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
-        subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
-        # subparser.add_argument('--shape-intercept', type=float, default=-0.8,
-        #                     help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
-        # subparser.add_argument('--shape-slope', type=float, default=2.6, 
-        #                     help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
+        subparser.add_argument('--shape', type=str, action='append', 
+                            help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--ribonanza', type=str, 
+                            help='specify the file name that includes SHAPE reactivity with Ribonanza format')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
                             help='number of epochs to train (default: 10)')
         subparser.add_argument('--log-dir', type=str, default=None,
                             help='Directory for storing logs')
+        subparser.add_argument('--save-checkpoint', type=int, default=1,
+                            help='save checkpoint every N epochs (default: 1)')
         subparser.add_argument('--resume', type=str, default=None,
                             help='Checkpoint file for resume')
         subparser.add_argument('--save-config', type=str, default=None,
