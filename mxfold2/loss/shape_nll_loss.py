@@ -83,7 +83,7 @@ class ShapeNLLLoss(nn.Module):
 
             @staticmethod
             def backward(ctx, grad_output):
-                return tuple( p-r for p, r in zip(pred_counts, ref_counts) )
+                return tuple( grad_output * (p-r) for p, r in zip(pred_counts, ref_counts) )
 
         loss = ADwrapper.apply(*pred_params)
 
