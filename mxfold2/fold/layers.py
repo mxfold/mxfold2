@@ -112,7 +112,7 @@ class Transform2D(nn.Module):
         elif self.join=='mul':
             x = x_l * x_r # (B, N, N, C)
         else:
-            raise(RuntimeError('not implemented'))
+            raise(NotImplementedError('not implemented'))
 
         return x
 

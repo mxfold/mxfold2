@@ -3,6 +3,7 @@ from __future__ import annotations
 from argparse import Namespace
 from .fold.fold import AbstractFold
 from typing import Any
+import torch.nn as nn
 
 class Common:
     def init(self):
@@ -137,9 +138,21 @@ class Common:
         #         model = MixedLinearFoldBL(init_param=param_turner2004, beam_size=args.beam_size, **config)
 
         if model is None:
-            raise(RuntimeError(f'not implemented: model={args.model}, fold={args.fold}'))
+            raise(NotImplementedError(f'not implemented: model={args.model}, fold={args.fold}'))
 
         return model, config
+
+
+    def build_shape_model(self, args: Namespace) -> nn.Module:
+        if args.shape_model == 'Wu':
+            from .fold.shape_layers import Wu
+            return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+        elif args.shape_model == 'Foo':
+            from .fold.shape_layers import Foo
+            return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+        else:
+            raise(NotImplementedError(f'not implemented: {args.shape_model}'))
+
 
     @classmethod
     def add_fold_args(cls, subparser):
@@ -202,3 +215,6 @@ class Common:
         #                 help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
         gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='symmetric')
         gparser.add_argument('--mix-type', choices=('add', 'average'), default='average')
+
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
+                            help="shape model (default: Wu)")

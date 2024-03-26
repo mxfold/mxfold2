@@ -35,7 +35,7 @@ class ZukerFold(AbstractFold):
             exclude_diag = False
             kwargs['paired_opt'] = 'symmetric'
         else:
-            raise(RuntimeError("not implemented"))
+            raise(NotImplementedError("not implemented"))
 
         self.model_type = model_type
         self.max_helix_length = max_helix_length
@@ -168,7 +168,7 @@ class ZukerFold(AbstractFold):
             score_base_external = score_unpaired
 
         else:
-            raise(RuntimeError("not implemented"))
+            raise(NotImplementedError("not implemented"))
 
         if perturb > 0.:
             score_lengths = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_lengths.items() }

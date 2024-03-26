@@ -60,7 +60,7 @@ class AbstractFold(nn.Module):
         return s
 
     def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        raise(RuntimeError('not implemented'))
+        raise(NotImplementedError('not implemented'))
 
     def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
             param_on_cpu = { k: v.to("cpu") for k, v in param.items() }

@@ -16,7 +16,7 @@ class ShapeNLLLoss(nn.Module):
     def __init__(self, model: AbstractFold, 
             shape_model: list[nn.Module],
             perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
-            sl_weight: float = 0.) -> None:
+            sl_weight: float = 0., shape_only: bool = False) -> None:
         super(ShapeNLLLoss, self).__init__()
         self.model = model
         self.shape_model = shape_model
@@ -25,6 +25,7 @@ class ShapeNLLLoss(nn.Module):
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
+        self.shape_only = shape_only
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
@@ -37,68 +38,82 @@ class ShapeNLLLoss(nn.Module):
         pred: torch.Tensor
         pred_s: list[str]
         pred_bps: list[list[int]]
-        pred, pred_s, pred_bps, param, _ = self.model(seq, return_param=True, return_count=True, perturb=self.perturb)
+        if self.shape_only:
+            with torch.no_grad():
+                pred, pred_s, pred_bps = self.model(seq, perturb=self.perturb)
 
-        pred_params, pred_counts = [], []
-        for k in sorted(param[0].keys()):
-            if k.startswith('score_'):
-                pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            elif k.startswith('count_'):
-                pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            elif isinstance(param[0][k], dict):
-                for kk in sorted(param[0][k].keys()):
-                    if kk.startswith('score_'):
-                        pred_params.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
-                    elif kk.startswith('count_'):
-                        pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+        else:
+            pred, pred_s, pred_bps, param, _ = self.model(seq, return_param=True, return_count=True, perturb=self.perturb)
+
+            pred_params, pred_counts = [], []
+            for k in sorted(param[0].keys()):
+                if k.startswith('score_'):
+                    pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+                elif k.startswith('count_'):
+                    pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+                elif isinstance(param[0][k], dict):
+                    for kk in sorted(param[0][k].keys()):
+                        if kk.startswith('score_'):
+                            pred_params.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                        elif kk.startswith('count_'):
+                            pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         paired = []
         for pred_bp in pred_bps:
             p = [ 1 if v > 0 else 0 for v in pred_bp ]
-            p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
+            p = torch.tensor(p, dtype=torch.float32, requires_grad=(not self.shape_only), device=pred.device)
             paired.append(p)
         targets = [ t.to(pred.device) for t in targets ]
         nlls = self.shape_model[dataset_id](seq, paired, targets)
-        nlls.backward()
-        grads = [ p.grad for p in paired ]
 
-        ref: torch.Tensor
-        ref_s: list[str]
-        ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True, 
-                                    pseudoenergy=[self.nu*g for g in grads])
+        if not self.shape_only:
+            nlls.backward()
+            grads = [ p.grad for p in paired ]
 
-        ref_counts = []
-        for k in sorted(param[0].keys()):
-            if k.startswith('count_'):
-                ref_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            elif isinstance(param[0][k], dict):
-                for kk in sorted(param[0][k].keys()):
-                    if kk.startswith('count_'):
-                        ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+            ref: torch.Tensor
+            ref_s: list[str]
+            ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True, 
+                                        pseudoenergy=[self.nu*g for g in grads])
 
-        class ADwrapper(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, *input):
-                return nlls
+            ref_counts = []
+            for k in sorted(param[0].keys()):
+                if k.startswith('count_'):
+                    ref_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+                elif isinstance(param[0][k], dict):
+                    for kk in sorted(param[0][k].keys()):
+                        if kk.startswith('count_'):
+                            ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
-            @staticmethod
-            def backward(ctx, grad_output):
-                return tuple( grad_output * (p-r) for p, r in zip(pred_counts, ref_counts) )
+            class ADwrapper(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, *input):
+                    return nlls
 
-        loss = ADwrapper.apply(*pred_params)
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return tuple( grad_output * (p-r) for p, r in zip(pred_counts, ref_counts) )
 
-        l = torch.tensor([len(s) for s in seq], device=pred.device)
+            loss = ADwrapper.apply(*pred_params)
+
+        else:
+            loss = nlls
+
         if self.sl_weight > 0.0:
+            l = torch.tensor([len(s) for s in seq], device=pred.device)
             with torch.no_grad():
                 ref2: torch.Tensor
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
             loss += self.sl_weight * (ref-ref2)**2 / l
 
-        logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
+        if self.shape_only:
+            logging.debug(f"Loss = {loss.item()}")
+        else:
+            logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
         logging.debug(seq)
         logging.debug(pred_s)
-        logging.debug(ref_s)
+        if not self.shape_only:
+            logging.debug(ref_s)
         if float(loss.item())> 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")

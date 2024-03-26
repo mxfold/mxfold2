@@ -91,3 +91,6 @@ class Foo(nn.Module):
             nll = -torch.mean(nll_valids[nll_valids < 0.])
             nlls.append(nll)
         return torch.stack(nlls)
+
+    def predict(self, seq: str, paired: list[int]):
+        return [ float(self.paired_dist.mean * p + self.unpaired_dist.mean * (1-p)) for p in paired[1:] ]

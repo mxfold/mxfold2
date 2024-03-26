@@ -6,16 +6,17 @@ import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Optional
+import pandas as pd
 
 import torch
-#import torch.nn as nn
+import torch.nn as nn
 #import torch.nn.functional as F
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
 from . import interface
 from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset
+from .dataset import BPseqDataset, FastaDataset, RibonanzaDataset
 from .fold.fold import AbstractFold
 from .common import Common
 
@@ -28,6 +29,7 @@ class Predict(Common):
     def predict(self, 
                 model: AbstractFold | AveragedModel,
                 data_loader: DataLoader,
+                shape_model: Optional[list[nn.Module]] = None,
                 output_bpseq: Optional[str] = None, 
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
@@ -42,6 +44,9 @@ class Predict(Common):
             shape_list.append(None)
 
         model.eval()
+        if shape_model is not None:
+            for sm in shape_model:
+                sm.eval()
         seq_processed = 0
         with torch.no_grad():
             for headers, seqs, vals in data_loader:
@@ -61,11 +66,20 @@ class Predict(Common):
                 else:
                     scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 elapsed_time = time.time() - start
-                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps):
+                for j, (header, seq, ref, sc, pred, bp, pf, bpp) in enumerate(zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps)):
+                    if shape_model is not None:
+                        p = [ 1 if v > 0 else 0 for v in bp ]
+                        if "dataset_id" in vals:
+                            shapes = [ shape_model[vals["dataset_id"][j]].predict(seq, p) ]
+                        else:
+                            shapes = [ sm.predict(seq, p) for sm in shape_model ]
                     if output_bpseq is None:
                         print('>'+header)
                         print(seq)
                         print(pred, f'({sc:.1f})')
+                        if shape_model is not None:
+                            for i, s in enumerate(zip(*shapes)):
+                                print(f"{i+1},", ", ".join(str(ss) for ss in s))
                     elif output_bpseq == "stdout":
                         print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)')
                         for i in range(1, len(bp)):
@@ -79,9 +93,17 @@ class Predict(Common):
                             for i in range(1, len(bp)):
                                 print(f'{i}\t{seq[i-1]}\t{bp[i]}', file=f)
                     if res_fn is not None:
-                        x = compare_bpseq(ref, bp)
-                        x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
-                        res_fn.write(', '.join([str(v) for v in x]) + "\n")
+                        if shape_model is not None and len(ref)>0:
+                            s = torch.tensor(shapes[0])
+                            d = torch.abs(ref[1:][ref[1:]>=0]-s[ref[1:]>=0])
+                            d2 = d**2
+                            x = [header, len(seq), elapsed_time, sc.item(), 
+                                len(d), float(torch.sum(d)/len(d)), float(torch.sum(d2)/len(d))]
+                            res_fn.write(', '.join([str(v) for v in x]) + "\n")
+                        else:
+                            x = compare_bpseq(ref, bp)
+                            x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
+                            res_fn.write(', '.join([str(v) for v in x]) + "\n")
                     if output_bpp is not None:
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
@@ -98,9 +120,12 @@ class Predict(Common):
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
-        test_dataset = FastaDataset(args.input)
-        if len(test_dataset) == 0:
-            test_dataset = BPseqDataset(args.input)
+        if args.ribonanza:
+            test_dataset = RibonanzaDataset(args.input)
+        else:
+            test_dataset = FastaDataset(args.input)
+            if len(test_dataset) == 0:
+                test_dataset = BPseqDataset(args.input)
         test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:
@@ -119,8 +144,23 @@ class Predict(Common):
                 model = AveragedModel(model)
             model.load_state_dict(p)
 
+        shape_model = None
+        if args.shape_param and args.shape_param != '':
+            param = Path(args.shape_param)
+            if not param.exists() and conf is not None:
+                param = Path(conf).parent / param
+            p = torch.load(param, map_location='cpu')
+            if isinstance(p, dict) and 'shape_model_state_dict' in p:
+                p = p['shape_model_state_dict']
+            shape_model = [ self.build_shape_model(args) for _ in range(len(p)) ]
+            for i, sm in enumerate(shape_model):
+                sm.load_state_dict(p[i])
+
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
+            if shape_model is not None:
+                for sm in shape_model:
+                    sm.to(torch.device("cuda", args.gpu))
 
         shape_list = None
         if args.shape is not None: 
@@ -132,7 +172,8 @@ class Predict(Common):
         elif args.shape_file is not None:
             shape_list = [args.shape_file]
 
-        self.predict(model=model, data_loader=test_loader, 
+        self.predict(model=model, shape_model=shape_model, 
+                    data_loader=test_loader, 
                     output_bpseq=args.bpseq, output_bpp=args.bpp,
                     result=args.result, use_constraint=args.use_constraint,
                     shape_list=shape_list,
@@ -188,6 +229,9 @@ class Predict(Common):
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
+        subparser.add_argument('--shape-param', type=str,
+                            help="predict SHAPE reactivity using the SHAPE model with this parameter set.")
+        subparser.add_argument('--ribonanza', action="store_true")
 
         cls.add_fold_args(subparser)
         cls.add_network_args(subparser)

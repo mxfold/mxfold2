@@ -123,8 +123,9 @@ class RibonanzaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         df_i = self.df.iloc[idx]
         seq_id = df_i['sequence_id']
         seq =  df_i['sequence']
-        df_i = df_i.fillna(-999)
+        df_react = df_i.iloc[start_react:start_react+len(seq)]
+        df_react = df_react.clip(0, 1).fillna(-999)
         react = torch.full((len(seq)+1,), -999, dtype=torch.float32)
-        react[1:] = torch.Tensor(df_i.iloc[start_react:start_react+len(seq)].values.astype(float))
+        react[1:] = torch.Tensor(df_react.values.astype(float))
         return (f"{self.csv_file}:{seq_id}", seq, 
                 {'type': 'SHAPE', 'target': react, 'dataset_id': self.dataset_id[df_i['experiment_type']]})

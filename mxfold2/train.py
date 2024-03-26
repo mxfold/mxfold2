@@ -64,7 +64,7 @@ class Train(Common):
                     elif vals['type'][i]=='SHAPE': 
                         loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
                     else:
-                        raise(RuntimeError('not implemented'))
+                        raise(NotImplementedError('not implemented'))
                     loss = loss * loss_weight[vals['type'][i]]
                     loss_total += loss.item()
                     running_loss += loss.item()
@@ -108,7 +108,7 @@ class Train(Common):
                     elif vals['type'][i]=='SHAPE': 
                         loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
                     else:
-                        raise(RuntimeError('not implemented'))
+                        raise(NotImplementedError('not implemented'))
                     loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
@@ -188,7 +188,7 @@ class Train(Common):
         elif optimizer == 'Lion':
             return po.Lion(optim_params)
         else:
-            raise(RuntimeError('not implemented'))
+            raise(NotImplementedError('not implemented'))
 
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
@@ -213,17 +213,6 @@ class Train(Common):
             raise(ValueError(f'not implemented: {loss_func}'))
 
 
-    def build_shape_model(self, args: Namespace) -> nn.Module:
-        if args.shape_model == 'Wu':
-            from .fold.shape_layers import Wu
-            return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
-        elif args.shape_model == 'Foo':
-            from .fold.shape_layers import Foo
-            return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
-        else:
-            raise(ValueError(f'not implemented: {args.shape_model}'))
-
-
     def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
                                 shape_model: Optional[nn.Module] = None) -> nn.Module:
         if loss_func == 'shape_nll':
@@ -232,7 +221,7 @@ class Train(Common):
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=0.)
+                            sl_weight=0., shape_only=args.shape_only_training)
 
         elif loss_func == 'shape_fy':
             from .loss.shape_fy_loss import ShapeFenchelYoungLoss
@@ -462,20 +451,19 @@ class Train(Common):
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
-                            help="shape model (default: Wu)")
         gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for shape loss (default: 0.1)')
         gparser.add_argument('--shape-nu', type=float, default=0.1,
                             help='weight for distribution for shape loss (default: 0.1)')
-        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+        gparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
-        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+        gparser.add_argument('--shape-slope', type=float, default=2.6, 
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         gparser.add_argument('--shape-loss-weight', type=float, default=1.,
                             help='weight for SHAPE loss function (default=1)')
+        gparser.add_argument('--shape-only-training', action="store_true", help="training only shape model (available for shape_nll loss)")
 
         cls.add_network_args(subparser)
 
