@@ -60,7 +60,16 @@ class ShapeNLLLoss(nn.Module):
 
         paired = []
         for pred_bp in pred_bps:
-            p = [ 1 if v > 0 else 0 for v in pred_bp ]
+            p = []
+            for i, j in enumerate(pred_bp):
+                if j==0:
+                    p.append([0, 0, 1])
+                elif i<j:
+                    p.append([1, 0, 0])
+                elif i>j:
+                    p.append([0, 1, 0])
+                else:
+                    raise RuntimeError('unreachable')
             p = torch.tensor(p, dtype=torch.float32, requires_grad=(not self.shape_only), device=pred.device)
             paired.append(p)
         targets = [ t.to(pred.device) for t in targets ]

@@ -150,6 +150,13 @@ class Common:
         elif args.shape_model == 'Foo':
             from .fold.shape_layers import Foo
             return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+        elif args.shape_model == 'CNN':
+            from .fold.shape_layers import ShapeCNN
+            return ShapeCNN(num_filters=args.shape_num_filters, 
+                            filter_size=args.shape_filter_size, 
+                            pool_size=args.shape_pool_size if args.shape_pool_size is not None else (1,),
+                            dropout_rate=args.shape_dropout_rate,
+                            fc_layers=args.shape_num_hidden_units)
         else:
             raise(NotImplementedError(f'not implemented: {args.shape_model}'))
 
@@ -216,5 +223,15 @@ class Common:
         gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='symmetric')
         gparser.add_argument('--mix-type', choices=('add', 'average'), default='average')
 
-        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo', 'CNN'), default='Wu',
                             help="shape model (default: Wu)")
+        gparser.add_argument('--shape-num-filters', type=int, action='append',
+                        help='the number of SHAPE CNN filters (default: 96)')
+        gparser.add_argument('--shape-filter-size', type=int, action='append',
+                        help='the length of each filter of SHAPE CNN (default: 5)')
+        gparser.add_argument('--shape-pool-size', type=int, action='append',
+                        help='the width of the max-pooling layer of SHAPE CNN (default: 1)')
+        gparser.add_argument('--shape-num-hidden-units', type=int, action='append',
+                        help='the number of the hidden units of SHAPE full connected layers (default: 32)')
+        gparser.add_argument('--shape-dropout-rate', type=float, default=0.0,
+                        help='dropout rate of the SHAPE CNN (default: 0.0)')

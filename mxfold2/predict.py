@@ -68,7 +68,17 @@ class Predict(Common):
                 elapsed_time = time.time() - start
                 for j, (header, seq, ref, sc, pred, bp, pf, bpp) in enumerate(zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps)):
                     if shape_model is not None:
-                        p = [ 1 if v > 0 else 0 for v in bp ]
+                        p = []
+                        for i, j in enumerate(bp):
+                            if j==0:
+                                p.append([0, 0, 1])
+                            elif i<j:
+                                p.append([1, 0, 0])
+                            elif i>j:
+                                p.append([0, 1, 0])
+                            else:
+                                raise RuntimeError('unreachable')
+                        p = torch.tensor(p, dtype=torch.float32, device=sc.device)
                         if "dataset_id" in vals:
                             shapes = [ shape_model[vals["dataset_id"][j]].predict(seq, p) ]
                         else:
@@ -95,6 +105,7 @@ class Predict(Common):
                     if res_fn is not None:
                         if shape_model is not None and len(ref)>0:
                             s = torch.tensor(shapes[0])
+                            s = s.clip(min=0.0, max=1.0)
                             d = torch.abs(ref[1:][ref[1:]>=0]-s[ref[1:]>=0])
                             d2 = d**2
                             x = [header, len(seq), elapsed_time, sc.item(), 
