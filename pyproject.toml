@@ -3,9 +3,8 @@ name = "mxfold2"
 version = "0.2.0"
 description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
 authors = [
-    { name="Kengo Sato", email="satoken@bio.titech.ac.jp" }
+    { name="Kengo Sato", email="satoken@life.isct.ac.jp" }
 ]
-repository = "https://github.com/mxfold/mxfold2"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -22,8 +21,6 @@ mxfold2 = "mxfold2.__main__:main"
 [build-system]
 requires = ["scikit-build-core", "pybind11"]
 build-backend = "scikit_build_core.build"
-#requires = ["hatchling"]
-#build-backend = "hatchling.build"
 
 [tool.uv]
 dev-dependencies = [
