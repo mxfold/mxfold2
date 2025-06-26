@@ -124,12 +124,20 @@ class Train(Common):
                         model: AbstractFold | AveragedModel, 
                         optimizer: optim.Optimizer, 
                         scheduler,
-                        shape_model: Optional[list[nn.Module]] = None) -> None:
+                        shape_model: Optional[list[nn.Module]] = None,
+                        step: Optional[int] = None) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict() }
+            'optimizer_state_dict': optimizer.state_dict(),
+            'step': step if step is not None else self.step,
+            'rng_state': {
+                'torch': torch.get_rng_state(),
+                'python': random.getstate(),
+            }}
+        if torch.cuda.is_available():
+            checkpoint['rng_state']['cuda'] = torch.cuda.get_rng_state_all()
         if scheduler is not None:
             checkpoint['scheduler_state_dict'] = scheduler.state_dict()
         if shape_model is not None:
@@ -146,9 +154,22 @@ class Train(Common):
         epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if scheduler is not None:
+        
+        # Restore step counter
+        if 'step' in checkpoint:
+            self.step = checkpoint['step']
+        
+        # Restore random states
+        if 'rng_state' in checkpoint:
+            torch.set_rng_state(checkpoint['rng_state']['torch'])
+            random.setstate(checkpoint['rng_state']['python'])
+            if 'cuda' in checkpoint['rng_state'] and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(checkpoint['rng_state']['cuda'])
+        
+        
+        if scheduler is not None and 'scheduler_state_dict' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        if shape_model is not None:
+        if shape_model is not None and 'shape_model_state_dict' in checkpoint:
             for i, sm in enumerate(shape_model):
                 sm.load_state_dict(checkpoint['shape_model_state_dict'][i])
         return epoch
@@ -282,7 +303,11 @@ class Train(Common):
             shape_dataset = [ ShapeDataset(s, i) for i, s in enumerate(args.shape) ]
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
 
-        train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True) # works well only for batch_size=1!!
+        # Create generator for reproducible shuffling
+        generator = torch.Generator()
+        if args.seed >= 0:
+            generator.manual_seed(args.seed)
+        train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, generator=generator) # works well only for batch_size=1!!
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
             test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False) # works well only for batch_size=1!!
@@ -334,7 +359,7 @@ class Train(Common):
 
         checkpoint_epoch = 0
         if args.resume is not None:
-            checkpoint_epoch = self.resume_checkpoint(args.resume, model, optimizer, scheduler)
+            checkpoint_epoch = self.resume_checkpoint(args.resume, model, optimizer, scheduler, shape_model)
         
         if args.swa:
             swa_model = AveragedModel(model)
@@ -348,6 +373,10 @@ class Train(Common):
             swa_scheduler = None
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
+            # Set random seed for this epoch to ensure reproducible shuffling
+            if args.seed >= 0:
+                epoch_seed = args.seed + epoch
+                generator.manual_seed(epoch_seed)
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
                         loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
             if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
@@ -361,7 +390,7 @@ class Train(Common):
             if test_loader is not None:
                 self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader)
             if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model)
+                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model, step=self.step)
 
         if args.param is not None:
             torch.save((swa_model or model).state_dict(), args.param)
