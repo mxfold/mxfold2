@@ -16,6 +16,8 @@ import torch.backends.cudnn
 import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
+from torch.amp.grad_scaler import GradScaler
+from torch.amp import autocast
 from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
@@ -44,7 +46,9 @@ class Train(Common):
                 loss_fn: nn.Module | dict[str, nn.Module], 
                 data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
                 loss_weight = defaultdict(lambda: 1.),
-                clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0) -> None:
+                clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0,
+                scaler: Optional[GradScaler] = None, 
+                use_amp: bool = False) -> None:
         model.train()
         if not isinstance(loss_fn, dict):
             loss_fn = {'BPSEQ': loss_fn}
@@ -59,22 +63,41 @@ class Train(Common):
                 n_batch = len(seqs)
                 for i in range(n_batch):
                     optimizer.zero_grad()
-                    if vals['type'][i]=='BPSEQ':
-                        loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
-                    elif vals['type'][i]=='SHAPE': 
-                        loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
-                    else:
-                        raise(RuntimeError('not implemented'))
-                    loss = loss * loss_weight[vals['type'][i]]
+                    
+                    # Use autocast for mixed precision if enabled
+                    with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                        if vals['type'][i]=='BPSEQ':
+                            loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                        elif vals['type'][i]=='SHAPE': 
+                            loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                        else:
+                            raise(RuntimeError('not implemented'))
+                        loss = loss * loss_weight[vals['type'][i]]
+                    
                     loss_total += loss.item()
                     running_loss += loss.item()
-                    loss.backward()
+                    
+                    # Scale loss and backward pass
+                    if scaler is not None:
+                        scaler.scale(loss).backward()
+                    else:
+                        loss.backward()
 
+                    # Gradient clipping with unscaling if using mixed precision
+                    if scaler is not None:
+                        scaler.unscale_(optimizer)
+                        
                     if clip_grad_norm > 0.0:
                         nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
                     elif clip_grad_value > 0.0:
                         nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
-                    optimizer.step()
+                    
+                    # Step the optimizer
+                    if scaler is not None:
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        optimizer.step()
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -92,7 +115,8 @@ class Train(Common):
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
                 loss_fn: nn.Module | dict[str, nn.Module],
-                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]]) -> None:
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                use_amp: bool = False) -> None:
         model.eval()
         if not isinstance(loss_fn, dict):
             loss_fn = {'BPSEQ': loss_fn}
@@ -103,12 +127,13 @@ class Train(Common):
             for fnames, seqs, vals in data_loader:
                 n_batch = len(seqs)
                 for i in range(n_batch):
-                    if vals['type'][i]=='BPSEQ':
-                        loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
-                    elif vals['type'][i]=='SHAPE': 
-                        loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
-                    else:
-                        raise(RuntimeError('not implemented'))
+                    with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                        if vals['type'][i]=='BPSEQ':
+                            loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                        elif vals['type'][i]=='SHAPE': 
+                            loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                        else:
+                            raise(RuntimeError('not implemented'))
                     loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
@@ -125,7 +150,8 @@ class Train(Common):
                         optimizer: optim.Optimizer, 
                         scheduler,
                         shape_model: Optional[list[nn.Module]] = None,
-                        step: Optional[int] = None) -> None:
+                        step: Optional[int] = None,
+                        scaler: Optional[GradScaler] = None) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
         checkpoint = {
             'epoch': epoch,
@@ -142,6 +168,8 @@ class Train(Common):
             checkpoint['scheduler_state_dict'] = scheduler.state_dict()
         if shape_model is not None:
             checkpoint['shape_model_state_dict'] = [ sm.state_dict() for sm in shape_model ]
+        if scaler is not None:
+            checkpoint['scaler_state_dict'] = scaler.state_dict()
         torch.save(checkpoint, filename)
 
 
@@ -149,7 +177,9 @@ class Train(Common):
                         model: AbstractFold, 
                         optimizer: optim.Optimizer, 
                         scheduler,
-                        shape_model: Optional[list[nn.Module]]) -> int:
+                        shape_model: Optional[list[nn.Module]],
+                        scaler: Optional[GradScaler] = None,
+                        gpu: int = -1) -> tuple[int, Optional[GradScaler]]:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -172,7 +202,16 @@ class Train(Common):
         if shape_model is not None and 'shape_model_state_dict' in checkpoint:
             for i, sm in enumerate(shape_model):
                 sm.load_state_dict(checkpoint['shape_model_state_dict'][i])
-        return epoch
+        
+        # Load GradScaler state if available
+        if 'scaler_state_dict' in checkpoint and scaler is None:
+            device = f'cuda:{gpu}' if gpu >= 0 else 'cuda'
+            scaler = GradScaler(device)
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        elif scaler is not None and 'scaler_state_dict' in checkpoint:
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            
+        return epoch, scaler
 
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
@@ -357,9 +396,21 @@ class Train(Common):
         loss_weight = { 'BPSEQ': 1.0, 'SHAPE': args.shape_loss_weight }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
+        # Initialize GradScaler for mixed precision training
+        scaler = None
+        use_amp = False
+        if hasattr(args, 'use_amp') and args.use_amp and args.gpu >= 0:
+            use_amp = True
+            scaler = GradScaler(f'cuda:{args.gpu}')
+            logging.info("Using Automatic Mixed Precision (AMP) training")
+
         checkpoint_epoch = 0
         if args.resume is not None:
-            checkpoint_epoch = self.resume_checkpoint(args.resume, model, optimizer, scheduler, shape_model)
+            checkpoint_epoch, resumed_scaler = self.resume_checkpoint(args.resume, model, optimizer, scheduler, shape_model, scaler, args.gpu)
+            if resumed_scaler is not None:
+                scaler = resumed_scaler
+                use_amp = True
+                logging.info("Resumed with Automatic Mixed Precision (AMP) training")
         
         if args.swa:
             swa_model = AveragedModel(model)
@@ -378,7 +429,8 @@ class Train(Common):
                 epoch_seed = args.seed + epoch
                 generator.manual_seed(epoch_seed)
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
-                        loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm)
+                        loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm,
+                        scaler=scaler, use_amp=use_amp)
             if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
@@ -388,9 +440,9 @@ class Train(Common):
                 logging.info(f'LR = {scheduler.get_last_lr()}')
 
             if test_loader is not None:
-                self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader)
+                self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader, use_amp=use_amp)
             if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model, step=self.step)
+                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model, step=self.step, scaler=scaler)
 
         if args.param is not None:
             torch.save((swa_model or model).state_dict(), args.param)
@@ -439,6 +491,8 @@ class Train(Common):
                             help='enable verbose outputs for debugging')
         subparser.add_argument('--loglevel', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
+        subparser.add_argument('--use-amp', action='store_true',
+                            help='use automatic mixed precision (AMP) for faster training on GPUs')
 
         cls.add_fold_args(subparser)
 

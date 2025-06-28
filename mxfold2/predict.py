@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 #import torch.nn as nn
 #import torch.nn.functional as F
+from torch.amp import autocast
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
@@ -34,7 +35,8 @@ class Predict(Common):
                 use_constraint: bool = False,
                 shape_list: Optional[list[str]] = None,
                 shape_intercept: float = 0.0,
-                shape_slope: float = 0.0) -> None:
+                shape_slope: float = 0.0,
+                use_amp: bool = False) -> None:
 
         res_fn = open(result, 'w') if result is not None else None
         shape_list = [None] * len(data_loader) if shape_list is None else shape_list
@@ -55,11 +57,14 @@ class Predict(Common):
                         if shape_file is not None else None \
                         for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
                 seq_processed += len(seqs)
-                if output_bpp is None:
-                    scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
-                    pfs = bpps = [None] * len(preds)
-                else:
-                    scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
+                
+                # Use autocast for mixed precision inference
+                with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                    if output_bpp is None:
+                        scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
+                        pfs = bpps = [None] * len(preds)
+                    else:
+                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 elapsed_time = time.time() - start
                 for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
@@ -132,11 +137,15 @@ class Predict(Common):
         elif args.shape_file is not None:
             shape_list = [args.shape_file]
 
+        # Enable mixed precision if GPU is being used and AMP is available
+        use_amp = hasattr(args, 'use_amp') and args.use_amp and args.gpu >= 0
+        
         self.predict(model=model, data_loader=test_loader, 
                     output_bpseq=args.bpseq, output_bpp=args.bpp,
                     result=args.result, use_constraint=args.use_constraint,
                     shape_list=shape_list,
-                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope)
+                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                    use_amp=use_amp)
 
 
     def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.tensor:
@@ -188,6 +197,8 @@ class Predict(Common):
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
+        subparser.add_argument('--use-amp', action='store_true',
+                            help='use automatic mixed precision (AMP) for faster inference on GPUs')
 
         cls.add_fold_args(subparser)
         cls.add_network_args(subparser)

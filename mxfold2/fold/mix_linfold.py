@@ -36,8 +36,8 @@ class MixedLinFold(AbstractFold):
 
     def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
         param_on_cpu = { 
-            'turner': {k: v.to("cpu") for k, v in param['turner'].items() },
-            'positional': {k: v.to("cpu") for k, v in param['positional'].items() }
+            'turner': {k: v.to("cpu").to(torch.float32) for k, v in param['turner'].items() },
+            'positional': {k: v.to("cpu").to(torch.float32) for k, v in param['positional'].items() }
         }
         param_on_cpu = {k: self.clear_count(v) for k, v in param_on_cpu.items()}
         return param_on_cpu

@@ -36,7 +36,7 @@ class AbstractFold(nn.Module):
         param_count = {}
         for n, p in param.items():
             if n.startswith("score_"):
-                param_count["count_"+n[6:]] = torch.zeros_like(p)
+                param_count["count_"+n[6:]] = torch.zeros_like(p, dtype=torch.float32)
         param.update(param_count)
         return param
 
@@ -54,9 +54,9 @@ class AbstractFold(nn.Module):
         raise(RuntimeError('not implemented'))
 
     def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
-            param_on_cpu = { k: v.to("cpu") for k, v in param.items() }
-            param_on_cpu = self.clear_count(param_on_cpu)
-            return param_on_cpu
+        param_on_cpu = { k: v.to("cpu").to(torch.float32) for k, v in param.items() }
+        param_on_cpu = self.clear_count(param_on_cpu)
+        return param_on_cpu
 
     def detect_device(self, param):
         return next(iter(param.values())).device
