@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
+cmake_policy(SET CMP0177 NEW)
 project(mxfold2 CXX)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -10,6 +11,7 @@ if(OPENMP_FOUND)
 endif()
 
 #add_subdirectory(pybind11)
+set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(interface
     interface.cpp 

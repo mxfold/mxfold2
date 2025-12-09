@@ -16,16 +16,22 @@ import torch.backends.cudnn
 import torch.nn as nn
 #import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim.adam import Adam
+from torch.optim.adamw import AdamW
+from torch.optim.rmsprop import RMSprop
+from torch.optim.sgd import SGD
+from torch.optim.asgd import ASGD
+from torch.optim.optimizer import Optimizer
 from torch.amp.grad_scaler import GradScaler
-from torch.amp import autocast
+from torch.amp.autocast_mode import autocast
 from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
-from . import interface
-from .dataset import BPseqDataset, FastaDataset, ShapeDataset
-from .fold.fold import AbstractFold
-from .common import Common
+from mxfold2 import interface
+from mxfold2.dataset import BPseqDataset, FastaDataset, ShapeDataset
+from mxfold2.fold.fold import AbstractFold
+from mxfold2.common import Common
 
 try:
     from torch.utils.tensorboard.writer import SummaryWriter
@@ -35,14 +41,14 @@ except ImportError:
 
 class Train(Common):
     step: int = 0
-    disable_progress_bar: bool
-    writer: Optional[SummaryWriter]
+    disable_progress_bar: bool = False
+    writer: Optional[SummaryWriter] = None
 
     def __init__(self):
         super(Train, self).__init__()
 
 
-    def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
+    def train(self, epoch: int, model: AbstractFold, optimizer: Optimizer, 
                 loss_fn: nn.Module | dict[str, nn.Module], 
                 data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
                 loss_weight = defaultdict(lambda: 1.),
@@ -147,7 +153,7 @@ class Train(Common):
 
     def save_checkpoint(self, outdir: str, epoch: int, 
                         model: AbstractFold | AveragedModel, 
-                        optimizer: optim.Optimizer, 
+                        optimizer: Optimizer, 
                         scheduler,
                         shape_model: Optional[list[nn.Module]] = None,
                         step: Optional[int] = None,
@@ -175,7 +181,7 @@ class Train(Common):
 
     def resume_checkpoint(self, filename: str, 
                         model: AbstractFold, 
-                        optimizer: optim.Optimizer, 
+                        optimizer: Optimizer, 
                         scheduler,
                         shape_model: Optional[list[nn.Module]],
                         scaler: Optional[GradScaler] = None,
@@ -215,7 +221,7 @@ class Train(Common):
 
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
-                        shape_model: Optional[list[nn.Module]] = None) -> optim.Optimizer:
+                        shape_model: Optional[list[nn.Module]] = None) -> Optimizer:
         # if hasattr(model, 'zuker') and hasattr(model, 'turner'):
         #     optim_params = [
         #         {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
@@ -233,16 +239,16 @@ class Train(Common):
                 optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
 
         if optimizer == 'Adam':
-            return optim.Adam(optim_params, amsgrad=False)
+            return Adam(optim_params, amsgrad=False)
         elif optimizer =='AdamW':
-            return optim.AdamW(optim_params, amsgrad=False)
+            return AdamW(optim_params, amsgrad=False)
         elif optimizer == 'RMSprop':
-            return optim.RMSprop(optim_params)
+            return RMSprop(optim_params)
         elif optimizer == 'SGD':
-            return optim.SGD(optim_params, nesterov=True, momentum=0.9)
+            return SGD(optim_params, nesterov=True, momentum=0.9)
             #return optim.SGD(optim_params)
         elif optimizer == 'ASGD':
-            return optim.ASGD(optim_params)
+            return ASGD(optim_params)
         elif optimizer == 'AdaBelief':
             return po.AdaBelief(optim_params)
         elif optimizer == 'Lion':
@@ -256,8 +262,7 @@ class Train(Common):
             from .loss.structured_loss import StructuredLoss
             return StructuredLoss(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
-                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
+                            perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
 
         if loss_func == 'fy' or loss_func == 'fy_mix':
             from .loss.fy_loss import FenchelYoungLoss
@@ -305,7 +310,7 @@ class Train(Common):
             raise(ValueError(f'not implemented: {loss_func}'))
 
 
-    def build_scheduler(self, scheduler: str, optimizer: optim.Optimizer, args: Namespace):
+    def build_scheduler(self, scheduler: str, optimizer: Optimizer, args: Namespace):
         if scheduler == 'CyclicLR':
             return optim.lr_scheduler.CyclicLR(optimizer=optimizer, base_lr=0.001, max_lr=args.lr,
                                                 step_size_up=args.scheduler_step_size, gamma=args.scheduler_gamma, mode="exp_range")

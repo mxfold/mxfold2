@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd
 
-from ..compbpseq import accuracy, compare_bpseq
-from ..fold.fold import AbstractFold
+from mxfold2.compbpseq import accuracy, compare_bpseq
+from mxfold2.fold.fold import AbstractFold
 
 # from .fold.linearfold import LinearFold
 
@@ -18,6 +18,7 @@ class StructuredLoss(nn.Module):
     def __init__(self, model: AbstractFold, 
             loss_pos_paired: float = 0, loss_neg_paired: float = 0, 
             loss_pos_unpaired: float = 0, loss_neg_unpaired: float = 0, 
+            perturb: float = 0., 
             l1_weight: float = 0., l2_weight: float = 0., 
             sl_weight: float = 0.) -> None:
         super(StructuredLoss, self).__init__()
@@ -26,6 +27,7 @@ class StructuredLoss(nn.Module):
         self.loss_neg_paired = loss_neg_paired
         self.loss_pos_unpaired = loss_pos_unpaired
         self.loss_neg_unpaired = loss_neg_unpaired
+        self.perturb = perturb
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
@@ -39,15 +41,13 @@ class StructuredLoss(nn.Module):
         pred: torch.Tensor
         pred_s: list[str]
         #pred_model = self.model.duplicate()
-        pred, pred_s, _, param, _ = self.model(seq, return_param=True, reference=pairs,
-                                loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
-                                loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired)
+        pred, pred_s, _, _, param_without_perturb = self.model(seq, return_param=True, reference=pairs, perturb=self.perturb,
+                                loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired)
         ref: torch.Tensor
         ref_s: list[str]
         #ref_model = self.model.duplicate()
-        ref, ref_s, _ = self.model(seq, param=param, constraint=pairs, reference=pairs,
+        ref, ref_s, _ = self.model(seq, param=param_without_perturb, constraint=pairs, reference=pairs,
                                 loss_pos_paired=self.loss_pos_paired, loss_neg_paired=self.loss_neg_paired, 
-                                loss_pos_unpaired=self.loss_pos_unpaired, loss_neg_unpaired=self.loss_neg_unpaired, 
                                 max_internal_length=None)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l

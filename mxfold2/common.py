@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from .fold.fold import AbstractFold
+from mxfold2.fold.fold import AbstractFold
 from typing import Any
 
 class Common:

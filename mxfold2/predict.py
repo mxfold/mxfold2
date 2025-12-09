@@ -14,11 +14,11 @@ from torch.amp import autocast
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
-from . import interface
-from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset
-from .fold.fold import AbstractFold
-from .common import Common
+from mxfold2 import interface
+from mxfold2.compbpseq import accuracy, compare_bpseq
+from mxfold2.dataset import BPseqDataset, FastaDataset
+from mxfold2.fold.fold import AbstractFold
+from mxfold2.common import Common
 
 
 class Predict(Common):

@@ -5,9 +5,9 @@ from typing import Any, Optional, cast
 import torch
 import torch.nn as nn
 
-from .. import interface
-from .fold import AbstractFold
-from .layers import LengthLayer, NeuralNet
+from mxfold2 import interface
+from mxfold2.fold.fold import AbstractFold
+from mxfold2.fold.layers import LengthLayer, NeuralNet
 
 
 class ZukerFold(AbstractFold):
@@ -84,14 +84,22 @@ class ZukerFold(AbstractFold):
 
 
     def make_param_helper(self, score_paired: torch.Tensor, score_unpaired: Optional[torch.Tensor],
-                        score_lengths: dict[str, torch.Tensor], perturb: float) -> list[dict[str, Any]]:        
+                        score_lengths: dict[str, torch.Tensor], perturb: float, use_gumbel: bool = False) -> list[dict[str, Any]]:        
         device = next(self.parameters()).device
         B, N, _, _ = score_paired.shape
 
         if perturb > 0.:
-            score_paired = score_paired + torch.normal(0., perturb, size=score_paired.shape, device=device)
-            if score_unpaired is not None:
-                score_unpaired = score_unpaired + torch.normal(0., perturb, size=score_unpaired.shape, device=device)
+            if use_gumbel:
+                noise_paired = torch.distributions.Gumbel(0, 1).sample(score_paired.shape)
+                score_paired = score_paired + noise_paired.to(device) * perturb
+                if score_unpaired is not None:
+                    noise_unpaired = torch.distributions.Gumbel(0, 1).sample(score_unpaired.shape)
+                    score_unpaired = score_unpaired + noise_unpaired.to(device) * perturb
+                    pass
+            else:
+                score_paired = score_paired + torch.normal(0., perturb, size=score_paired.shape, device=device)
+                if score_unpaired is not None:
+                    score_unpaired = score_unpaired + torch.normal(0., perturb, size=score_unpaired.shape, device=device)
 
         def unpair_interval(su: torch.Tensor) -> torch.Tensor:
             su = su.view(B, 1, N)
