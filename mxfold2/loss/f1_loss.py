@@ -16,7 +16,23 @@ from ..fold.fold import AbstractFold
 
 
 class F1Loss(nn.Module):
-    def __init__(self, model: AbstractFold, 
+    class ADwrapper(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, f1_tensor, num_counts, *tensors):
+            ctx.save_for_backward(*tensors[:num_counts * 2])
+            ctx.num_counts = num_counts
+            return f1_tensor.clone()
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            saved = ctx.saved_tensors
+            num_counts = ctx.num_counts
+            pred_counts = saved[:num_counts]
+            ref_counts = saved[num_counts:num_counts * 2]
+            grads = tuple(p - r for p, r in zip(pred_counts, ref_counts))
+            return (None, None) + (None,) * (num_counts * 2) + grads
+
+    def __init__(self, model: AbstractFold,
             perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
             sl_weight: float = 0.) -> None:
         super(F1Loss, self).__init__()
@@ -76,16 +92,9 @@ class F1Loss(nn.Module):
                     if kk.startswith('count_'):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
-        class ADwrapper(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, *input):
-                return torch.tensor([1.-v for v in f1], device=pred.device)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                return tuple( p-r for p, r in zip(pred_counts, ref_counts) )
-
-        loss = ADwrapper.apply(*pred_params)
+        f1_tensor = torch.tensor([1.-v for v in f1], device=pred.device)
+        num_counts = len(pred_counts)
+        loss = self.ADwrapper.apply(f1_tensor, num_counts, *pred_counts, *ref_counts, *pred_params)
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
