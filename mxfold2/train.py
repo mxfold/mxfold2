@@ -33,16 +33,14 @@ from mxfold2.dataset import BPseqDataset, FastaDataset, ShapeDataset
 from mxfold2.fold.fold import AbstractFold
 from mxfold2.common import Common
 
-try:
-    from torch.utils.tensorboard.writer import SummaryWriter
-except ImportError:
-    pass
+import wandb
 
 
 class Train(Common):
     step: int = 0
     disable_progress_bar: bool = False
-    writer: Optional[SummaryWriter] = None
+    use_wandb: bool = False
+    gpu: int = -1
 
     def __init__(self):
         super(Train, self).__init__()
@@ -112,8 +110,15 @@ class Train(Common):
                 n_running_loss += n_batch
                 if n_running_loss >= 100 or num >= n_dataset:
                     running_loss /= n_running_loss
-                    if self.writer is not None:
-                        self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
+                    if self.use_wandb:
+                        log_data = {
+                            "train/loss": running_loss,
+                            "train/step": (epoch-1) * n_dataset + num,
+                        }
+                        if self.gpu >= 0 and torch.cuda.is_available():
+                            log_data["train/gpu_memory_allocated"] = torch.cuda.memory_allocated(self.gpu) / 1024**3
+                            log_data["train/gpu_memory_reserved"] = torch.cuda.memory_reserved(self.gpu) / 1024**3
+                        wandb.log(log_data)
                     running_loss, n_running_loss = 0, 0
         elapsed_time = time.time() - start
         print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
@@ -146,8 +151,11 @@ class Train(Common):
                 pbar.update(n_batch)
 
         elapsed_time = time.time() - start
-        if self.writer is not None:
-            self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
+        if self.use_wandb:
+            wandb.log({
+                "test/loss": loss_total / num,
+                "test/epoch": epoch,
+            })
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
@@ -336,11 +344,20 @@ class Train(Common):
 
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         self.disable_progress_bar = args.disable_progress_bar
+        self.gpu = args.gpu
         loglevel = 'INFO' if args.verbose else args.loglevel
         logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=getattr(logging, loglevel, None))
-        self.writer = None
-        if args.log_dir is not None and 'SummaryWriter' in globals():
-            self.writer = SummaryWriter(log_dir=args.log_dir)
+
+        # Initialize wandb if project is specified
+        self.use_wandb = args.wandb_project is not None
+        if self.use_wandb:
+            wandb_config = vars(args).copy()
+            wandb.init(
+                project=args.wandb_project,
+                name=args.wandb_run_name,
+                tags=args.wandb_tags,
+                config=wandb_config,
+            )
 
         train_dataset = BPseqDataset(args.input)
         if args.shape is not None:
@@ -433,28 +450,45 @@ class Train(Common):
             if args.seed >= 0:
                 epoch_seed = args.seed + epoch
                 generator.manual_seed(epoch_seed)
+
+            epoch_start = time.time()
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
                         loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm,
                         scaler=scaler, use_amp=use_amp)
+
+            # Get current learning rate
+            current_lr = args.lr
             if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
                 swa_model.update_parameters(model)
                 swa_scheduler.step()
-                logging.info(f'LR = {swa_scheduler.get_last_lr()}')
+                current_lr = swa_scheduler.get_last_lr()[0]
+                logging.info(f'LR = {current_lr}')
             elif scheduler is not None:
                 scheduler.step()
-                logging.info(f'LR = {scheduler.get_last_lr()}')
+                current_lr = scheduler.get_last_lr()[0]
+                logging.info(f'LR = {current_lr}')
 
             if test_loader is not None:
                 self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader, use_amp=use_amp)
-            if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch, model, optimizer, scheduler, shape_model, step=self.step, scaler=scaler)
+
+            epoch_time = time.time() - epoch_start
+            if self.use_wandb:
+                wandb.log({
+                    "epoch": epoch,
+                    "epoch_time": epoch_time,
+                    "learning_rate": current_lr,
+                })
+
+            if args.output_dir is not None:
+                self.save_checkpoint(args.output_dir, epoch, model, optimizer, scheduler, shape_model, step=self.step, scaler=scaler)
 
         if args.param is not None:
             torch.save((swa_model or model).state_dict(), args.param)
         if args.save_config is not None:
             self.save_config(args.save_config, config)
 
-        #return self.model
+        if self.use_wandb:
+            wandb.finish()
 
 
     @classmethod
@@ -484,8 +518,8 @@ class Train(Common):
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
                             help='number of epochs to train (default: 10)')
-        subparser.add_argument('--log-dir', type=str, default=None,
-                            help='Directory for storing logs')
+        subparser.add_argument('--output-dir', type=str, default=None,
+                            help='Directory for storing checkpoints')
         subparser.add_argument('--resume', type=str, default=None,
                             help='Checkpoint file for resume')
         subparser.add_argument('--save-config', type=str, default=None,
@@ -498,6 +532,14 @@ class Train(Common):
                             default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
         subparser.add_argument('--use-amp', action='store_true',
                             help='use automatic mixed precision (AMP) for faster training on GPUs')
+
+        gparser = subparser.add_argument_group("Weights & Biases (wandb)")
+        gparser.add_argument('--wandb-project', type=str, default=None,
+                            help='wandb project name (enables wandb logging when specified)')
+        gparser.add_argument('--wandb-run-name', type=str, default=None,
+                            help='wandb run name (optional)')
+        gparser.add_argument('--wandb-tags', type=str, nargs='*', default=None,
+                            help='wandb tags (optional)')
 
         cls.add_fold_args(subparser)
 

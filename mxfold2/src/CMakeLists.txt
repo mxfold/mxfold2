@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
-cmake_policy(SET CMP0177 NEW)
+if(POLICY CMP0177)
+    cmake_policy(SET CMP0177 NEW)
+endif()
 project(mxfold2 CXX)
 set(CMAKE_CXX_STANDARD 17)
 
