@@ -469,7 +469,18 @@ class Train(Common):
                 logging.info(f'LR = {current_lr}')
 
             if test_loader is not None:
+                # Save RNG states before test() to ensure test data doesn't affect training reproducibility
+                rng_state_torch = torch.get_rng_state()
+                rng_state_python = random.getstate()
+                rng_state_cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+
                 self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader, use_amp=use_amp)
+
+                # Restore RNG states after test()
+                torch.set_rng_state(rng_state_torch)
+                random.setstate(rng_state_python)
+                if rng_state_cuda is not None:
+                    torch.cuda.set_rng_state_all(rng_state_cuda)
 
             epoch_time = time.time() - epoch_start
             if self.use_wandb:

@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd
 
-from mxfold2.compbpseq import accuracy, compare_bpseq
 from mxfold2.fold.fold import AbstractFold
 
 # from .fold.linearfold import LinearFold
