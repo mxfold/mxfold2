@@ -15,6 +15,7 @@
 #include "param/positional_1d.h"
 #include "param/bpscore.h"
 #include "param/mix.h"
+#include "compbpseq.h"
 
 namespace py = pybind11;
 
@@ -927,34 +928,43 @@ PYBIND11_MODULE(interface, m)
 
     py::class_<LinFoldWrapper<MixedNearestNeighbor1D>>(m, "MixedLinFoldPositional1DWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_viterbi, 
-            "Predict RNA secondary structure with Mixed LinearFold Model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_viterbi,
+            "Predict RNA secondary structure with Mixed LinearFold Model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
             "traceback for LinFold model")
-        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities, 
-            "Partition function with Mixed LinearFold Model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities,
+            "Partition function with Mixed LinearFold Model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
             "paired_position_scores"_a=py::none());
+
+    // compare_bpseq functions for fast base pair comparison
+    m.def("compare_bpseq_pairs", &compare_bpseq_pairs,
+        "Compare base pair sequences (pair list mode)",
+        "ref_pairs"_a, "pred"_a, "L"_a);
+
+    m.def("compare_bpseq_array", &compare_bpseq_array,
+        "Compare base pair sequences (array mode)",
+        "ref"_a, "pred"_a);
 }

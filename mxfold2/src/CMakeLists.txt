@@ -16,7 +16,8 @@ endif()
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(interface
-    interface.cpp 
+    interface.cpp
+    compbpseq.cpp compbpseq.h
     param/turner.cpp param/turner.h 
     param/contrafold.cpp param/contrafold.h 
     param/positional.cpp param/positional.h 

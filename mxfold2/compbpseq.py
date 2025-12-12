@@ -6,6 +6,13 @@ from typing import Optional
 
 import torch
 
+# Try to import C++ implementation for faster compare_bpseq
+try:
+    from mxfold2 import interface as _cpp
+    _HAS_CPP = True
+except ImportError:
+    _HAS_CPP = False
+
 
 def read_bpseq(file: str) -> tuple[str, list[int], Optional[str], Optional[float], Optional[float]]:
     with open(file) as f:
@@ -35,29 +42,60 @@ def read_pdb(file: str) -> list[tuple[int, int]]:
     return p
 
 def compare_bpseq(ref, pred) -> tuple[int, int, int, int]:
-    L = len(ref) - 1
-    tp = fp = fn = 0
-    if ((len(ref)>0 and isinstance(ref[0], list)) or (isinstance(ref, torch.Tensor) and ref.ndim==2)):
-        if isinstance(ref, torch.Tensor):
-            ref = ref.tolist()
-        ref = {(min(i, j), max(i, j)) for i, j in ref}
-        pred = {(i, j) for i, j in enumerate(pred) if i < j}
-        tp = len(ref & pred)
-        fp = len(pred - ref)
-        fn = len(ref - pred)
+    # Mode A: ref is a list of base pairs or 2D tensor
+    if ((len(ref) > 0 and isinstance(ref[0], list)) or (isinstance(ref, torch.Tensor) and ref.ndim == 2)):
+        # In Mode A, L is derived from pred (sequence length), not ref (which is pair list)
+        L = len(pred) - 1
+        if _HAS_CPP:
+            # Use C++ implementation - pass list directly, C++ handles conversion
+            if isinstance(ref, torch.Tensor):
+                ref_pairs = ref.tolist()
+            else:
+                ref_pairs = ref
+            return _cpp.compare_bpseq_pairs(ref_pairs, pred, L)
+        else:
+            # Fallback to Python implementation
+            return _compare_bpseq_pairs_python(ref, pred, L)
+
+    # Mode B: ref is a 1D array
     else:
-        assert(len(ref) == len(pred))
-        for i, (j1, j2) in enumerate(zip(ref, pred)):
-            if j1 > 0 and i < j1: # pos
-                if j1 == j2:
-                    tp += 1
-                elif j2 > 0 and i < j2:
-                    fp += 1
-                    fn += 1
-                else:
-                    fn += 1
+        L = len(ref) - 1
+        if _HAS_CPP:
+            # Use C++ implementation - pass list directly, C++ handles conversion
+            return _cpp.compare_bpseq_array(ref, pred)
+        else:
+            # Fallback to Python implementation
+            return _compare_bpseq_array_python(ref, pred, L)
+
+
+def _compare_bpseq_pairs_python(ref, pred, L) -> tuple[int, int, int, int]:
+    """Original Python implementation for pair list mode."""
+    if isinstance(ref, torch.Tensor):
+        ref = ref.tolist()
+    ref = {(min(i, j), max(i, j)) for i, j in ref}
+    pred = {(i, j) for i, j in enumerate(pred) if i < j}
+    tp = len(ref & pred)
+    fp = len(pred - ref)
+    fn = len(ref - pred)
+    tn = L * (L - 1) // 2 - tp - fp - fn
+    return (tp, tn, fp, fn)
+
+
+def _compare_bpseq_array_python(ref, pred, L) -> tuple[int, int, int, int]:
+    """Original Python implementation for array mode."""
+    tp = fp = fn = 0
+    assert len(ref) == len(pred)
+    for i, (j1, j2) in enumerate(zip(ref, pred)):
+        if j1 > 0 and i < j1:  # pos
+            if j1 == j2:
+                tp += 1
             elif j2 > 0 and i < j2:
                 fp += 1
+                fn += 1
+            else:
+                fn += 1
+        elif j2 > 0 and i < j2:
+            fp += 1
     tn = L * (L - 1) // 2 - tp - fp - fn
     return (tp, tn, fp, fn)
 
