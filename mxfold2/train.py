@@ -28,6 +28,8 @@ from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
+from mxfold2.ema import EMA
+
 from mxfold2 import interface
 from mxfold2.dataset import BPseqDataset, FastaDataset, ShapeDataset
 from mxfold2.fold.fold import AbstractFold
@@ -96,6 +98,16 @@ class Train(Common):
                     elif clip_grad_value > 0.0:
                         nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
                     
+                    # Workaround for pytorch_optimizer AdaBelief/Lion: ensure state is initialized
+                    # for parameters that didn't have gradients in the first step
+                    if isinstance(optimizer, (po.AdaBelief, po.Lion)):
+                        for group in optimizer.param_groups:
+                            for p in group['params']:
+                                if p.grad is not None and len(optimizer.state[p]) == 0:
+                                    optimizer.state[p]['exp_avg'] = torch.zeros_like(p)
+                                    if isinstance(optimizer, po.AdaBelief):
+                                        optimizer.state[p]['exp_avg_var'] = torch.zeros_like(p)
+
                     # Step the optimizer
                     if scaler is not None:
                         scaler.step(optimizer)
@@ -159,11 +171,12 @@ class Train(Common):
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def save_checkpoint(self, outdir: str, epoch: int, 
-                        model: AbstractFold | AveragedModel, 
-                        optimizer: Optimizer, 
+    def save_checkpoint(self, outdir: str, epoch: int,
+                        model: AbstractFold | AveragedModel,
+                        optimizer: Optimizer,
                         scheduler,
                         shape_model: Optional[list[nn.Module]] = None,
+                        ema: Optional[EMA] = None,
                         step: Optional[int] = None,
                         scaler: Optional[GradScaler] = None) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
@@ -181,42 +194,46 @@ class Train(Common):
         if scheduler is not None:
             checkpoint['scheduler_state_dict'] = scheduler.state_dict()
         if shape_model is not None:
-            checkpoint['shape_model_state_dict'] = [ sm.state_dict() for sm in shape_model ]
+            checkpoint['shape_model_state_dict'] = [sm.state_dict() for sm in shape_model]
+        if ema is not None:
+            checkpoint['ema_state_dict'] = ema.state_dict()
         if scaler is not None:
             checkpoint['scaler_state_dict'] = scaler.state_dict()
         torch.save(checkpoint, filename)
 
 
-    def resume_checkpoint(self, filename: str, 
-                        model: AbstractFold, 
-                        optimizer: Optimizer, 
+    def resume_checkpoint(self, filename: str,
+                        model: AbstractFold,
+                        optimizer: Optimizer,
                         scheduler,
                         shape_model: Optional[list[nn.Module]],
+                        ema: Optional[EMA] = None,
                         scaler: Optional[GradScaler] = None,
                         gpu: int = -1) -> tuple[int, Optional[GradScaler]]:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        
+
         # Restore step counter
         if 'step' in checkpoint:
             self.step = checkpoint['step']
-        
+
         # Restore random states
         if 'rng_state' in checkpoint:
             torch.set_rng_state(checkpoint['rng_state']['torch'])
             random.setstate(checkpoint['rng_state']['python'])
             if 'cuda' in checkpoint['rng_state'] and torch.cuda.is_available():
                 torch.cuda.set_rng_state_all(checkpoint['rng_state']['cuda'])
-        
-        
+
         if scheduler is not None and 'scheduler_state_dict' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         if shape_model is not None and 'shape_model_state_dict' in checkpoint:
             for i, sm in enumerate(shape_model):
                 sm.load_state_dict(checkpoint['shape_model_state_dict'][i])
-        
+        if ema is not None and 'ema_state_dict' in checkpoint:
+            ema.load_state_dict(checkpoint['ema_state_dict'])
+
         # Load GradScaler state if available
         if 'scaler_state_dict' in checkpoint and scaler is None:
             device = f'cuda:{gpu}' if gpu >= 0 else 'cuda'
@@ -224,7 +241,7 @@ class Train(Common):
             scaler.load_state_dict(checkpoint['scaler_state_dict'])
         elif scaler is not None and 'scaler_state_dict' in checkpoint:
             scaler.load_state_dict(checkpoint['scaler_state_dict'])
-            
+
         return epoch, scaler
 
 
@@ -267,18 +284,18 @@ class Train(Common):
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
         if loss_func == 'hinge' or loss_func == 'hinge_mix':
-            from .loss.structured_loss import StructuredLoss
+            from mxfold2.loss.structured_loss import StructuredLoss
             return StructuredLoss(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
                             perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
 
         if loss_func == 'fy' or loss_func == 'fy_mix':
-            from .loss.fy_loss import FenchelYoungLoss
+            from mxfold2.loss.fy_loss import FenchelYoungLoss
             return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                                                 sl_weight=args.score_loss_weight)
 
         if loss_func == 'f1':
-            from .loss.f1_loss import F1Loss
+            from mxfold2.loss.f1_loss import F1Loss
             return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight)
 
@@ -288,10 +305,10 @@ class Train(Common):
 
     def build_shape_model(self, args: Namespace) -> nn.Module:
         if args.shape_model == 'Wu':
-            from .fold.shape_layers import Wu
+            from mxfold2.fold.shape_layers import Wu
             return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
         elif args.shape_model == 'Foo':
-            from .fold.shape_layers import Foo
+            from mxfold2.fold.shape_layers import Foo
             return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
         else:
             raise(ValueError(f'not implemented: {args.shape_model}'))
@@ -300,20 +317,29 @@ class Train(Common):
     def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
                                 shape_model: Optional[nn.Module] = None) -> nn.Module:
         if loss_func == 'shape_nll':
-            from .loss.shape_nll_loss import ShapeNLLLoss
+            from mxfold2.loss.shape_nll_loss import ShapeNLLLoss
             return ShapeNLLLoss(model=model,
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=0.)
+                            sl_weight=args.score_loss_weight)
 
         elif loss_func == 'shape_fy':
-            from .loss.shape_fy_loss import ShapeFenchelYoungLoss
+            from mxfold2.loss.shape_fy_loss import ShapeFenchelYoungLoss
             return ShapeFenchelYoungLoss(model,
                             perturb=args.shape_perturb, 
                             shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight)
+
+        elif loss_func == 'shape_rank':
+            from mxfold2.loss.shape_rank_loss import ShapeRankLoss
+            return ShapeRankLoss(model,
+                            margin=args.shape_margin,
+                            perturb=args.shape_perturb, nu=args.shape_nu,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight)
+
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
 
@@ -323,7 +349,7 @@ class Train(Common):
             return optim.lr_scheduler.CyclicLR(optimizer=optimizer, base_lr=0.001, max_lr=args.lr,
                                                 step_size_up=args.scheduler_step_size, gamma=args.scheduler_gamma, mode="exp_range")
         if scheduler == 'CosineAnnealingLR':
-            return optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=args.scheduler_step_size)
+            return optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=args.scheduler_step_size, eta_min=args.lr*1e-3)
         
         return None
 
@@ -385,7 +411,7 @@ class Train(Common):
         config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
 
         shape_model = None 
-        if args.shape is not None:
+        if args.shape is not None and args.shape_loss_func == 'shape_nll':
             shape_model = [ self.build_shape_model(args) for _ in args.shape ]
         
         if args.init_param != '':
@@ -426,18 +452,27 @@ class Train(Common):
             scaler = GradScaler(f'cuda:{args.gpu}')
             logging.info("Using Automatic Mixed Precision (AMP) training")
 
+        # Initialize EMA before resume (so state can be restored)
+        if args.ema:
+            ema = EMA(model, decay=args.ema_decay)
+            ema_start = args.ema_start if args.ema_start >= 1.0 else args.epochs * args.ema_start
+        else:
+            ema = None
+            ema_start = args.epochs
+
         checkpoint_epoch = 0
         if args.resume is not None:
-            checkpoint_epoch, resumed_scaler = self.resume_checkpoint(args.resume, model, optimizer, scheduler, shape_model, scaler, args.gpu)
+            checkpoint_epoch, resumed_scaler = self.resume_checkpoint(
+                args.resume, model, optimizer, scheduler, shape_model, ema, scaler, args.gpu)
             if resumed_scaler is not None:
                 scaler = resumed_scaler
                 use_amp = True
                 logging.info("Resumed with Automatic Mixed Precision (AMP) training")
-        
+
         if args.swa:
             swa_model = AveragedModel(model)
             swa_start = args.swa_start if args.swa_start > 1.0 else args.epochs * args.swa_start
-            swa_scheduler = SWALR(optimizer, swa_lr=args.swa_lr, 
+            swa_scheduler = SWALR(optimizer, swa_lr=args.swa_lr,
                                     anneal_epochs=args.swa_anneal_epochs,
                                     anneal_strategy=args.swa_anneal_strategy)
         else:
@@ -468,13 +503,19 @@ class Train(Common):
                 current_lr = scheduler.get_last_lr()[0]
                 logging.info(f'LR = {current_lr}')
 
+            # Update EMA after each epoch (after warmup)
+            if ema is not None and epoch > ema_start:
+                ema.update(model)
+
             if test_loader is not None:
                 # Save RNG states before test() to ensure test data doesn't affect training reproducibility
                 rng_state_torch = torch.get_rng_state()
                 rng_state_python = random.getstate()
                 rng_state_cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
 
-                self.test(epoch, model=swa_model or model, loss_fn=loss_fn, data_loader=test_loader, use_amp=use_amp)
+                # Use SWA model if available, otherwise EMA model (if started), otherwise regular model
+                eval_model = swa_model or (ema.shadow if ema and epoch > ema_start else None) or model
+                self.test(epoch, model=eval_model, loss_fn=loss_fn, data_loader=test_loader, use_amp=use_amp)
 
                 # Restore RNG states after test()
                 torch.set_rng_state(rng_state_torch)
@@ -491,10 +532,12 @@ class Train(Common):
                 })
 
             if args.output_dir is not None:
-                self.save_checkpoint(args.output_dir, epoch, model, optimizer, scheduler, shape_model, step=self.step, scaler=scaler)
+                self.save_checkpoint(args.output_dir, epoch, model, optimizer, scheduler, shape_model, ema=ema, step=self.step, scaler=scaler)
 
         if args.param is not None:
-            torch.save((swa_model or model).state_dict(), args.param)
+            # Priority: SWA model > EMA model (if started) > regular model
+            final_model = swa_model or (ema.shadow if ema and args.epochs > ema_start else None) or model
+            torch.save(final_model.state_dict(), args.param)
         if args.save_config is not None:
             self.save_config(args.save_config, config)
 
@@ -574,6 +617,12 @@ class Train(Common):
         gparser.add_argument('--swa-anneal-strategy', choices=('linear', 'cos'), default='linear',
                             help="SWA anneal strategy ('linear', 'cos')")
         gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
+        gparser.add_argument('--ema', default=False, action='store_true',
+                            help='use exponential moving average (EMA) for model weights')
+        gparser.add_argument('--ema-decay', type=float, default=0.999,
+                            help='EMA decay factor (default: 0.999)')
+        gparser.add_argument('--ema-start', type=float, default=0,
+                            help='epoch to start EMA (default: 0). If < 1.0, fraction of total epochs.')
 
         gparser = subparser.add_argument_group("Setting for loss function")
         gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
@@ -598,12 +647,14 @@ class Train(Common):
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
         gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
                             help="shape model (default: Wu)")
-        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy'), default='shape_nll',
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_rank'), default='shape_nll',
                             help="loss fuction for SHAPE training data (default: shape)")
         gparser.add_argument('--shape-perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for shape loss (default: 0.1)')
         gparser.add_argument('--shape-nu', type=float, default=0.1,
                             help='weight for distribution for shape loss (default: 0.1)')
+        gparser.add_argument('--shape-margin', type=float, default=0.0,
+                            help='margin for shape rank loss (default: 0.0)')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 

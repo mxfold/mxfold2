@@ -12,13 +12,13 @@ import torch.autograd
 from mxfold2.fold.fold import AbstractFold
 
 
-class ShapeNLLLoss(nn.Module):
+class ShapeRankLoss(nn.Module):
     class ADwrapper(torch.autograd.Function):
         @staticmethod
-        def forward(ctx, nlls, num_counts, *tensors):
+        def forward(ctx, losses, num_counts, *tensors):
             ctx.save_for_backward(*tensors[:num_counts * 2])
             ctx.num_counts = num_counts
-            return nlls.clone()
+            return losses.clone()
 
         @staticmethod
         def backward(ctx, grad_output):
@@ -29,15 +29,16 @@ class ShapeNLLLoss(nn.Module):
             grads = tuple(p - r for p, r in zip(pred_counts, ref_counts))
             return (None, None) + (None,) * (num_counts * 2) + grads
 
+
     def __init__(self, model: AbstractFold,
-            shape_model: list[nn.Module],
-            perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
+            perturb: float = 0., nu: float = 0.1, margin: float = 0.,
+            l1_weight: float = 0., l2_weight: float = 0.,
             sl_weight: float = 0.) -> None:
-        super(ShapeNLLLoss, self).__init__()
+        super(ShapeRankLoss, self).__init__()
         self.model = model
-        self.shape_model = shape_model
         self.perturb = perturb
         self.nu = nu
+        self.margin = margin
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
@@ -69,16 +70,26 @@ class ShapeNLLLoss(nn.Module):
                         pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         paired = []
-        for pred_bp in pred_bps:
+        losses = []
+        for pred_bp, target in zip(pred_bps, targets):
             p = [ 1 if v > 0 else 0 for v in pred_bp ]
             p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
             paired.append(p)
-        targets = [ t.to(pred.device) for t in targets ]
-        nlls = self.shape_model[dataset_id](seq, paired, targets)
-        # nlls is not a scalar (shape_model returns torch.stack(nlls)), so we need grad_outputs
-        # This backward call flows gradients to both shape_model and paired
-        nlls.backward(torch.ones_like(nlls), retain_graph=True)
-        grads = [p.grad for p in paired]
+            
+            # Initialize with p.sum() * 0 to maintain gradient connection to p
+            n_compare = p.sum() * 0
+            n_violate = p.sum() * 0
+            for i in torch.where(p==1)[0]:
+                for j in torch.where(p==0)[0]:
+                    n_compare = n_compare + p[i] * (1-p[j])
+                    if target[i] > target[j]:
+                        n_violate = n_violate + p[i] * (1-p[j])
+            losses.append(n_violate / (n_compare + 1e-5))
+
+        losses = torch.stack(losses)
+        # Use autograd.grad to get gradients only for paired, without affecting other parameters
+        grads = torch.autograd.grad(losses, paired, grad_outputs=torch.ones_like(losses),
+                                    retain_graph=True, create_graph=False)
 
         ref: torch.Tensor
         ref_s: list[str]
@@ -95,7 +106,7 @@ class ShapeNLLLoss(nn.Module):
                         ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
 
         num_counts = len(pred_counts)
-        loss = self.ADwrapper.apply(nlls, num_counts, *pred_counts, *ref_counts, *pred_params)
+        losses = self.ADwrapper.apply(losses, num_counts, *pred_counts, *ref_counts, *pred_params)
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
@@ -103,7 +114,9 @@ class ShapeNLLLoss(nn.Module):
                 ref2: torch.Tensor
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq)
-            loss += self.sl_weight * (ref-ref2)**2 / l
+            losses += self.sl_weight * (ref-ref2)**2 / l
+
+        loss = losses.mean()
 
         logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
         logging.debug(seq)

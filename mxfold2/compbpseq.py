@@ -61,7 +61,11 @@ def compare_bpseq(ref, pred) -> tuple[int, int, int, int]:
     else:
         L = len(ref) - 1
         if _HAS_CPP:
-            # Use C++ implementation - pass list directly, C++ handles conversion
+            # Use C++ implementation - convert tensors to lists
+            if isinstance(ref, torch.Tensor):
+                ref = ref.tolist()
+            if isinstance(pred, torch.Tensor):
+                pred = pred.tolist()
             return _cpp.compare_bpseq_array(ref, pred)
         else:
             # Fallback to Python implementation
