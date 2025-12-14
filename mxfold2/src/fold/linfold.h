@@ -78,6 +78,41 @@ class LinFold : public Fold
             ScoreType alpha, beta;
         };
 
+        // Structures for OpenMP parallelization
+        struct PendingUpdate
+        {
+            u_int32_t target_j;  // Target position for update
+            u_int32_t key;       // Hash map key
+            ScoreType score;
+            TBType manner;
+            std::variant<u_int32_t, std::pair<u_int16_t, u_int16_t>> ptr;
+
+            PendingUpdate(u_int32_t tj, u_int32_t k, ScoreType s, TBType m, u_int32_t p)
+                : target_j(tj), key(k), score(s), manner(m), ptr(p) {}
+            PendingUpdate(u_int32_t tj, u_int32_t k, ScoreType s, TBType m, u_int16_t p1, u_int16_t p2)
+                : target_j(tj), key(k), score(s), manner(m), ptr(std::make_pair(p1, p2)) {}
+        };
+
+        struct alignas(64) ThreadLocalBuffers
+        {
+            std::vector<PendingUpdate> Hv_updates;
+            std::vector<PendingUpdate> Nv_updates;
+            std::vector<PendingUpdate> Cv_updates;
+            std::vector<PendingUpdate> Mv_updates;
+            std::vector<PendingUpdate> M1v_updates;
+            std::vector<PendingUpdate> Ev_updates;
+
+            void clear()
+            {
+                Hv_updates.clear();
+                Nv_updates.clear();
+                Cv_updates.clear();
+                Mv_updates.clear();
+                M1v_updates.clear();
+                Ev_updates.clear();
+            }
+        };
+
     public:
         LinFold(std::unique_ptr<P>&& p);
         auto compute_viterbi(const std::string& seq, const Options& opt = Options()) -> ScoreType;
