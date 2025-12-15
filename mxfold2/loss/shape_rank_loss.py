@@ -74,16 +74,38 @@ class ShapeRankLoss(nn.Module):
         for pred_bp, target in zip(pred_bps, targets):
             p = [ 1 if v > 0 else 0 for v in pred_bp ]
             p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
+            target = target.to(pred.device)
             paired.append(p)
-            
-            # Initialize with p.sum() * 0 to maintain gradient connection to p
-            n_compare = p.sum() * 0
-            n_violate = p.sum() * 0
-            for i in torch.where(p==1)[0]:
-                for j in torch.where(p==0)[0]:
-                    n_compare = n_compare + p[i] * (1-p[j])
-                    if target[i] > target[j]:
-                        n_violate = n_violate + p[i] * (1-p[j])
+
+            # Vectorized pairwise comparison (much faster than nested loops)
+            # Original code:
+            #   n_compare = p.sum() * 0
+            #   n_violate = p.sum() * 0
+            #   for i in torch.where(p==1)[0]:
+            #       for j in torch.where(p==0)[0]:
+            #           n_compare = n_compare + p[i] * (1-p[j])
+            #           if target[i] > target[j]:
+            #               n_violate = n_violate + p[i] * (1-p[j])
+            paired_idx = torch.where(p == 1)[0]
+            unpaired_idx = torch.where(p == 0)[0]
+
+            if len(paired_idx) > 0 and len(unpaired_idx) > 0:
+                # p[paired_idx] is always 1, (1-p[unpaired_idx]) is always 1
+                # so n_compare = len(paired_idx) * len(unpaired_idx)
+                n_compare = p[paired_idx].sum() * (1 - p[unpaired_idx]).sum()
+
+                # Broadcasting: compare all pairs at once
+                # target[paired_idx][:, None] has shape (n_paired, 1)
+                # target[unpaired_idx][None, :] has shape (1, n_unpaired)
+                # Result has shape (n_paired, n_unpaired)
+                violations = (target[paired_idx][:, None] > target[unpaired_idx][None, :]).float()
+                # Weight by p values to maintain gradient connection
+                weights = p[paired_idx][:, None] * (1 - p[unpaired_idx])[None, :]
+                n_violate = (violations * weights).sum()
+            else:
+                n_compare = p.sum() * 0  # Maintain gradient connection
+                n_violate = p.sum() * 0
+
             losses.append(n_violate / (n_compare + 1e-5))
 
         losses = torch.stack(losses)
@@ -107,6 +129,7 @@ class ShapeRankLoss(nn.Module):
 
         num_counts = len(pred_counts)
         losses = self.ADwrapper.apply(losses, num_counts, *pred_counts, *ref_counts, *pred_params)
+        losses = losses.to(pred.device)
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
