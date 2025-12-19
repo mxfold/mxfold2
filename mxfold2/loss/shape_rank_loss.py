@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 import numpy as np
@@ -33,7 +34,10 @@ class ShapeRankLoss(nn.Module):
     def __init__(self, model: AbstractFold,
             perturb: float = 0., nu: float = 0.1, margin: float = 0.,
             l1_weight: float = 0., l2_weight: float = 0.,
-            sl_weight: float = 0.) -> None:
+            sl_weight: float = 0.,
+            weight_schedule: str = 'none',
+            weight_schedule_start: int = 1,
+            weight_schedule_end: Optional[int] = None) -> None:
         super(ShapeRankLoss, self).__init__()
         self.model = model
         self.perturb = perturb
@@ -42,10 +46,42 @@ class ShapeRankLoss(nn.Module):
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
+        # Weight scheduling for ref prediction (only for Mixed models)
+        self.weight_schedule = weight_schedule
+        self.weight_schedule_start = weight_schedule_start
+        self.weight_schedule_end = weight_schedule_end
+        self.current_epoch = 1
+        self.total_epochs = 1
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+
+    def set_epoch_info(self, epoch: int, total_epochs: int) -> None:
+        """Set the current epoch and total epochs for weight scheduling."""
+        self.current_epoch = epoch
+        self.total_epochs = total_epochs
+
+    def _get_scheduled_weights(self) -> tuple[float, float]:
+        """Calculate scheduled weights for ref prediction based on current epoch."""
+        if self.weight_schedule == 'none' or not hasattr(self.model, 'score_weight_turner'):
+            return None, None
+
+        schedule_end = self.weight_schedule_end or self.total_epochs
+        if self.current_epoch < self.weight_schedule_start:
+            progress = 0.0
+        elif self.current_epoch >= schedule_end:
+            progress = 1.0
+        else:
+            progress = (self.current_epoch - self.weight_schedule_start) / (schedule_end - self.weight_schedule_start)
+
+        if self.weight_schedule == 'cosine':
+            progress = 0.5 * (1 - math.cos(math.pi * progress))
+
+        # Turner: 1.0 -> 0.5, Positional: 0.0 -> 0.5
+        weight_turner = 1.0 - 0.5 * progress
+        weight_positional = 0.5 * progress
+        return weight_turner, weight_positional
 
 
     def forward(self, seq: list[str], targets: list[torch.Tensor],
@@ -115,8 +151,25 @@ class ShapeRankLoss(nn.Module):
 
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True, 
+
+        # Apply weight scheduling for ref prediction (only for Mixed models)
+        scheduled_turner, scheduled_positional = self._get_scheduled_weights()
+        if scheduled_turner is not None:
+            # Save original weights (only score weights, not count weights)
+            orig_score_turner = self.model.score_weight_turner
+            orig_score_positional = self.model.score_weight_positional
+            # Apply scheduled weights
+            self.model.score_weight_turner = scheduled_turner
+            self.model.score_weight_positional = scheduled_positional
+            logging.debug(f'Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}')
+
+        ref, ref_s, _, param, _ = self.model(seq, param=param, return_param=True, return_count=True,
                                     pseudoenergy=[self.nu*g for g in grads])
+
+        # Restore original weights
+        if scheduled_turner is not None:
+            self.model.score_weight_turner = orig_score_turner
+            self.model.score_weight_positional = orig_score_positional
 
         ref_counts = []
         for k in sorted(param[0].keys()):

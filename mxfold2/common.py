@@ -70,6 +70,8 @@ class Common:
             #'bl_size': args.bl_size,
             'paired_opt': args.paired_opt,
             'mix_type': args.mix_type,
+            'weight_turner': args.weight_turner,
+            'weight_positional': args.weight_positional,
             'additional_params': args.additional_params,
         }
 
@@ -193,3 +195,13 @@ class Common:
         #                 help='the input dimension of the bilinear layer of LinearFold model (default: 4)')
         gparser.add_argument('--paired-opt', choices=('0_1_1', 'fixed', 'symmetric'), default='symmetric')
         gparser.add_argument('--mix-type', choices=('add', 'average'), default='average')
+        gparser.add_argument('--weight-turner', type=float, default=None,
+                        help='weight for Turner/CONTRAfold model (overrides --mix-type)')
+        gparser.add_argument('--weight-positional', type=float, default=None,
+                        help='weight for positional model (overrides --mix-type)')
+        gparser.add_argument('--weight-schedule', choices=('none', 'linear', 'cosine'), default='none',
+                        help='weight scheduling strategy for mixed models (default: none)')
+        gparser.add_argument('--weight-schedule-start', type=int, default=1,
+                        help='epoch to start weight scheduling (default: 1)')
+        gparser.add_argument('--weight-schedule-end', type=int, default=None,
+                        help='epoch to end weight scheduling (default: total epochs)')

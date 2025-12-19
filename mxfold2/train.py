@@ -320,17 +320,23 @@ class Train(Common):
             from mxfold2.loss.shape_nll_loss import ShapeNLLLoss
             return ShapeNLLLoss(model=model,
                             shape_model=shape_model,
-                            perturb=args.shape_perturb, nu=args.shape_nu, 
+                            perturb=args.shape_perturb, nu=args.shape_nu,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=args.score_loss_weight)
+                            sl_weight=args.score_loss_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end)
 
         elif loss_func == 'shape_fy':
             from mxfold2.loss.shape_fy_loss import ShapeFenchelYoungLoss
             return ShapeFenchelYoungLoss(model,
-                            perturb=args.shape_perturb, 
+                            perturb=args.shape_perturb,
                             shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=args.score_loss_weight)
+                            sl_weight=args.score_loss_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end)
 
         elif loss_func == 'shape_rank':
             from mxfold2.loss.shape_rank_loss import ShapeRankLoss
@@ -338,7 +344,10 @@ class Train(Common):
                             margin=args.shape_margin,
                             perturb=args.shape_perturb, nu=args.shape_nu,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=args.score_loss_weight)
+                            sl_weight=args.score_loss_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end)
 
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
@@ -486,6 +495,10 @@ class Train(Common):
                 epoch_seed = args.seed + epoch
                 generator.manual_seed(epoch_seed)
 
+            # Update epoch info for Shape loss functions (for weight scheduling inside loss)
+            if 'SHAPE' in loss_fn and hasattr(loss_fn['SHAPE'], 'set_epoch_info'):
+                loss_fn['SHAPE'].set_epoch_info(epoch, args.epochs)
+
             epoch_start = time.time()
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
                         loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm,
@@ -525,11 +538,12 @@ class Train(Common):
 
             epoch_time = time.time() - epoch_start
             if self.use_wandb:
-                wandb.log({
+                log_dict = {
                     "epoch": epoch,
                     "epoch_time": epoch_time,
                     "learning_rate": current_lr,
-                })
+                }
+                wandb.log(log_dict)
 
             if args.output_dir is not None:
                 self.save_checkpoint(args.output_dir, epoch, model, optimizer, scheduler, shape_model, ema=ema, step=self.step, scaler=scaler)

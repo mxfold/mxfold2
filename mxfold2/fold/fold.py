@@ -144,7 +144,7 @@ class AbstractFold(nn.Module):
                 for n, p in param_on_cpu.items():
                     if n.startswith('count_'):
                         param[i][n] = p.to(self.detect_device(param[i]))
-                    elif isinstance(param[i][n], dict):
+                    elif n in param[i] and isinstance(param[i][n], dict):
                         for n2, p2 in p.items():
                             if n2.startswith('count_'):
                                 param[i][n][n2] = p2.to(self.detect_device(param[i]))

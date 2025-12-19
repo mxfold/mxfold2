@@ -1717,5 +1717,4 @@ template class LinFold<PositionalNearestNeighborBL>;
 template class LinFold<MixedNearestNeighborBL>;
 template class LinFold<PositionalNearestNeighbor>;
 template class LinFold<MixedNearestNeighbor>;
-template class LinFold<MixedNearestNeighbor2>;
 template class LinFold<MixedNearestNeighbor1D>;

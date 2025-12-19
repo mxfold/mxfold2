@@ -118,6 +118,8 @@ class Predict(Common):
             if not param.exists() and conf is not None:
                 param = Path(conf).parent / param
             p = torch.load(param, map_location='cpu')
+            if isinstance(p, dict) and 'ema_state_dict' in p:
+                p = p['ema_state_dict']
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             if 'n_averaged' in p:
