@@ -80,7 +80,10 @@ class ShapeFenchelYoungLoss(nn.Module):
 
         # Apply weight scheduling for ref prediction (only for Mixed models)
         scheduled_turner, scheduled_positional = self._get_scheduled_weights()
-        if scheduled_turner is not None:
+        if scheduled_turner is None:
+            ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
+            
+        else:
             # Save original weights (only score weights, not count weights)
             orig_score_turner = self.model.score_weight_turner
             orig_score_positional = self.model.score_weight_positional
@@ -88,20 +91,19 @@ class ShapeFenchelYoungLoss(nn.Module):
             self.model.score_weight_turner = scheduled_turner
             self.model.score_weight_positional = scheduled_positional
             logging.debug(f'Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}')
+            ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
 
-        ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
-
-        # Restore original weights
-        if scheduled_turner is not None:
+            # Restore original weights
             self.model.score_weight_turner = orig_score_turner
             self.model.score_weight_positional = orig_score_positional
+            ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, constraint=ref_stru)
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2: torch.Tensor
-                ref2, _, _ = self.turner(seq, pseudoenergy=pseudoenergy, constraint=ref_stru)
+                ref2, _, _ = self.turner(seq, constraint=ref_stru)
             loss += self.sl_weight * (ref-ref2)**2 / l
         logging.debug(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
         logging.debug(seq)
