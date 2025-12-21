@@ -134,7 +134,7 @@ class ShapeRankLoss(nn.Module):
                 # target[paired_idx][:, None] has shape (n_paired, 1)
                 # target[unpaired_idx][None, :] has shape (1, n_unpaired)
                 # Result has shape (n_paired, n_unpaired)
-                violations = (target[paired_idx][:, None] > target[unpaired_idx][None, :]).float()
+                violations = (target[paired_idx][:, None] > target[unpaired_idx][None, :] + self.margin).float()
                 # Weight by p values to maintain gradient connection
                 weights = p[paired_idx][:, None] * (1 - p[unpaired_idx])[None, :]
                 n_violate = (violations * weights).sum()
