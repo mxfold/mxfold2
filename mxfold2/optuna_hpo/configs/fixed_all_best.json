@@ -1,0 +1,29 @@
+{
+    "_comment": "All parameters fixed to current best (train-all-with-test.sh)",
+    "_comment2": "Use this with default.yaml to only optimize parameters NOT in this file",
+
+    "optimizer": "AdaBelief",
+    "lr": 0.001,
+    "dropout_rate": 0.5,
+    "fc_dropout_rate": 0.5,
+
+    "embed_size": 64,
+    "num_filters_list": [64, 64, 64, 64, 64, 64, 64, 64],
+    "filter_size_list": [5, 3, 5, 3, 5, 3, 5, 3],
+    "num_paired_filters_list": [64, 64, 64, 64, 64, 64, 64, 64],
+    "paired_filter_size_list": [5, 3, 5, 3, 5, 3, 5, 3],
+    "num_lstm_layers": 2,
+    "num_lstm_units": 32,
+    "num_att": 8,
+    "pair_join": "cat",
+
+    "loss_func": "fy",
+    "perturb": 0.75,
+    "l2_weight": 0.01,
+    "score_loss_weight": 0.125,
+
+    "shape_loss_func": "shape_rank",
+    "shape_perturb": 0.5,
+    "shape_nu": 10.0,
+    "shape_margin": 0.2
+}

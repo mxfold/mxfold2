@@ -1,0 +1,146 @@
+# MXFold2 HPO Search Space Configuration
+# This file defines the hyperparameter search space for Optuna optimization.
+
+# ============================================================================
+# Learning Parameters
+# ============================================================================
+
+# Optimizer selection
+optimizer:
+  - Adam
+  - AdamW
+  - RMSprop
+  - SGD
+  - AdaBelief
+  - Lion
+
+# Learning rate (log scale)
+lr:
+  min: 0.0001
+  max: 0.01
+  log: true
+
+# Learning rate scheduler
+scheduler:
+  - None
+  - CyclicLR
+  - CosineAnnealingLR
+
+# Dropout rate for CNN and LSTM
+dropout_rate:
+  min: 0.0
+  max: 0.5
+
+# Dropout rate for fully connected layers
+fc_dropout_rate:
+  min: 0.0
+  max: 0.5
+
+# L2 regularization weight (log scale)
+l2_weight:
+  min: 0.00001
+  max: 0.1
+  log: true
+
+# Gradient clipping (norm-based)
+clip_grad_norm:
+  min: 0.0
+  max: 5.0
+
+# ============================================================================
+# Model Architecture Parameters
+# ============================================================================
+
+# Embedding size (0 = one-hot encoding)
+embed_size:
+  - 0
+  - 32
+  - 64
+  - 128
+
+# Number of CNN filters per layer
+num_filters:
+  min: 32
+  max: 128
+  step: 16
+
+# Filter size for CNN
+filter_size:
+  - 3
+  - 5
+  - 7
+
+# Number of LSTM layers
+num_lstm_layers:
+  min: 0
+  max: 3
+
+# Number of LSTM units (only used when num_lstm_layers > 0)
+num_lstm_units:
+  min: 16
+  max: 128
+  step: 16
+
+# Number of attention heads
+num_att:
+  - 0
+  - 4
+  - 8
+
+# Method to join pair vectors
+pair_join:
+  - cat
+  - add
+  - mul
+
+# ============================================================================
+# Loss Function Parameters
+# ============================================================================
+
+# Loss function for BPSEQ data
+loss_func:
+  - hinge
+  - fy
+  - f1
+
+# Perturbation for Fenchel-Young loss
+perturb:
+  min: 0.1
+  max: 1.0
+
+# Nu parameter for F1 loss (log scale)
+nu:
+  min: 0.01
+  max: 1.0
+  log: true
+
+# Score loss weight
+score_loss_weight:
+  min: 0.0
+  max: 0.5
+
+# ============================================================================
+# SHAPE Loss Parameters
+# ============================================================================
+
+# Loss function for SHAPE data
+shape_loss_func:
+  - shape_nll
+  - shape_fy
+  - shape_rank
+
+# SHAPE perturbation
+shape_perturb:
+  min: 0.1
+  max: 1.0
+
+# SHAPE nu parameter (log scale)
+shape_nu:
+  min: 0.1
+  max: 10.0
+  log: true
+
+# SHAPE margin (only for shape_rank loss)
+shape_margin:
+  min: 0.0
+  max: 1.0
