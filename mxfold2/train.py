@@ -323,6 +323,7 @@ class Train(Common):
                             perturb=args.shape_perturb, nu=args.shape_nu,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight,
+                            pseudo_fy_weight=args.shape_pseudo_fy_weight,
                             weight_schedule=args.weight_schedule,
                             weight_schedule_start=args.weight_schedule_start,
                             weight_schedule_end=args.weight_schedule_end)
@@ -345,6 +346,7 @@ class Train(Common):
                             perturb=args.shape_perturb, nu=args.shape_nu,
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
                             sl_weight=args.score_loss_weight,
+                            pseudo_fy_weight=args.shape_pseudo_fy_weight,
                             weight_schedule=args.weight_schedule,
                             weight_schedule_start=args.weight_schedule_start,
                             weight_schedule_end=args.weight_schedule_end)
@@ -669,6 +671,8 @@ class Train(Common):
                             help='weight for distribution for shape loss (default: 0.1)')
         gparser.add_argument('--shape-margin', type=float, default=0.0,
                             help='margin for shape rank loss (default: 0.0)')
+        gparser.add_argument('--shape-pseudo-fy-weight', type=float, default=0.0,
+                            help='weight for FY loss using Turner structure as pseudo ground truth (default: 0.0)')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
         subparser.add_argument('--shape-slope', type=float, default=2.6, 

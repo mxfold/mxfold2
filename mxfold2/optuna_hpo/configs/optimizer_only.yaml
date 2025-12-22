@@ -116,3 +116,8 @@ shape_nu:
 shape_margin:
   min: 0.2
   max: 0.2
+
+# Fixed: 0.0 (not used in this config)
+shape_pseudo_fy_weight:
+  min: 0.0
+  max: 0.0

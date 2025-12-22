@@ -144,3 +144,9 @@ shape_nu:
 shape_margin:
   min: 0.0
   max: 1.0
+
+# SHAPE pseudo FY weight (only for shape_rank loss)
+# Uses Turner-predicted structure as pseudo ground truth for FY loss
+shape_pseudo_fy_weight:
+  min: 0.0
+  max: 1.0

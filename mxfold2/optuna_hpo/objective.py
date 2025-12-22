@@ -189,6 +189,7 @@ class MXFold2Objective:
             shape_perturb=params["shape_perturb"],
             shape_nu=params["shape_nu"],
             shape_margin=params["shape_margin"],
+            shape_pseudo_fy_weight=params["shape_pseudo_fy_weight"],
             shape_intercept=-0.8,
             shape_slope=2.6,
             shape_loss_weight=1.0,

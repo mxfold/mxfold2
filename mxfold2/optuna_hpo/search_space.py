@@ -69,6 +69,8 @@ class SearchSpaceConfig:
     shape_nu_log: bool = True
     shape_margin_min: float = 0.0
     shape_margin_max: float = 1.0
+    shape_pseudo_fy_weight_min: float = 0.0
+    shape_pseudo_fy_weight_max: float = 1.0
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SearchSpaceConfig":
@@ -119,6 +121,7 @@ class SearchSpaceConfig:
             "shape_perturb": {"min": self.shape_perturb_min, "max": self.shape_perturb_max},
             "shape_nu": {"min": self.shape_nu_min, "max": self.shape_nu_max, "log": self.shape_nu_log},
             "shape_margin": {"min": self.shape_margin_min, "max": self.shape_margin_max},
+            "shape_pseudo_fy_weight": {"min": self.shape_pseudo_fy_weight_min, "max": self.shape_pseudo_fy_weight_max},
         }
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
@@ -220,5 +223,13 @@ def suggest_hyperparameters(
         )
     else:
         params["shape_margin"] = 0.0
+
+    # Conditional: shape_pseudo_fy_weight for shape_rank and shape_nll
+    if params["shape_loss_func"] in ["shape_rank", "shape_nll"]:
+        params["shape_pseudo_fy_weight"] = trial.suggest_float(
+            "shape_pseudo_fy_weight", config.shape_pseudo_fy_weight_min, config.shape_pseudo_fy_weight_max
+        )
+    else:
+        params["shape_pseudo_fy_weight"] = 0.0
 
     return params

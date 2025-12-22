@@ -35,6 +35,7 @@ class ShapeRankLoss(nn.Module):
             perturb: float = 0., nu: float = 0.1, margin: float = 0.,
             l1_weight: float = 0., l2_weight: float = 0.,
             sl_weight: float = 0.,
+            pseudo_fy_weight: float = 0.,
             weight_schedule: str = 'none',
             weight_schedule_start: int = 1,
             weight_schedule_end: Optional[int] = None) -> None:
@@ -46,13 +47,14 @@ class ShapeRankLoss(nn.Module):
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
+        self.pseudo_fy_weight = pseudo_fy_weight
         # Weight scheduling for ref prediction (only for Mixed models)
         self.weight_schedule = weight_schedule
         self.weight_schedule_start = weight_schedule_start
         self.weight_schedule_end = weight_schedule_end
         self.current_epoch = 1
         self.total_epochs = 1
-        if sl_weight > 0.0:
+        if sl_weight > 0.0 or pseudo_fy_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
@@ -187,6 +189,16 @@ class ShapeRankLoss(nn.Module):
         losses = losses.to(pred.device)
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
+
+        # FY Loss: Use Turner structure as pseudo ground truth
+        if self.pseudo_fy_weight > 0.0:
+            with torch.no_grad():
+                turner_energy, turner_s, turner_stru = self.turner(seq)
+
+            fy_ref, fy_ref_s, _ = self.model(seq, param=param, constraint=turner_stru, max_internal_length=None)
+            fy_loss = (pred - fy_ref) / l
+            losses = losses + self.pseudo_fy_weight * fy_loss
+
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2: torch.Tensor
