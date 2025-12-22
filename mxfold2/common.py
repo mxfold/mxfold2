@@ -73,6 +73,7 @@ class Common:
             'weight_turner': args.weight_turner,
             'weight_positional': args.weight_positional,
             'additional_params': args.additional_params,
+            'resnet_every_n': args.resnet_every_n,
         }
 
         model = None
@@ -205,3 +206,5 @@ class Common:
                         help='epoch to start weight scheduling (default: 1)')
         gparser.add_argument('--weight-schedule-end', type=int, default=None,
                         help='epoch to end weight scheduling (default: total epochs)')
+        gparser.add_argument('--resnet-every-n', type=int, default=1,
+                        help='apply skip connection every N layers (default: 1 = every layer, 2 = classic ResNet)')

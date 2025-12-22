@@ -12,13 +12,15 @@ from .transformer import TransformerLayer
 
 
 class CNNLayer(nn.Module):
-    def __init__(self, n_in: int, 
-        num_filters: tuple[int, ...] = (128,), 
-        filter_size: tuple[int, ...] = (7,), 
-        pool_size: tuple[int, ...] = (1,), 
-        dilation: int = 1, dropout_rate: float = 0.0, resnet: bool = False) -> None:
+    def __init__(self, n_in: int,
+        num_filters: tuple[int, ...] = (128,),
+        filter_size: tuple[int, ...] = (7,),
+        pool_size: tuple[int, ...] = (1,),
+        dilation: int = 1, dropout_rate: float = 0.0, resnet: bool = False,
+        resnet_every_n: int = 1) -> None:
         super(CNNLayer, self).__init__()
         self.resnet = resnet
+        self.resnet_every_n = resnet_every_n
         self.net = nn.ModuleList()
         for n_out, ksize, p in zip(num_filters, filter_size, pool_size):
             self.net.append( 
@@ -32,23 +34,32 @@ class CNNLayer(nn.Module):
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor: # (B=1, 4, N)
-        for net in self.net:
+        x_skip = None
+        for i, net in enumerate(self.net):
+            if i % self.resnet_every_n == 0:
+                x_skip = x  # save the starting point for skip connection
             x_a = net(x)
-            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
+            # apply skip connection at the last layer of each block
+            if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                x = x_skip + x_a
+            else:
+                x = x_a
         return x
 
 
 class CNNLSTMEncoder(nn.Module):
-    def __init__(self, n_in: int, 
-            num_filters: tuple[int, ...] = (256,), 
-            filter_size: tuple[int, ...] = (7,), 
-            pool_size: tuple[int, ...] = (1,), 
+    def __init__(self, n_in: int,
+            num_filters: tuple[int, ...] = (256,),
+            filter_size: tuple[int, ...] = (7,),
+            pool_size: tuple[int, ...] = (1,),
             dilation: int = 0,
-            num_lstm_layers: int = 0, num_lstm_units: int = 0, 
-            num_att: int = 0, dropout_rate: float = 0.0, resnet: bool = True) -> None:
+            num_lstm_layers: int = 0, num_lstm_units: int = 0,
+            num_att: int = 0, dropout_rate: float = 0.0, resnet: bool = True,
+            resnet_every_n: int = 1) -> None:
 
         super(CNNLSTMEncoder, self).__init__()
         self.resnet = resnet
+        self.resnet_every_n = resnet_every_n
         self.n_in = self.n_out = n_in
         while len(num_filters) > len(filter_size):
             filter_size = tuple(filter_size) + (filter_size[-1],)
@@ -61,7 +72,7 @@ class CNNLSTMEncoder(nn.Module):
         self.conv = self.lstm = self.att = None
 
         if len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate, resnet=self.resnet)
+            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate, resnet=self.resnet, resnet_every_n=self.resnet_every_n)
             self.n_out = n_in = num_filters[-1]
 
         if num_lstm_layers > 0:
@@ -118,16 +129,18 @@ class Transform2D(nn.Module):
 
 
 class PairedLayer(nn.Module):
-    def __init__(self, n_in: int, n_out: int = 1, 
-            filters: tuple[int, ...] = (), 
-            ksize: tuple[int, ...] = (), 
-            fc_layers: tuple[int, ...] = (), 
-            dropout_rate: float = 0.0, 
-            exclude_diag: bool = True, resnet: bool = True, 
-            paired_opt: str = "0_1_1") -> None:
+    def __init__(self, n_in: int, n_out: int = 1,
+            filters: tuple[int, ...] = (),
+            ksize: tuple[int, ...] = (),
+            fc_layers: tuple[int, ...] = (),
+            dropout_rate: float = 0.0,
+            exclude_diag: bool = True, resnet: bool = True,
+            paired_opt: str = "0_1_1",
+            resnet_every_n: int = 1) -> None:
         super(PairedLayer, self).__init__()
 
-        self.resnet = resnet        
+        self.resnet = resnet
+        self.resnet_every_n = resnet_every_n
         self.exclude_diag = exclude_diag
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
@@ -163,9 +176,15 @@ class PairedLayer(nn.Module):
         x_u = torch.triu(x.view(B*C, N, N), diagonal=diag).view(B, C, N, N)
         x_l = torch.tril(x.view(B*C, N, N), diagonal=-1).view(B, C, N, N)
         x = torch.cat((x_u, x_l), dim=0).view(B*2, C, N, N)
-        for conv in self.conv:
+        x_skip = None
+        for i, conv in enumerate(self.conv):
+            if i % self.resnet_every_n == 0:
+                x_skip = x
             x_a = conv(x)
-            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
+            if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                x = x_skip + x_a
+            else:
+                x = x_a
         x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
         x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
         x_l = torch.tril(x_u.view(B, -1, N, N), diagonal=-1)
@@ -181,9 +200,15 @@ class PairedLayer(nn.Module):
         x_u = torch.triu(x.view(B*C, N, N), diagonal=diag).view(B, C, N, N)
         x_l = torch.tril(x.view(B*C, N, N), diagonal=-1).view(B, C, N, N)
         x = torch.cat((x_u, x_l), dim=0).view(B*2, C, N, N)
-        for conv in self.conv:
+        x_skip = None
+        for i, conv in enumerate(self.conv):
+            if i % self.resnet_every_n == 0:
+                x_skip = x
             x_a = conv(x)
-            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B*2, n_out, N, N)
+            if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                x = x_skip + x_a
+            else:
+                x = x_a
         x_u, x_l = torch.split(x, B, dim=0) # (B, n_out, N, N) * 2
         x_u = torch.triu(x_u.view(B, -1, N, N), diagonal=diag)
         x_l = torch.tril(x_l.view(B, -1, N, N), diagonal=-1)
@@ -196,9 +221,15 @@ class PairedLayer(nn.Module):
         B, N, _, C = x.shape
         x = x.permute(0, 3, 1, 2)
         x = torch.triu(x.view(B*C, N, N), diagonal=1).view(B, C, N, N)
-        for conv in self.conv:
+        x_skip = None
+        for i, conv in enumerate(self.conv):
+            if i % self.resnet_every_n == 0:
+                x_skip = x
             x_a = conv(x)
-            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a # (B, C, N, N)
+            if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                x = x_skip + x_a
+            else:
+                x = x_a
         x_u = torch.triu(x, diagonal=1)
         x_l = torch.transpose(x_u, 2, 3)
         x = x_u + x_l # (B, C, N, N)
@@ -208,14 +239,16 @@ class PairedLayer(nn.Module):
 
 
 class UnpairedLayer(nn.Module):
-    def __init__(self, n_in: int, n_out: int = 1, 
-        filters: tuple[int, ...] = (), 
-        ksize: tuple[int, ...] = (), 
-        fc_layers: tuple[int, ...] = (), 
-        dropout_rate: float = 0.0, resnet: bool = True) -> None:
+    def __init__(self, n_in: int, n_out: int = 1,
+        filters: tuple[int, ...] = (),
+        ksize: tuple[int, ...] = (),
+        fc_layers: tuple[int, ...] = (),
+        dropout_rate: float = 0.0, resnet: bool = True,
+        resnet_every_n: int = 1) -> None:
         super(UnpairedLayer, self).__init__()
 
         self.resnet = resnet
+        self.resnet_every_n = resnet_every_n
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
@@ -244,9 +277,15 @@ class UnpairedLayer(nn.Module):
     def forward(self, x: torch.Tensor, x_base: Optional[torch.Tensor] = None) -> torch.Tensor:
         B, N, _ = x.shape
         x = x.transpose(1, 2) # (B, n_in, N)
-        for conv in self.conv:
+        x_skip = None
+        for i, conv in enumerate(self.conv):
+            if i % self.resnet_every_n == 0:
+                x_skip = x
             x_a = conv(x)
-            x = x + x_a if self.resnet and x.shape[1]==x_a.shape[1] else x_a
+            if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                x = x_skip + x_a
+            else:
+                x = x_a
         x = x.transpose(1, 2).view(B*N, -1) # (B, N, n_out)
         x = self.fc(x)
         return x.view(B, N, -1)
@@ -286,20 +325,21 @@ class LengthLayer(nn.Module):
 
 class NeuralNet(nn.Module):
     def __init__(self, embed_size: int = 0,
-            num_filters: tuple[int, ...] = (96,), 
-            filter_size: tuple[int, ...] = (5,), 
-            dilation: int = 0, 
-            pool_size: tuple[int, ...] = (1,), 
-            num_lstm_layers: int = 0, num_lstm_units: int = 0, num_att: int = 0, 
+            num_filters: tuple[int, ...] = (96,),
+            filter_size: tuple[int, ...] = (5,),
+            dilation: int = 0,
+            pool_size: tuple[int, ...] = (1,),
+            num_lstm_layers: int = 0, num_lstm_units: int = 0, num_att: int = 0,
             num_transformer_layers: int = 0, num_transformer_hidden_units: int = 2048,
             num_transformer_att: int = 8,
             no_split_lr: bool = False, pair_join: str = 'cat',
-            num_paired_filters: tuple[int, ...] = (), 
+            num_paired_filters: tuple[int, ...] = (),
             paired_filter_size: tuple[int, ...] = (),
-            num_hidden_units: tuple[int, ...] = (32,), 
-            dropout_rate: float =0.0, fc_dropout_rate: float = 0.0, 
-            exclude_diag: bool = True, 
-            n_out_paired_layers: int = 0, n_out_unpaired_layers: int = 0, 
+            num_hidden_units: tuple[int, ...] = (32,),
+            dropout_rate: float = 0.0, fc_dropout_rate: float = 0.0,
+            exclude_diag: bool = True,
+            n_out_paired_layers: int = 0, n_out_unpaired_layers: int = 0,
+            resnet_every_n: int = 1,
             **kwargs) -> None:
 
         super(NeuralNet, self).__init__()
@@ -312,10 +352,11 @@ class NeuralNet(nn.Module):
         if num_transformer_layers==0:
             self.encoder = CNNLSTMEncoder(n_in,
                 num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
-                num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
+                num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate,
+                resnet_every_n=resnet_every_n)
         else:
-            self.encoder = TransformerLayer(n_in, n_head=num_transformer_att, 
-                            n_hidden=num_transformer_hidden_units, 
+            self.encoder = TransformerLayer(n_in, n_head=num_transformer_att,
+                            n_hidden=num_transformer_hidden_units,
                             n_layers=num_transformer_layers, dropout=dropout_rate)
         n_in = self.encoder.n_out
 
@@ -329,12 +370,14 @@ class NeuralNet(nn.Module):
             self.fc_paired = PairedLayer(n_in_paired, n_out_paired_layers,
                                     filters=num_paired_filters, ksize=paired_filter_size,
                                     exclude_diag=exclude_diag,
-                                    fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate, 
-                                    paired_opt=kwargs['paired_opt'])
+                                    fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate,
+                                    paired_opt=kwargs['paired_opt'],
+                                    resnet_every_n=resnet_every_n)
             if n_out_unpaired_layers > 0:
                 self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
                                         filters=num_paired_filters, ksize=paired_filter_size,
-                                        fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate)
+                                        fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate,
+                                        resnet_every_n=resnet_every_n)
             else:
                 self.fc_unpaired = None
 
@@ -382,16 +425,17 @@ class NeuralNet(nn.Module):
 
 class NeuralNet1D(nn.Module):
     def __init__(self, embed_size: int = 0,
-            num_filters: tuple[int, ...] = (96,), 
-            filter_size: tuple[int, ...] = (5,), 
-            dilation: int = 0, 
-            pool_size: tuple[int, ...] = (1,), 
-            num_lstm_layers: int = 0, num_lstm_units: int = 0, num_att: int = 0, 
+            num_filters: tuple[int, ...] = (96,),
+            filter_size: tuple[int, ...] = (5,),
+            dilation: int = 0,
+            pool_size: tuple[int, ...] = (1,),
+            num_lstm_layers: int = 0, num_lstm_units: int = 0, num_att: int = 0,
             num_transformer_layers: int = 0, num_transformer_hidden_units: int = 2048,
             num_transformer_att: int = 8,
-            num_hidden_units: tuple[int, ...] = (32,), 
-            dropout_rate: float =0.0, fc_dropout_rate: float = 0.0, 
-            n_out: int = 0,  
+            num_hidden_units: tuple[int, ...] = (32,),
+            dropout_rate: float = 0.0, fc_dropout_rate: float = 0.0,
+            n_out: int = 0,
+            resnet_every_n: int = 1,
             **kwargs: dict[str, Any]) -> None:
 
         super(NeuralNet1D, self).__init__()
@@ -402,10 +446,11 @@ class NeuralNet1D(nn.Module):
         if num_transformer_layers==0:
             self.encoder = CNNLSTMEncoder(n_in,
                 num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
-                num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate)
+                num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate,
+                resnet_every_n=resnet_every_n)
         else:
-            self.encoder = TransformerLayer(n_in, n_head=num_transformer_att, 
-                            n_hidden=num_transformer_hidden_units, 
+            self.encoder = TransformerLayer(n_in, n_head=num_transformer_att,
+                            n_hidden=num_transformer_hidden_units,
                             n_layers=num_transformer_layers, dropout=dropout_rate)
         n_in = self.encoder.n_out
         self.fc = nn.Linear(n_in, n_out) if n_in != n_out else None
