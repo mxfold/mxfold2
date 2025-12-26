@@ -121,6 +121,11 @@ class MXFold2Objective:
             paired_filter_size = self.fixed_params["paired_filter_size_list"]
         else:
             paired_filter_size = [5, 3, 5, 3, 5, 3, 5, 3]
+            
+        if "resnet_every_n" in self.fixed_params:
+            resnet_every_n = self.fixed_params["resnet_every_n"]
+        else:
+            resnet_every_n = 1
 
         args = Namespace(
             # Basic settings
@@ -158,6 +163,7 @@ class MXFold2Objective:
             num_hidden_units=None,
             num_paired_filters=num_paired_filters,
             paired_filter_size=paired_filter_size,
+            resnet_every_n=resnet_every_n,
             dropout_rate=params["dropout_rate"],
             fc_dropout_rate=params["fc_dropout_rate"],
             num_att=params["num_att"],
