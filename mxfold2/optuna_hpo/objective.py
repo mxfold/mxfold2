@@ -205,6 +205,12 @@ class MXFold2Objective:
             use_amp=False,
             swa=False,
             ema=False,
+            # SAM settings
+            sam_type=params.get("sam_type", "None"),
+            sam_rho=params.get("sam_rho", 0.05),
+            sam_alpha=params.get("sam_alpha", 0.1),
+            # Gradient accumulation
+            grad_accum_steps=params.get("grad_accum_steps", 1),
         )
 
         return args

@@ -72,6 +72,21 @@ class SearchSpaceConfig:
     shape_pseudo_fy_weight_min: float = 0.0
     shape_pseudo_fy_weight_max: float = 1.0
 
+    # SAM (Sharpness-Aware Minimization) parameters
+    sam_type: list[str] = field(
+        default_factory=lambda: ["None", "SAM", "ASAM", "GSAM"]
+    )
+    sam_rho_min: float = 0.01
+    sam_rho_max: float = 1.0
+    sam_rho_log: bool = True
+    sam_alpha_min: float = 0.01
+    sam_alpha_max: float = 0.5
+
+    # Gradient accumulation
+    grad_accum_steps: list[int] = field(
+        default_factory=lambda: [1, 2, 4, 8]
+    )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SearchSpaceConfig":
         """Load configuration from a YAML file."""
@@ -122,6 +137,12 @@ class SearchSpaceConfig:
             "shape_nu": {"min": self.shape_nu_min, "max": self.shape_nu_max, "log": self.shape_nu_log},
             "shape_margin": {"min": self.shape_margin_min, "max": self.shape_margin_max},
             "shape_pseudo_fy_weight": {"min": self.shape_pseudo_fy_weight_min, "max": self.shape_pseudo_fy_weight_max},
+            # SAM parameters
+            "sam_type": self.sam_type,
+            "sam_rho": {"min": self.sam_rho_min, "max": self.sam_rho_max, "log": self.sam_rho_log},
+            "sam_alpha": {"min": self.sam_alpha_min, "max": self.sam_alpha_max},
+            # Gradient accumulation
+            "grad_accum_steps": self.grad_accum_steps,
         }
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
@@ -231,5 +252,29 @@ def suggest_hyperparameters(
         )
     else:
         params["shape_pseudo_fy_weight"] = 0.0
+
+    # SAM (Sharpness-Aware Minimization) parameters
+    params["sam_type"] = trial.suggest_categorical("sam_type", config.sam_type)
+
+    # Conditional: sam_rho only when SAM is enabled
+    if params["sam_type"] != "None":
+        params["sam_rho"] = trial.suggest_float(
+            "sam_rho", config.sam_rho_min, config.sam_rho_max, log=config.sam_rho_log
+        )
+    else:
+        params["sam_rho"] = 0.05  # default value
+
+    # Conditional: sam_alpha only for GSAM
+    if params["sam_type"] == "GSAM":
+        params["sam_alpha"] = trial.suggest_float(
+            "sam_alpha", config.sam_alpha_min, config.sam_alpha_max
+        )
+    else:
+        params["sam_alpha"] = 0.1  # default value
+
+    # Gradient accumulation
+    params["grad_accum_steps"] = trial.suggest_categorical(
+        "grad_accum_steps", config.grad_accum_steps
+    )
 
     return params

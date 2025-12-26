@@ -23,6 +23,7 @@ from mxfold2 import interface
 from mxfold2.compbpseq import accuracy, compare_bpseq
 from mxfold2.dataset import FastaDataset
 from mxfold2.fold.fold import AbstractFold
+from mxfold2.sam import SAM, GSAM
 from mxfold2.train import Train
 
 
@@ -86,7 +87,11 @@ class HPOTrainer(Train):
 
         # Build optimizer
         optimizer = self.build_optimizer(
-            args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model
+            args.optimizer, model, args.lr, args.l2_weight,
+            shape_model=shape_model,
+            sam_type=getattr(args, 'sam_type', None),
+            sam_rho=getattr(args, 'sam_rho', 0.05),
+            sam_alpha=getattr(args, 'sam_alpha', 0.1)
         )
 
         # Build loss functions
@@ -127,6 +132,7 @@ class HPOTrainer(Train):
                 clip_grad_norm=args.clip_grad_norm,
                 scaler=scaler,
                 use_amp=use_amp,
+                grad_accum_steps=getattr(args, 'grad_accum_steps', 1),
             )
 
             # Update scheduler
@@ -163,6 +169,7 @@ class HPOTrainer(Train):
         clip_grad_norm: float = 0.0,
         scaler: Optional[GradScaler] = None,
         use_amp: bool = False,
+        grad_accum_steps: int = 1,
     ) -> None:
         """Train for one epoch (simplified version without progress bar and wandb)."""
         if loss_weight is None:
@@ -176,43 +183,97 @@ class HPOTrainer(Train):
         loss_total, num = 0.0, 0
         start = time.time()
 
+        # Check if using SAM optimizer
+        is_sam = isinstance(optimizer, SAM)
+
+        # Gradient accumulation counter
+        accumulated_samples = 0
+        optimizer.zero_grad()  # Zero gradients once at the start
+
         for fnames, seqs, vals in data_loader:
             self.step += 1
             n_batch = len(seqs)
             for i in range(n_batch):
-                optimizer.zero_grad()
+                accumulated_samples += 1
+                is_update_step = (accumulated_samples % grad_accum_steps == 0)
 
-                with autocast(
-                    device_type="cuda", dtype=torch.float16, enabled=use_amp
-                ):
-                    if vals["type"][i] == "BPSEQ":
-                        loss = torch.sum(
-                            loss_fn["BPSEQ"](
-                                seqs[i : i + 1],
-                                vals["target"][i : i + 1],
-                                fname=fnames[i : i + 1],
+                # Define loss computation function for SAM
+                def compute_loss():
+                    with autocast(
+                        device_type="cuda", dtype=torch.float16, enabled=use_amp
+                    ):
+                        if vals["type"][i] == "BPSEQ":
+                            loss = torch.sum(
+                                loss_fn["BPSEQ"](
+                                    seqs[i : i + 1],
+                                    vals["target"][i : i + 1],
+                                    fname=fnames[i : i + 1],
+                                )
                             )
-                        )
-                    elif vals["type"][i] == "SHAPE":
-                        loss = torch.sum(
-                            loss_fn["SHAPE"](
-                                seqs[i : i + 1],
-                                vals["target"][i : i + 1],
-                                fname=fnames[i : i + 1],
-                                dataset_id=vals["dataset_id"][i : i + 1],
+                        elif vals["type"][i] == "SHAPE":
+                            loss = torch.sum(
+                                loss_fn["SHAPE"](
+                                    seqs[i : i + 1],
+                                    vals["target"][i : i + 1],
+                                    fname=fnames[i : i + 1],
+                                    dataset_id=vals["dataset_id"][i : i + 1],
+                                )
                             )
-                        )
+                        else:
+                            raise RuntimeError("not implemented")
+                        return loss * loss_weight[vals["type"][i]]
+
+                if is_sam:
+                    # SAM two-step optimization with gradient accumulation
+                    loss = self._sam_step(
+                        model, optimizer, compute_loss,
+                        clip_grad_value, clip_grad_norm,
+                        scaler, use_amp,
+                        grad_accum_steps=grad_accum_steps,
+                        is_update_step=is_update_step
+                    )
+                    if is_update_step:
+                        optimizer.zero_grad()
+                else:
+                    # Standard optimization with gradient accumulation
+                    loss = compute_loss()
+
+                    # Scale loss for gradient accumulation
+                    scaled_loss = loss / grad_accum_steps
+                    if scaler is not None:
+                        scaler.scale(scaled_loss).backward()
                     else:
-                        raise RuntimeError("not implemented")
-                    loss = loss * loss_weight[vals["type"][i]]
+                        scaled_loss.backward()
+
+                    # Only update on accumulation boundary
+                    if is_update_step:
+                        if scaler is not None:
+                            scaler.unscale_(optimizer)
+
+                        if clip_grad_norm > 0.0:
+                            nn.utils.clip_grad_norm_(
+                                model.parameters(), max_norm=clip_grad_norm, norm_type=2
+                            )
+                        elif clip_grad_value > 0.0:
+                            nn.utils.clip_grad_value_(
+                                model.parameters(), clip_value=clip_grad_value
+                            )
+
+                        if scaler is not None:
+                            scaler.step(optimizer)
+                            scaler.update()
+                        else:
+                            optimizer.step()
+
+                        optimizer.zero_grad()
 
                 loss_total += loss.item()
 
-                if scaler is not None:
-                    scaler.scale(loss).backward()
-                else:
-                    loss.backward()
+            num += n_batch
 
+        # Handle remaining accumulated gradients at end of epoch
+        if accumulated_samples % grad_accum_steps != 0:
+            if not is_sam:
                 if scaler is not None:
                     scaler.unscale_(optimizer)
 
@@ -231,7 +292,7 @@ class HPOTrainer(Train):
                 else:
                     optimizer.step()
 
-            num += n_batch
+                optimizer.zero_grad()
 
         elapsed_time = time.time() - start
         logging.debug(

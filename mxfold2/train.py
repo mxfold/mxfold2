@@ -29,6 +29,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 
 from mxfold2.ema import EMA
+from mxfold2.sam import SAM, ASAM, GSAM
 
 from mxfold2 import interface
 from mxfold2.dataset import BPseqDataset, FastaDataset, ShapeDataset
@@ -48,13 +49,14 @@ class Train(Common):
         super(Train, self).__init__()
 
 
-    def train(self, epoch: int, model: AbstractFold, optimizer: Optimizer, 
-                loss_fn: nn.Module | dict[str, nn.Module], 
+    def train(self, epoch: int, model: AbstractFold, optimizer: Optimizer,
+                loss_fn: nn.Module | dict[str, nn.Module],
                 data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
                 loss_weight = defaultdict(lambda: 1.),
                 clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0,
-                scaler: Optional[GradScaler] = None, 
-                use_amp: bool = False) -> None:
+                scaler: Optional[GradScaler] = None,
+                use_amp: bool = False,
+                grad_accum_steps: int = 1) -> None:
         model.train()
         if not isinstance(loss_fn, dict):
             loss_fn = {'BPSEQ': loss_fn}
@@ -62,58 +64,88 @@ class Train(Common):
         loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
         start = time.time()
+
+        # Check if using SAM optimizer
+        is_sam = isinstance(optimizer, SAM)
+
+        # Gradient accumulation counter
+        accumulated_samples = 0
+        optimizer.zero_grad()  # Zero gradients once at the start
+
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, vals in data_loader:
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
                 for i in range(n_batch):
-                    optimizer.zero_grad()
-                    
-                    # Use autocast for mixed precision if enabled
-                    with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
-                        if vals['type'][i]=='BPSEQ':
-                            loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
-                        elif vals['type'][i]=='SHAPE': 
-                            loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                    accumulated_samples += 1
+                    is_update_step = (accumulated_samples % grad_accum_steps == 0)
+
+                    # Define loss computation function for SAM
+                    def compute_loss():
+                        with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                            if vals['type'][i] == 'BPSEQ':
+                                loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                            elif vals['type'][i] == 'SHAPE':
+                                loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                            else:
+                                raise RuntimeError('not implemented')
+                            return loss * loss_weight[vals['type'][i]]
+
+                    if is_sam:
+                        # SAM two-step optimization with gradient accumulation
+                        loss = self._sam_step(
+                            model, optimizer, compute_loss,
+                            clip_grad_value, clip_grad_norm,
+                            scaler, use_amp,
+                            grad_accum_steps=grad_accum_steps,
+                            is_update_step=is_update_step
+                        )
+                        if is_update_step:
+                            optimizer.zero_grad()
+                    else:
+                        # Standard optimization with gradient accumulation
+                        loss = compute_loss()
+
+                        # Scale loss for gradient accumulation and backward pass
+                        scaled_loss = loss / grad_accum_steps
+                        if scaler is not None:
+                            scaler.scale(scaled_loss).backward()
                         else:
-                            raise(RuntimeError('not implemented'))
-                        loss = loss * loss_weight[vals['type'][i]]
-                    
+                            scaled_loss.backward()
+
+                        # Only update on accumulation boundary
+                        if is_update_step:
+                            # Gradient clipping with unscaling if using mixed precision
+                            if scaler is not None:
+                                scaler.unscale_(optimizer)
+
+                            if clip_grad_norm > 0.0:
+                                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+                            elif clip_grad_value > 0.0:
+                                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+                            # Workaround for pytorch_optimizer AdaBelief/Lion: ensure state is initialized
+                            # for parameters that didn't have gradients in the first step
+                            if isinstance(optimizer, (po.AdaBelief, po.Lion)):
+                                for group in optimizer.param_groups:
+                                    for p in group['params']:
+                                        if p.grad is not None and len(optimizer.state[p]) == 0:
+                                            optimizer.state[p]['exp_avg'] = torch.zeros_like(p)
+                                            if isinstance(optimizer, po.AdaBelief):
+                                                optimizer.state[p]['exp_avg_var'] = torch.zeros_like(p)
+
+                            # Step the optimizer
+                            if scaler is not None:
+                                scaler.step(optimizer)
+                                scaler.update()
+                            else:
+                                optimizer.step()
+
+                            optimizer.zero_grad()
+
                     loss_total += loss.item()
                     running_loss += loss.item()
-                    
-                    # Scale loss and backward pass
-                    if scaler is not None:
-                        scaler.scale(loss).backward()
-                    else:
-                        loss.backward()
-
-                    # Gradient clipping with unscaling if using mixed precision
-                    if scaler is not None:
-                        scaler.unscale_(optimizer)
-                        
-                    if clip_grad_norm > 0.0:
-                        nn.utils.clip_grad_norm_(model.parameters(),  max_norm=clip_grad_norm, norm_type=2)
-                    elif clip_grad_value > 0.0:
-                        nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
-                    
-                    # Workaround for pytorch_optimizer AdaBelief/Lion: ensure state is initialized
-                    # for parameters that didn't have gradients in the first step
-                    if isinstance(optimizer, (po.AdaBelief, po.Lion)):
-                        for group in optimizer.param_groups:
-                            for p in group['params']:
-                                if p.grad is not None and len(optimizer.state[p]) == 0:
-                                    optimizer.state[p]['exp_avg'] = torch.zeros_like(p)
-                                    if isinstance(optimizer, po.AdaBelief):
-                                        optimizer.state[p]['exp_avg_var'] = torch.zeros_like(p)
-
-                    # Step the optimizer
-                    if scaler is not None:
-                        scaler.step(optimizer)
-                        scaler.update()
-                    else:
-                        optimizer.step()
 
                 num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
@@ -132,8 +164,111 @@ class Train(Common):
                             log_data["train/gpu_memory_reserved"] = torch.cuda.memory_reserved(self.gpu) / 1024**3
                         wandb.log(log_data)
                     running_loss, n_running_loss = 0, 0
+
+        # Handle remaining accumulated gradients at end of epoch
+        if accumulated_samples % grad_accum_steps != 0:
+            if is_sam:
+                # For SAM, we need to do the full two-step update with remaining gradients
+                # This is handled by calling _sam_step with is_update_step=True
+                pass  # Already handled in the loop
+            else:
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+
+                if clip_grad_norm > 0.0:
+                    nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+                elif clip_grad_value > 0.0:
+                    nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+                if scaler is not None:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+
+                optimizer.zero_grad()
+
         elapsed_time = time.time() - start
         print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+
+
+    def _sam_step(self, model: AbstractFold, optimizer: SAM,
+                  compute_loss: callable,
+                  clip_grad_value: float, clip_grad_norm: float,
+                  scaler: Optional[GradScaler], use_amp: bool,
+                  grad_accum_steps: int = 1,
+                  is_update_step: bool = True) -> torch.Tensor:
+        """Perform SAM two-step optimization with AMP and gradient accumulation support.
+
+        Args:
+            model: The model being trained
+            optimizer: SAM optimizer instance
+            compute_loss: Callable that computes and returns the loss
+            clip_grad_value: Gradient clipping by value
+            clip_grad_norm: Gradient clipping by norm
+            scaler: GradScaler for AMP (optional)
+            use_amp: Whether AMP is enabled
+            grad_accum_steps: Number of gradient accumulation steps
+            is_update_step: Whether this is an update step (vs accumulation step)
+
+        Returns:
+            The loss value from the first forward pass
+        """
+        is_gsam = isinstance(optimizer, GSAM)
+
+        # === First forward-backward pass ===
+        loss = compute_loss()
+        scaled_loss = loss / grad_accum_steps
+
+        if scaler is not None:
+            scaler.scale(scaled_loss).backward()
+        else:
+            scaled_loss.backward()
+
+        # Only perform SAM two-step update on update steps
+        if is_update_step:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+
+            # Apply gradient clipping before perturbation
+            if clip_grad_norm > 0.0:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+            elif clip_grad_value > 0.0:
+                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+            # Apply perturbation (first step)
+            if is_gsam:
+                optimizer.first_step(zero_grad=True, loss=loss)
+            else:
+                optimizer.first_step(zero_grad=True)
+
+            # === Second forward-backward pass (at perturbed weights) ===
+            loss_perturbed = compute_loss()
+            scaled_loss_perturbed = loss_perturbed / grad_accum_steps
+
+            if scaler is not None:
+                scaler.scale(scaled_loss_perturbed).backward()
+                scaler.unscale_(optimizer)
+            else:
+                scaled_loss_perturbed.backward()
+
+            # Apply gradient clipping before update
+            if clip_grad_norm > 0.0:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+            elif clip_grad_value > 0.0:
+                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+            # Restore weights and apply update (second step)
+            if is_gsam:
+                optimizer.second_step(zero_grad=False, loss=loss_perturbed)
+            else:
+                optimizer.second_step(zero_grad=False)
+
+            # Update scaler if using AMP
+            if scaler is not None:
+                scaler.update()
+
+        return loss
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
@@ -246,16 +381,10 @@ class Train(Common):
 
 
     def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
-                        shape_model: Optional[list[nn.Module]] = None) -> Optimizer:
-        # if hasattr(model, 'zuker') and hasattr(model, 'turner'):
-        #     optim_params = [
-        #         {'params': model.zuker.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-        #         {'params': model.turner.parameters(), 'lr': lr*10, 'weight_decay': l2_weight/10},
-        #     ]
-        # else:
-        #     optim_params = [
-        #         {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
-        #     ]
+                        shape_model: Optional[list[nn.Module]] = None,
+                        sam_type: Optional[str] = None,
+                        sam_rho: float = 0.05,
+                        sam_alpha: float = 0.1) -> Optimizer:
         optim_params = [
             {'params': model.parameters(), 'lr': lr, 'weight_decay': l2_weight},
         ]
@@ -263,23 +392,34 @@ class Train(Common):
             for sm in shape_model:
                 optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
 
-        if optimizer == 'Adam':
-            return Adam(optim_params, amsgrad=False)
-        elif optimizer =='AdamW':
-            return AdamW(optim_params, amsgrad=False)
-        elif optimizer == 'RMSprop':
-            return RMSprop(optim_params)
-        elif optimizer == 'SGD':
-            return SGD(optim_params, nesterov=True, momentum=0.9)
-            #return optim.SGD(optim_params)
-        elif optimizer == 'ASGD':
-            return ASGD(optim_params)
-        elif optimizer == 'AdaBelief':
-            return po.AdaBelief(optim_params)
-        elif optimizer == 'Lion':
-            return po.Lion(optim_params)
+        # Define base optimizer classes and their kwargs
+        base_optimizer_config = {
+            'Adam': (Adam, {'amsgrad': False}),
+            'AdamW': (AdamW, {'amsgrad': False}),
+            'RMSprop': (RMSprop, {}),
+            'SGD': (SGD, {'nesterov': True, 'momentum': 0.9}),
+            'ASGD': (ASGD, {}),
+            'AdaBelief': (po.AdaBelief, {}),
+            'Lion': (po.Lion, {}),
+        }
+
+        if optimizer not in base_optimizer_config:
+            raise RuntimeError(f'not implemented: {optimizer}')
+
+        base_optimizer_class, base_kwargs = base_optimizer_config[optimizer]
+
+        # Apply SAM wrapper if requested
+        if sam_type is None or sam_type == 'None':
+            # Create regular optimizer
+            return base_optimizer_class(optim_params, **base_kwargs)
+        elif sam_type == 'SAM':
+            return SAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
+        elif sam_type == 'ASAM':
+            return ASAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
+        elif sam_type == 'GSAM':
+            return GSAM(optim_params, base_optimizer_class, rho=sam_rho, alpha=sam_alpha, **base_kwargs)
         else:
-            raise(RuntimeError('not implemented'))
+            raise RuntimeError(f'not implemented SAM type: {sam_type}')
 
 
     def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
@@ -446,7 +586,13 @@ class Train(Common):
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
 
-        optimizer = self.build_optimizer(args.optimizer, model, args.lr, args.l2_weight, shape_model=shape_model)
+        optimizer = self.build_optimizer(
+            args.optimizer, model, args.lr, args.l2_weight,
+            shape_model=shape_model,
+            sam_type=getattr(args, 'sam_type', None),
+            sam_rho=getattr(args, 'sam_rho', 0.05),
+            sam_alpha=getattr(args, 'sam_alpha', 0.1)
+        )
 
         loss_fn = {
             'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
@@ -504,7 +650,8 @@ class Train(Common):
             epoch_start = time.time()
             self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
                         loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm,
-                        scaler=scaler, use_amp=use_amp)
+                        scaler=scaler, use_amp=use_amp,
+                        grad_accum_steps=getattr(args, 'grad_accum_steps', 1))
 
             # Get current learning rate
             current_lr = args.lr
@@ -639,6 +786,14 @@ class Train(Common):
                             help='EMA decay factor (default: 0.999)')
         gparser.add_argument('--ema-start', type=float, default=0,
                             help='epoch to start EMA (default: 0). If < 1.0, fraction of total epochs.')
+        gparser.add_argument('--sam-type', choices=('None', 'SAM', 'ASAM', 'GSAM'), default='None',
+                            help="SAM optimizer type ('None', 'SAM', 'ASAM', 'GSAM')")
+        gparser.add_argument('--sam-rho', type=float, default=0.05,
+                            help='SAM perturbation radius (default: 0.05, use 0.5 for ASAM)')
+        gparser.add_argument('--sam-alpha', type=float, default=0.1,
+                            help='GSAM gap weighting parameter (default: 0.1)')
+        gparser.add_argument('--grad-accum-steps', type=int, default=1,
+                            help='Gradient accumulation steps (default: 1, no accumulation)')
 
         gparser = subparser.add_argument_group("Setting for loss function")
         gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
