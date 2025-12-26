@@ -144,7 +144,7 @@ class ShapeRankLoss(nn.Module):
                 n_compare = p.sum() * 0  # Maintain gradient connection
                 n_violate = p.sum() * 0
 
-            losses.append(n_violate / (n_compare + 1e-5))
+            losses.append(n_violate / (n_compare.detach() + 1e-5))
 
         losses = torch.stack(losses)
         # Use autograd.grad to get gradients only for paired, without affecting other parameters
