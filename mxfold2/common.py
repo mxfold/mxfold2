@@ -154,8 +154,8 @@ class Common:
     @classmethod
     def add_network_args(cls, subparser):
         gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'Positional', 'Mix', 'Mix1D', 'CFMix'), default='Turner', 
-                        help="select parameter model (default: 'Turner')")
+        gparser.add_argument('--model', choices=('Turner', 'CONTRAfold', 'Positional', 'Mix', 'Mix1D', 'CFMix'), default='Mix', 
+                        help="select parameter model (default: 'Mix')")
         gparser.add_argument('--additional-params', default=None, action='store_true')
         gparser.add_argument('--embed-size', type=int, default=0,
                         help='the dimention of embedding (default: 0 == onehot)')
