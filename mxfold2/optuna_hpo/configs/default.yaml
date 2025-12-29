@@ -16,8 +16,8 @@ optimizer:
 
 # Learning rate (log scale)
 lr:
-  min: 0.0001
-  max: 0.01
+  min: 1.0e-4
+  max: 1.0e-2
   log: true
 
 # Learning rate scheduler
@@ -26,7 +26,11 @@ scheduler:
   - CyclicLR
   - CosineAnnealingLR
 
-# Dropout rate for CNN and LSTM
+# ============================================================================
+# Regularization Parameters
+# ============================================================================
+
+# Default dropout rate (fallback for all layers)
 dropout_rate:
   min: 0.0
   max: 0.5
@@ -36,16 +40,61 @@ fc_dropout_rate:
   min: 0.0
   max: 0.5
 
+# Granular dropout rates (override default dropout_rate)
+dropout_rate_1d_cnn:
+  min: 0.0
+  max: 0.5
+
+dropout_rate_2d_cnn:
+  min: 0.0
+  max: 0.5
+
+dropout_rate_lstm:
+  min: 0.0
+  max: 0.5
+
 # L2 regularization weight (log scale)
 l2_weight:
-  min: 0.00001
-  max: 0.1
+  min: 1.0e-5
+  max: 1.0e-1
   log: true
 
 # Gradient clipping (norm-based)
 clip_grad_norm:
   min: 0.0
   max: 5.0
+
+# ============================================================================
+# Stochastic Depth Parameters
+# ============================================================================
+# Stochastic depth (drop path) regularization for ResNet blocks.
+# Values represent survival probability (1.0 = disabled, lower = more aggressive).
+# Can use either min/max range or categorical choices.
+# Choices can be single values ("0.9") or layer-wise patterns ("0.95,0.90,0.85,0.80").
+
+# Whether to optimize stochastic depth parameters
+optimize_stochastic_depth: false
+
+# 1D CNN stochastic depth (encoder CNN layers)
+stochastic_depth_1d:
+  min: 0.8
+  max: 1.0
+  # Uncomment below to use categorical choices instead of range:
+  # choices:
+  #   - "1.0"                                    # disabled
+  #   - "0.9"                                    # mild (single value for all layers)
+  #   - "0.95,0.90,0.85,0.80,0.75,0.70,0.65,0.60"  # progressive (layer-wise)
+  #   - "0.90,0.80,0.70,0.60,0.50,0.40,0.30,0.20"  # aggressive progressive
+
+# 2D CNN stochastic depth (paired layer CNN)
+stochastic_depth_2d:
+  min: 0.8
+  max: 1.0
+  # Uncomment below to use categorical choices instead of range:
+  # choices:
+  #   - "1.0"
+  #   - "0.9"
+  #   - "0.95,0.90,0.85,0.80,0.75,0.70,0.65,0.60"
 
 # ============================================================================
 # Model Architecture Parameters
@@ -110,7 +159,7 @@ perturb:
 
 # Nu parameter for F1 loss (log scale)
 nu:
-  min: 0.01
+  min: 1.0e-2
   max: 1.0
   log: true
 
@@ -145,8 +194,42 @@ shape_margin:
   min: 0.0
   max: 1.0
 
-# SHAPE pseudo FY weight (only for shape_rank loss)
+# SHAPE pseudo FY weight (only for shape_rank and shape_nll)
 # Uses Turner-predicted structure as pseudo ground truth for FY loss
 shape_pseudo_fy_weight:
   min: 0.0
   max: 1.0
+
+# ============================================================================
+# SAM (Sharpness-Aware Minimization) Parameters
+# ============================================================================
+
+# SAM type (None = disabled)
+sam_type:
+  - None
+  - SAM
+  - ASAM
+  - GSAM
+
+# SAM rho parameter (perturbation radius, log scale)
+# Only used when sam_type != None
+sam_rho:
+  min: 1.0e-2
+  max: 1.0
+  log: true
+
+# SAM alpha parameter (only for GSAM)
+sam_alpha:
+  min: 1.0e-2
+  max: 0.5
+
+# ============================================================================
+# Training Parameters
+# ============================================================================
+
+# Gradient accumulation steps
+grad_accum_steps:
+  - 1
+  - 2
+  - 4
+  - 8

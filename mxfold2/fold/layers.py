@@ -11,16 +11,43 @@ from .embedding import OneHotEmbedding, SparseEmbedding
 from .transformer import TransformerLayer
 
 
+def drop_path(x: torch.Tensor, survival_prob: float, training: bool) -> torch.Tensor:
+    """Apply stochastic depth (drop path) regularization.
+
+    During training, randomly drops the entire residual path with probability (1 - survival_prob).
+    During inference, returns x unchanged.
+
+    Args:
+        x: Input tensor (residual to potentially drop)
+        survival_prob: Probability that the path survives (1.0 = always survives = disabled)
+        training: Whether in training mode
+
+    Returns:
+        Scaled tensor or zeros
+    """
+    if not training or survival_prob >= 1.0:
+        return x
+    if survival_prob <= 0.0:
+        return torch.zeros_like(x)
+
+    batch_size = x.shape[0]
+    random_tensor = torch.rand(batch_size, *([1] * (x.dim() - 1)), device=x.device, dtype=x.dtype)
+    binary_mask = (random_tensor < survival_prob).float()
+    return x * binary_mask / survival_prob  # Scale to maintain expected value
+
+
 class CNNLayer(nn.Module):
     def __init__(self, n_in: int,
         num_filters: tuple[int, ...] = (128,),
         filter_size: tuple[int, ...] = (7,),
         pool_size: tuple[int, ...] = (1,),
         dilation: int = 1, dropout_rate: float = 0.0, resnet: bool = False,
-        resnet_every_n: int = 1) -> None:
+        resnet_every_n: int = 1,
+        stochastic_depth_probs: tuple[float, ...] | None = None) -> None:
         super(CNNLayer, self).__init__()
         self.resnet = resnet
         self.resnet_every_n = resnet_every_n
+        self.stochastic_depth_probs = stochastic_depth_probs
         self.net = nn.ModuleList()
         for n_out, ksize, p in zip(num_filters, filter_size, pool_size):
             self.net.append( 
@@ -41,6 +68,9 @@ class CNNLayer(nn.Module):
             x_a = net(x)
             # apply skip connection at the last layer of each block
             if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                # Apply stochastic depth to residual
+                if self.stochastic_depth_probs is not None and i < len(self.stochastic_depth_probs):
+                    x_a = drop_path(x_a, self.stochastic_depth_probs[i], self.training)
                 x = x_skip + x_a
             else:
                 x = x_a
@@ -54,8 +84,12 @@ class CNNLSTMEncoder(nn.Module):
             pool_size: tuple[int, ...] = (1,),
             dilation: int = 0,
             num_lstm_layers: int = 0, num_lstm_units: int = 0,
-            num_att: int = 0, dropout_rate: float = 0.0, resnet: bool = True,
-            resnet_every_n: int = 1) -> None:
+            num_att: int = 0, dropout_rate: float = 0.0,
+            dropout_rate_1d_cnn: float | None = None,
+            dropout_rate_lstm: float | None = None,
+            resnet: bool = True,
+            resnet_every_n: int = 1,
+            stochastic_depth_probs: tuple[float, ...] | None = None) -> None:
 
         super(CNNLSTMEncoder, self).__init__()
         self.resnet = resnet
@@ -68,21 +102,28 @@ class CNNLSTMEncoder(nn.Module):
         if num_lstm_layers == 0 and num_lstm_units > 0:
             num_lstm_layers = 1
 
-        self.dropout = nn.Dropout(p=dropout_rate)
+        # Resolve dropout rates with fallback
+        effective_cnn_dropout = dropout_rate_1d_cnn if dropout_rate_1d_cnn is not None else dropout_rate
+        effective_lstm_dropout = dropout_rate_lstm if dropout_rate_lstm is not None else dropout_rate
+
+        self.dropout = nn.Dropout(p=effective_lstm_dropout)
         self.conv = self.lstm = self.att = None
 
         if len(num_filters) > 0 and num_filters[0] > 0:
-            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation, dropout_rate=dropout_rate, resnet=self.resnet, resnet_every_n=self.resnet_every_n)
+            self.conv = CNNLayer(n_in, num_filters, filter_size, pool_size, dilation,
+                                 dropout_rate=effective_cnn_dropout, resnet=self.resnet,
+                                 resnet_every_n=self.resnet_every_n,
+                                 stochastic_depth_probs=stochastic_depth_probs)
             self.n_out = n_in = num_filters[-1]
 
         if num_lstm_layers > 0:
-            self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True, 
-                            dropout=dropout_rate if num_lstm_layers>1 else 0)
+            self.lstm = nn.LSTM(n_in, num_lstm_units, num_layers=num_lstm_layers, batch_first=True, bidirectional=True,
+                            dropout=effective_lstm_dropout if num_lstm_layers>1 else 0)
             self.n_out = n_in = num_lstm_units*2
             self.lstm_ln = nn.LayerNorm(self.n_out)
 
         if num_att > 0:
-            self.att = nn.MultiheadAttention(self.n_out, num_att, dropout=dropout_rate)
+            self.att = nn.MultiheadAttention(self.n_out, num_att, dropout=effective_lstm_dropout)
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor: # (B, n_in, N)
@@ -134,13 +175,16 @@ class PairedLayer(nn.Module):
             ksize: tuple[int, ...] = (),
             fc_layers: tuple[int, ...] = (),
             dropout_rate: float = 0.0,
+            fc_dropout_rate: float = 0.0,
             exclude_diag: bool = True, resnet: bool = True,
             paired_opt: str = "0_1_1",
-            resnet_every_n: int = 1) -> None:
+            resnet_every_n: int = 1,
+            stochastic_depth_probs: tuple[float, ...] | None = None) -> None:
         super(PairedLayer, self).__init__()
 
         self.resnet = resnet
         self.resnet_every_n = resnet_every_n
+        self.stochastic_depth_probs = stochastic_depth_probs
         self.exclude_diag = exclude_diag
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
@@ -148,20 +192,20 @@ class PairedLayer(nn.Module):
         self.conv = nn.ModuleList()
         for m, k in zip(filters, ksize):
             self.conv.append(
-                nn.Sequential( 
-                    nn.Conv2d(n_in, m, k, padding=k//2), 
+                nn.Sequential(
+                    nn.Conv2d(n_in, m, k, padding=k//2),
                     nn.GroupNorm(1, m),
-                    nn.CELU(), 
+                    nn.CELU(),
                     nn.Dropout(p=dropout_rate) ) )
             n_in = m
 
         fc = []
         for m in fc_layers:
             fc += [
-                nn.Linear(n_in, m), 
+                nn.Linear(n_in, m),
                 nn.LayerNorm(m),
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate) ]
+                nn.CELU(),
+                nn.Dropout(p=fc_dropout_rate) ]
             n_in = m
         fc += [ nn.Linear(n_in, n_out) ]
         self.fc = nn.Sequential(*fc)
@@ -182,6 +226,9 @@ class PairedLayer(nn.Module):
                 x_skip = x
             x_a = conv(x)
             if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                # Apply stochastic depth to residual
+                if self.stochastic_depth_probs is not None and i < len(self.stochastic_depth_probs):
+                    x_a = drop_path(x_a, self.stochastic_depth_probs[i], self.training)
                 x = x_skip + x_a
             else:
                 x = x_a
@@ -206,6 +253,9 @@ class PairedLayer(nn.Module):
                 x_skip = x
             x_a = conv(x)
             if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                # Apply stochastic depth to residual
+                if self.stochastic_depth_probs is not None and i < len(self.stochastic_depth_probs):
+                    x_a = drop_path(x_a, self.stochastic_depth_probs[i], self.training)
                 x = x_skip + x_a
             else:
                 x = x_a
@@ -227,6 +277,9 @@ class PairedLayer(nn.Module):
                 x_skip = x
             x_a = conv(x)
             if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                # Apply stochastic depth to residual
+                if self.stochastic_depth_probs is not None and i < len(self.stochastic_depth_probs):
+                    x_a = drop_path(x_a, self.stochastic_depth_probs[i], self.training)
                 x = x_skip + x_a
             else:
                 x = x_a
@@ -243,12 +296,16 @@ class UnpairedLayer(nn.Module):
         filters: tuple[int, ...] = (),
         ksize: tuple[int, ...] = (),
         fc_layers: tuple[int, ...] = (),
-        dropout_rate: float = 0.0, resnet: bool = True,
-        resnet_every_n: int = 1) -> None:
+        dropout_rate: float = 0.0,
+        fc_dropout_rate: float = 0.0,
+        resnet: bool = True,
+        resnet_every_n: int = 1,
+        stochastic_depth_probs: tuple[float, ...] | None = None) -> None:
         super(UnpairedLayer, self).__init__()
 
         self.resnet = resnet
         self.resnet_every_n = resnet_every_n
+        self.stochastic_depth_probs = stochastic_depth_probs
         while len(filters) > len(ksize):
             ksize = tuple(ksize) + (ksize[-1],)
 
@@ -256,19 +313,19 @@ class UnpairedLayer(nn.Module):
         for m, k in zip(filters, ksize):
             self.conv.append(
                 nn.Sequential(
-                    nn.Conv1d(n_in, m, k, padding=k//2), 
+                    nn.Conv1d(n_in, m, k, padding=k//2),
                     nn.GroupNorm(1, m),
-                    nn.CELU(), 
+                    nn.CELU(),
                     nn.Dropout(p=dropout_rate) ) )
             n_in = m
 
         fc = []
         for m in fc_layers:
             fc += [
-                nn.Linear(n_in, m), 
+                nn.Linear(n_in, m),
                 nn.LayerNorm(m),
-                nn.CELU(), 
-                nn.Dropout(p=dropout_rate)]
+                nn.CELU(),
+                nn.Dropout(p=fc_dropout_rate)]
             n_in = m
         fc += [ nn.Linear(n_in, n_out) ] # , nn.LayerNorm(n_out) ]
         self.fc = nn.Sequential(*fc)
@@ -283,6 +340,9 @@ class UnpairedLayer(nn.Module):
                 x_skip = x
             x_a = conv(x)
             if self.resnet and (i + 1) % self.resnet_every_n == 0 and x_skip.shape[1] == x_a.shape[1]:
+                # Apply stochastic depth to residual
+                if self.stochastic_depth_probs is not None and i < len(self.stochastic_depth_probs):
+                    x_a = drop_path(x_a, self.stochastic_depth_probs[i], self.training)
                 x = x_skip + x_a
             else:
                 x = x_a
@@ -324,6 +384,20 @@ class LengthLayer(nn.Module):
 
 
 class NeuralNet(nn.Module):
+    @staticmethod
+    def _parse_stochastic_depth(value: str | None, num_layers: int) -> tuple[float, ...] | None:
+        """Parse stochastic depth string to tuple of survival probabilities."""
+        if value is None:
+            return None
+        values = [float(x.strip()) for x in value.split(',')]
+        if len(values) == 1:
+            # Single value: apply to all layers
+            return tuple([values[0]] * num_layers)
+        elif len(values) == num_layers:
+            return tuple(values)
+        else:
+            raise ValueError(f"Stochastic depth: expected 1 or {num_layers} values, got {len(values)}")
+
     def __init__(self, embed_size: int = 0,
             num_filters: tuple[int, ...] = (96,),
             filter_size: tuple[int, ...] = (5,),
@@ -336,7 +410,13 @@ class NeuralNet(nn.Module):
             num_paired_filters: tuple[int, ...] = (),
             paired_filter_size: tuple[int, ...] = (),
             num_hidden_units: tuple[int, ...] = (32,),
-            dropout_rate: float = 0.0, fc_dropout_rate: float = 0.0,
+            dropout_rate: float = 0.0,
+            dropout_rate_1d_cnn: float | None = None,
+            dropout_rate_2d_cnn: float | None = None,
+            dropout_rate_lstm: float | None = None,
+            fc_dropout_rate: float = 0.0,
+            stochastic_depth_1d: str | None = None,
+            stochastic_depth_2d: str | None = None,
             exclude_diag: bool = True,
             n_out_paired_layers: int = 0, n_out_unpaired_layers: int = 0,
             resnet_every_n: int = 1,
@@ -349,11 +429,20 @@ class NeuralNet(nn.Module):
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
+        # Parse stochastic depth strings
+        sd_1d_probs = self._parse_stochastic_depth(stochastic_depth_1d, len(num_filters))
+        sd_2d_probs = self._parse_stochastic_depth(stochastic_depth_2d, len(num_paired_filters))
+
+        # Resolve dropout rates with fallback
+        effective_1d_cnn_dropout = dropout_rate_1d_cnn if dropout_rate_1d_cnn is not None else dropout_rate
+        effective_2d_cnn_dropout = dropout_rate_2d_cnn if dropout_rate_2d_cnn is not None else dropout_rate
+
         if num_transformer_layers==0:
             self.encoder = CNNLSTMEncoder(n_in,
                 num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
                 num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate,
-                resnet_every_n=resnet_every_n)
+                dropout_rate_1d_cnn=dropout_rate_1d_cnn, dropout_rate_lstm=dropout_rate_lstm,
+                resnet_every_n=resnet_every_n, stochastic_depth_probs=sd_1d_probs)
         else:
             self.encoder = TransformerLayer(n_in, n_head=num_transformer_att,
                             n_hidden=num_transformer_hidden_units,
@@ -370,14 +459,18 @@ class NeuralNet(nn.Module):
             self.fc_paired = PairedLayer(n_in_paired, n_out_paired_layers,
                                     filters=num_paired_filters, ksize=paired_filter_size,
                                     exclude_diag=exclude_diag,
-                                    fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate,
+                                    fc_layers=num_hidden_units, dropout_rate=effective_2d_cnn_dropout,
+                                    fc_dropout_rate=fc_dropout_rate,
                                     paired_opt=kwargs['paired_opt'],
-                                    resnet_every_n=resnet_every_n)
+                                    resnet_every_n=resnet_every_n,
+                                    stochastic_depth_probs=sd_2d_probs)
             if n_out_unpaired_layers > 0:
                 self.fc_unpaired = UnpairedLayer(n_in, n_out_unpaired_layers,
                                         filters=num_paired_filters, ksize=paired_filter_size,
-                                        fc_layers=num_hidden_units, dropout_rate=fc_dropout_rate,
-                                        resnet_every_n=resnet_every_n)
+                                        fc_layers=num_hidden_units, dropout_rate=effective_1d_cnn_dropout,
+                                        fc_dropout_rate=fc_dropout_rate,
+                                        resnet_every_n=resnet_every_n,
+                                        stochastic_depth_probs=sd_1d_probs)
             else:
                 self.fc_unpaired = None
 
@@ -433,7 +526,11 @@ class NeuralNet1D(nn.Module):
             num_transformer_layers: int = 0, num_transformer_hidden_units: int = 2048,
             num_transformer_att: int = 8,
             num_hidden_units: tuple[int, ...] = (32,),
-            dropout_rate: float = 0.0, fc_dropout_rate: float = 0.0,
+            dropout_rate: float = 0.0,
+            dropout_rate_1d_cnn: float | None = None,
+            dropout_rate_lstm: float | None = None,
+            fc_dropout_rate: float = 0.0,
+            stochastic_depth_1d: str | None = None,
             n_out: int = 0,
             resnet_every_n: int = 1,
             **kwargs: dict[str, Any]) -> None:
@@ -443,11 +540,15 @@ class NeuralNet1D(nn.Module):
         self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
         n_in = self.embedding.n_out
 
+        # Parse stochastic depth string
+        sd_1d_probs = NeuralNet._parse_stochastic_depth(stochastic_depth_1d, len(num_filters))
+
         if num_transformer_layers==0:
             self.encoder = CNNLSTMEncoder(n_in,
                 num_filters=num_filters, filter_size=filter_size, pool_size=pool_size, dilation=dilation, num_att=num_att,
                 num_lstm_layers=num_lstm_layers, num_lstm_units=num_lstm_units, dropout_rate=dropout_rate,
-                resnet_every_n=resnet_every_n)
+                dropout_rate_1d_cnn=dropout_rate_1d_cnn, dropout_rate_lstm=dropout_rate_lstm,
+                resnet_every_n=resnet_every_n, stochastic_depth_probs=sd_1d_probs)
         else:
             self.encoder = TransformerLayer(n_in, n_head=num_transformer_att,
                             n_hidden=num_transformer_hidden_units,

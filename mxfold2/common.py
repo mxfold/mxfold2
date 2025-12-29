@@ -63,7 +63,12 @@ class Common:
             'num_paired_filters': args.num_paired_filters,
             'paired_filter_size': args.paired_filter_size,
             'dropout_rate': args.dropout_rate,
+            'dropout_rate_1d_cnn': args.dropout_rate_1d_cnn if args.dropout_rate_1d_cnn is not None else args.dropout_rate,
+            'dropout_rate_2d_cnn': args.dropout_rate_2d_cnn if args.dropout_rate_2d_cnn is not None else args.dropout_rate,
+            'dropout_rate_lstm': args.dropout_rate_lstm if args.dropout_rate_lstm is not None else args.dropout_rate,
             'fc_dropout_rate': args.fc_dropout_rate,
+            'stochastic_depth_1d': args.stochastic_depth_1d,
+            'stochastic_depth_2d': args.stochastic_depth_2d,
             'num_att': args.num_att,
             'pair_join': args.pair_join,
             'no_split_lr': args.no_split_lr,
@@ -185,8 +190,18 @@ class Common:
                         help='the number of the hidden units of full connected layers (default: 32)')
         gparser.add_argument('--dropout-rate', type=float, default=0.0,
                         help='dropout rate of the CNN and LSTM units (default: 0.0)')
+        gparser.add_argument('--dropout-rate-1d-cnn', type=float, default=None,
+                        help='dropout rate for 1D CNN layers (default: use --dropout-rate)')
+        gparser.add_argument('--dropout-rate-2d-cnn', type=float, default=None,
+                        help='dropout rate for 2D CNN layers (default: use --dropout-rate)')
+        gparser.add_argument('--dropout-rate-lstm', type=float, default=None,
+                        help='dropout rate for LSTM layers (default: use --dropout-rate)')
         gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
                         help='dropout rate of the hidden units (default: 0.0)')
+        gparser.add_argument('--stochastic-depth-1d', type=str, default=None,
+                        help='Survival probability for 1D CNN stochastic depth (comma-separated or single value, default: disabled)')
+        gparser.add_argument('--stochastic-depth-2d', type=str, default=None,
+                        help='Survival probability for 2D CNN stochastic depth (comma-separated or single value, default: disabled)')
         gparser.add_argument('--num-att', type=int, default=0,
                         help='the number of the heads of attention (default: 0)')
         gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 

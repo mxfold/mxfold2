@@ -28,6 +28,26 @@ class SearchSpaceConfig:
     dropout_rate_max: float = 0.5
     fc_dropout_rate_min: float = 0.0
     fc_dropout_rate_max: float = 0.5
+
+    # Granular dropout parameters
+    dropout_rate_1d_cnn_min: float = 0.0
+    dropout_rate_1d_cnn_max: float = 0.5
+    dropout_rate_2d_cnn_min: float = 0.0
+    dropout_rate_2d_cnn_max: float = 0.5
+    dropout_rate_lstm_min: float = 0.0
+    dropout_rate_lstm_max: float = 0.5
+
+    # Stochastic depth parameters (survival probability)
+    # Can be specified as min/max range OR as a list of categorical choices
+    stochastic_depth_1d_min: float = 0.8
+    stochastic_depth_1d_max: float = 1.0
+    stochastic_depth_2d_min: float = 0.8
+    stochastic_depth_2d_max: float = 1.0
+    # Categorical choices (if provided, these take precedence over min/max)
+    stochastic_depth_1d_choices: list[str] | None = None
+    stochastic_depth_2d_choices: list[str] | None = None
+    optimize_stochastic_depth: bool = False  # Whether to optimize stochastic depth
+
     l2_weight_min: float = 1e-5
     l2_weight_max: float = 0.1
     l2_weight_log: bool = True
@@ -106,6 +126,8 @@ class SearchSpaceConfig:
                     flat_data[f"{key}_log"] = value["log"]
                 if "step" in value:
                     flat_data[f"{key}_step"] = value["step"]
+                if "choices" in value:
+                    flat_data[f"{key}_choices"] = value["choices"]
             else:
                 flat_data[key] = value
 
@@ -119,6 +141,22 @@ class SearchSpaceConfig:
             "scheduler": self.scheduler,
             "dropout_rate": {"min": self.dropout_rate_min, "max": self.dropout_rate_max},
             "fc_dropout_rate": {"min": self.fc_dropout_rate_min, "max": self.fc_dropout_rate_max},
+            # Granular dropout
+            "dropout_rate_1d_cnn": {"min": self.dropout_rate_1d_cnn_min, "max": self.dropout_rate_1d_cnn_max},
+            "dropout_rate_2d_cnn": {"min": self.dropout_rate_2d_cnn_min, "max": self.dropout_rate_2d_cnn_max},
+            "dropout_rate_lstm": {"min": self.dropout_rate_lstm_min, "max": self.dropout_rate_lstm_max},
+            # Stochastic depth (supports both range and categorical choices)
+            "stochastic_depth_1d": {
+                "min": self.stochastic_depth_1d_min,
+                "max": self.stochastic_depth_1d_max,
+                "choices": self.stochastic_depth_1d_choices,
+            },
+            "stochastic_depth_2d": {
+                "min": self.stochastic_depth_2d_min,
+                "max": self.stochastic_depth_2d_max,
+                "choices": self.stochastic_depth_2d_choices,
+            },
+            "optimize_stochastic_depth": self.optimize_stochastic_depth,
             "l2_weight": {"min": self.l2_weight_min, "max": self.l2_weight_max, "log": self.l2_weight_log},
             "clip_grad_norm": {"min": self.clip_grad_norm_min, "max": self.clip_grad_norm_max},
             "embed_size": self.embed_size,
@@ -174,6 +212,41 @@ def suggest_hyperparameters(
     params["fc_dropout_rate"] = trial.suggest_float(
         "fc_dropout_rate", config.fc_dropout_rate_min, config.fc_dropout_rate_max
     )
+
+    # Granular dropout parameters
+    params["dropout_rate_1d_cnn"] = trial.suggest_float(
+        "dropout_rate_1d_cnn", config.dropout_rate_1d_cnn_min, config.dropout_rate_1d_cnn_max
+    )
+    params["dropout_rate_2d_cnn"] = trial.suggest_float(
+        "dropout_rate_2d_cnn", config.dropout_rate_2d_cnn_min, config.dropout_rate_2d_cnn_max
+    )
+    params["dropout_rate_lstm"] = trial.suggest_float(
+        "dropout_rate_lstm", config.dropout_rate_lstm_min, config.dropout_rate_lstm_max
+    )
+
+    # Stochastic depth parameters (optional)
+    if config.optimize_stochastic_depth:
+        # Use categorical choices if provided, otherwise use float range
+        if config.stochastic_depth_1d_choices:
+            params["stochastic_depth_1d"] = trial.suggest_categorical(
+                "stochastic_depth_1d", config.stochastic_depth_1d_choices
+            )
+        else:
+            params["stochastic_depth_1d"] = str(trial.suggest_float(
+                "stochastic_depth_1d", config.stochastic_depth_1d_min, config.stochastic_depth_1d_max
+            ))
+        if config.stochastic_depth_2d_choices:
+            params["stochastic_depth_2d"] = trial.suggest_categorical(
+                "stochastic_depth_2d", config.stochastic_depth_2d_choices
+            )
+        else:
+            params["stochastic_depth_2d"] = str(trial.suggest_float(
+                "stochastic_depth_2d", config.stochastic_depth_2d_min, config.stochastic_depth_2d_max
+            ))
+    else:
+        params["stochastic_depth_1d"] = None
+        params["stochastic_depth_2d"] = None
+
     params["l2_weight"] = trial.suggest_float(
         "l2_weight", config.l2_weight_min, config.l2_weight_max, log=config.l2_weight_log
     )
