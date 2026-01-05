@@ -27,7 +27,13 @@ class ShapeRankLoss(nn.Module):
             num_counts = ctx.num_counts
             pred_counts = saved[:num_counts]
             ref_counts = saved[num_counts:num_counts * 2]
-            grads = tuple(p - r for p, r in zip(pred_counts, ref_counts))
+            # Apply grad_output to properly propagate gradients through the chain rule
+            # grad_output shape: (batch,) or scalar
+            # pred_counts[i], ref_counts[i] shape: (batch, features)
+            grads = tuple(
+                grad_output.view(-1, 1) * (p - r)
+                for p, r in zip(pred_counts, ref_counts)
+            )
             return (None, None) + (None,) * (num_counts * 2) + grads
 
 
