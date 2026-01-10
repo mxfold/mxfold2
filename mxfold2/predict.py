@@ -14,7 +14,7 @@ from torch.amp import autocast
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
-from mxfold2 import interface
+from mxfold2 import interface  # ty:ignore[unresolved-import]
 from mxfold2.compbpseq import accuracy, compare_bpseq
 from mxfold2.dataset import BPseqDataset, FastaDataset
 from mxfold2.fold.fold import AbstractFold
@@ -33,7 +33,7 @@ class Predict(Common):
                 output_bpp: Optional[str] = None, 
                 result: Optional[str] = None, 
                 use_constraint: bool = False,
-                shape_list: Optional[list[str]] = None,
+                shape_list: Optional[list[Optional[str]]] = None,
                 shape_intercept: float = 0.0,
                 shape_slope: float = 0.0,
                 use_amp: bool = False) -> None:
@@ -59,7 +59,7 @@ class Predict(Common):
                 seq_processed += len(seqs)
                 
                 # Use autocast for mixed precision inference
-                with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
                     if output_bpp is None:
                         scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
                         pfs = bpps = [None] * len(preds)
@@ -126,8 +126,8 @@ class Predict(Common):
                 model = AveragedModel(model)
             model.load_state_dict(p)
 
-        if args.gpu >= 0:
-            model.to(torch.device("cuda", args.gpu))
+        device, self.device_type = self.get_device(args.gpu)
+        model.to(device)
 
         shape_list = None
         if args.shape is not None: 
@@ -140,7 +140,7 @@ class Predict(Common):
             shape_list = [args.shape_file]
 
         # Enable mixed precision if GPU is being used and AMP is available
-        use_amp = hasattr(args, 'use_amp') and args.use_amp and args.gpu >= 0
+        use_amp = hasattr(args, 'use_amp') and args.use_amp and self.device_type in ('cuda', 'mps')
         
         self.predict(model=model, data_loader=test_loader, 
                     output_bpseq=args.bpseq, output_bpp=args.bpp,
@@ -150,7 +150,7 @@ class Predict(Common):
                     use_amp=use_amp)
 
 
-    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.tensor:
+    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.Tensor:
         r = []
         with open(fname) as f:
             for l in f:
@@ -166,7 +166,7 @@ class Predict(Common):
                     r.append(-999)
                 r[idx-1] = val
         # Deigan’s pseudoenergy approach
-        r = torch.tensor(r, dtype=float)
+        r = torch.tensor(r, dtype=torch.float)
         not_na = r > -1
         r[torch.logical_not(not_na)] = 0
         r[not_na] = slope * torch.log(r[not_na]+1) + intercept

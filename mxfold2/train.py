@@ -47,6 +47,7 @@ class Train(Common):
 
     def __init__(self):
         super(Train, self).__init__()
+        self.device_type = 'cpu'  # Will be set in run()
 
 
     def train(self, epoch: int, model: AbstractFold, optimizer: Optimizer,
@@ -83,7 +84,7 @@ class Train(Common):
 
                     # Define loss computation function for SAM
                     def compute_loss():
-                        with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                        with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
                             if vals['type'][i] == 'BPSEQ':
                                 loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                             elif vals['type'][i] == 'SHAPE':
@@ -159,9 +160,10 @@ class Train(Common):
                             "train/loss": running_loss,
                             "train/step": (epoch-1) * n_dataset + num,
                         }
-                        if self.gpu >= 0 and torch.cuda.is_available():
+                        if self.device_type == 'cuda':
                             log_data["train/gpu_memory_allocated"] = torch.cuda.memory_allocated(self.gpu) / 1024**3
                             log_data["train/gpu_memory_reserved"] = torch.cuda.memory_reserved(self.gpu) / 1024**3
+                        # MPS does not provide memory stats via PyTorch API
                         wandb.log(log_data)
                     running_loss, n_running_loss = 0, 0
 
@@ -285,7 +287,7 @@ class Train(Common):
             for fnames, seqs, vals in data_loader:
                 n_batch = len(seqs)
                 for i in range(n_batch):
-                    with autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                    with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
                         if vals['type'][i]=='BPSEQ':
                             loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                         elif vals['type'][i]=='SHAPE': 
@@ -371,8 +373,12 @@ class Train(Common):
 
         # Load GradScaler state if available
         if 'scaler_state_dict' in checkpoint and scaler is None:
-            device = f'cuda:{gpu}' if gpu >= 0 else 'cuda'
-            scaler = GradScaler(device)
+            _, device_type = self.get_device(gpu)
+            if device_type == 'cuda':
+                device_str = f'cuda:{gpu}'
+            else:
+                device_str = device_type
+            scaler = GradScaler(device_str)
             scaler.load_state_dict(checkpoint['scaler_state_dict'])
         elif scaler is not None and 'scaler_state_dict' in checkpoint:
             scaler.load_state_dict(checkpoint['scaler_state_dict'])
@@ -577,11 +583,11 @@ class Train(Common):
                 p = p['model_state_dict']
             model.load_state_dict(p)
 
-        if args.gpu >= 0:
-            model.to(torch.device("cuda", args.gpu))
-            if shape_model is not None:
-                for sm in shape_model:
-                    sm.to(torch.device("cuda", args.gpu))
+        device, self.device_type = self.get_device(args.gpu)
+        model.to(device)
+        if shape_model is not None:
+            for sm in shape_model:
+                sm.to(device)
 
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
@@ -604,10 +610,13 @@ class Train(Common):
         # Initialize GradScaler for mixed precision training
         scaler = None
         use_amp = False
-        if hasattr(args, 'use_amp') and args.use_amp and args.gpu >= 0:
+        if hasattr(args, 'use_amp') and args.use_amp and self.device_type in ('cuda', 'mps'):
             use_amp = True
-            scaler = GradScaler(f'cuda:{args.gpu}')
-            logging.info("Using Automatic Mixed Precision (AMP) training")
+            if self.device_type == 'cuda':
+                scaler = GradScaler(f'cuda:{args.gpu}')
+            else:  # MPS
+                scaler = GradScaler('mps')
+            logging.info(f"Using Automatic Mixed Precision (AMP) training on {self.device_type.upper()}")
 
         # Initialize EMA before resume (so state can be restored)
         if args.ema:

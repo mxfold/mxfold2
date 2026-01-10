@@ -3,10 +3,38 @@ from __future__ import annotations
 from argparse import Namespace
 from mxfold2.fold.fold import AbstractFold
 from typing import Any
+import torch
 
 class Common:
     def init(self):
         pass
+
+    @staticmethod
+    def get_device(gpu: int) -> tuple[torch.device, str]:
+        """Get appropriate device and device type for training/inference.
+
+        Args:
+            gpu: GPU ID (-1 for auto-detect, >=0 for specific CUDA GPU)
+
+        Returns:
+            tuple of (device, device_type):
+                - device: torch.device to use
+                - device_type: str ('cuda', 'mps', or 'cpu') for autocast/GradScaler
+
+        Device selection logic:
+            - gpu >= 0: Use specified CUDA GPU
+            - gpu == -1: Auto-detect (MPS if available, else CPU)
+        """
+        if gpu >= 0:
+            if not torch.cuda.is_available():
+                raise RuntimeError(f"CUDA GPU {gpu} requested but CUDA is not available")
+            return torch.device("cuda", gpu), "cuda"
+        else:
+            # Auto-detect best available device
+            if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+                return torch.device("mps"), "mps"
+            else:
+                return torch.device("cpu"), "cpu"
 
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
         if args.model == 'Turner':

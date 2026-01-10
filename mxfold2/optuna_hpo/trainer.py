@@ -34,6 +34,7 @@ class HPOTrainer(Train):
         super().__init__()
         self.best_f1: float = 0.0
         self.epoch_f1_scores: list[float] = []
+        self.device_type = 'cpu'  # Will be set in train_with_validation()
 
     def train_with_validation(
         self,
@@ -74,12 +75,12 @@ class HPOTrainer(Train):
         if args.shape is not None and args.shape_loss_func == "shape_nll":
             shape_model = [self.build_shape_model(args) for _ in args.shape]
 
-        # Move to GPU if available
-        if args.gpu >= 0:
-            model.to(torch.device("cuda", args.gpu))
-            if shape_model is not None:
-                for sm in shape_model:
-                    sm.to(torch.device("cuda", args.gpu))
+        # Move to appropriate device
+        device, self.device_type = self.get_device(args.gpu)
+        model.to(device)
+        if shape_model is not None:
+            for sm in shape_model:
+                sm.to(device)
 
         # Set threads
         torch.set_num_threads(args.threads)
@@ -109,9 +110,12 @@ class HPOTrainer(Train):
         # Initialize GradScaler for mixed precision
         scaler = None
         use_amp = False
-        if hasattr(args, "use_amp") and args.use_amp and args.gpu >= 0:
+        if hasattr(args, "use_amp") and args.use_amp and self.device_type in ('cuda', 'mps'):
             use_amp = True
-            scaler = GradScaler(f"cuda:{args.gpu}")
+            if self.device_type == 'cuda':
+                scaler = GradScaler(f"cuda:{args.gpu}")
+            else:  # MPS
+                scaler = GradScaler('mps')
 
         # Training loop
         for epoch in range(1, args.epochs + 1):
@@ -200,7 +204,7 @@ class HPOTrainer(Train):
                 # Define loss computation function for SAM
                 def compute_loss():
                     with autocast(
-                        device_type="cuda", dtype=torch.float16, enabled=use_amp
+                        device_type=self.device_type, dtype=torch.float16, enabled=use_amp
                     ):
                         if vals["type"][i] == "BPSEQ":
                             loss = torch.sum(
