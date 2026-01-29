@@ -426,7 +426,7 @@ class NeuralNet(nn.Module):
 
         self.no_split_lr = no_split_lr
         self.pair_join = pair_join
-        if kwargs['use_fp']:
+        if kwargs.get('use_fp', False):
             self.embedding = ECFPEmbedding(dim=embed_size, nbits=kwargs['fp_bits'], radius=kwargs['fp_radius'])
         else:
             self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)
@@ -540,7 +540,7 @@ class NeuralNet1D(nn.Module):
 
         super(NeuralNet1D, self).__init__()
 
-        if kwargs['use_fp']:
+        if kwargs.get('use_fp', False):
             self.embedding = ECFPEmbedding(dim=embed_size, nbits=kwargs['fp_bits'], radius=kwargs['fp_radius'])
         else:
             self.embedding = OneHotEmbedding() if embed_size == 0 else SparseEmbedding(embed_size)

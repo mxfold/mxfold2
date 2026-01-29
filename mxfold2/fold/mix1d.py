@@ -13,7 +13,7 @@ from .zuker1d import ZukerFold1D
 class MixedFold1D(AbstractFold):
     def __init__(self, init_param=None,
         max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedFold1D, self).__init__(interface.ZukerMixed1DWrapper(), kwargs['use_fp'])
+        super(MixedFold1D, self).__init__(interface.ZukerMixed1DWrapper(), kwargs.get('use_fp', False))
         self.turner = RNAFold(init_param=init_param)
         self.zuker = ZukerFold1D(max_helix_length=max_helix_length, **kwargs)
         self.max_helix_length = max_helix_length

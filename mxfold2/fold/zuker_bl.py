@@ -13,7 +13,7 @@ from .positional import PositionalScore
 
 class ZukerFoldBL(AbstractFold):
     def __init__(self, bl_size: int = 4, max_helix_length: int = 30, **kwargs: dict[str, Any]):
-        super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper(), kwargs['use_fp'])
+        super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper(), kwargs.get('use_fp', False))
 
         self.max_helix_length = max_helix_length
         bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
