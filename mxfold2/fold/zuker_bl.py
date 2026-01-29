@@ -94,7 +94,7 @@ class ZukerFoldBL(AbstractFold):
         return next(self.parameters()).device
 
     def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
-        param_on_cpu = { k: v if k=='cnt' else v.to("cpu") for k, v in param.items() }
+        param_on_cpu = { k: v if k=='cnt' else v.to("cpu").to(torch.float32) for k, v in param.items() }
         param_on_cpu = self.clear_count(param_on_cpu)
         return param_on_cpu
 

@@ -1,4 +1,7 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
+if(POLICY CMP0177)
+    cmake_policy(SET CMP0177 NEW)
+endif()
 project(mxfold2 CXX)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -10,9 +13,11 @@ if(OPENMP_FOUND)
 endif()
 
 #add_subdirectory(pybind11)
+set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(interface
-    interface.cpp 
+    interface.cpp
+    compbpseq.cpp compbpseq.h
     param/turner.cpp param/turner.h 
     param/contrafold.cpp param/contrafold.h 
     param/positional.cpp param/positional.h 

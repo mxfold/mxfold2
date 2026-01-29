@@ -165,3 +165,4 @@ experiments
 poetry.lock
 models
 .tool-versions
+wandb

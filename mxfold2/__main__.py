@@ -1,12 +1,14 @@
+from zmq.backend import has
 import os
 import sys
 from argparse import ArgumentParser
 
-from .predict import Predict
-from .train import Train
+from mxfold2.predict import Predict
+from mxfold2.train import Train
 #from .show_param import ShowParam
 
-default_conf = os.path.join(os.path.dirname(__file__), 'models', 'TrainSetAB.conf')
+#default_conf = os.path.join(os.path.dirname(__file__), 'models', 'TrainSetAB.conf')
+default_conf = os.path.join(os.path.dirname(__file__), 'models', 'all_cdhit.conf')
 
 def main():
     parser = ArgumentParser(
@@ -20,8 +22,10 @@ def main():
     # ShowParam.add_args(subparser)
     args = parser.parse_args()
 
-    if hasattr(args, 'param'):
-        if args.param == '':
+    if hasattr(args, 'param') and (args.param == '' or args.param == 'default'):
+        if hasattr(args, 'model') and (args.model == 'Turner' or args.model == 'CONTRAfold'):
+            args.param = 'default'
+        else:    
             sys.argv.insert(2, '@'+default_conf)
             args = parser.parse_args()
 

@@ -1,0 +1,16 @@
+{
+    "_comment": "Fixed network architecture based on train-all-with-test.sh",
+
+    "embed_size": 64,
+
+    "num_filters_list": [64, 64, 64, 64, 64, 64, 64, 64],
+    "filter_size_list": [5, 3, 5, 3, 5, 3, 5, 3],
+
+    "num_paired_filters_list": [64, 64, 64, 64, 64, 64, 64, 64],
+    "paired_filter_size_list": [5, 3, 5, 3, 5, 3, 5, 3],
+
+    "num_lstm_layers": 2,
+    "num_lstm_units": 32,
+    "num_att": 8,
+    "pair_join": "cat"
+}

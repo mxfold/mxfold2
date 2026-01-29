@@ -1,0 +1,126 @@
+# MXFold2 HPO - Learning Parameters Only
+# Network architecture is fixed based on current best settings
+# from experiments/tuned-so_AdaBelief_shape-rank_pert0.5_nu10.0-margin0.2/
+
+# ============================================================================
+# Learning Parameters (TO BE OPTIMIZED)
+# ============================================================================
+
+optimizer:
+  - Adam
+  - AdamW
+  - AdaBelief
+  - Lion
+
+lr:
+  min: 0.0001
+  max: 0.01
+  log: true
+
+scheduler:
+  - None
+  - CyclicLR
+  - CosineAnnealingLR
+
+dropout_rate:
+  min: 0.0
+  max: 0.5
+
+fc_dropout_rate:
+  min: 0.0
+  max: 0.5
+
+l2_weight:
+  min: 0.00001
+  max: 0.1
+  log: true
+
+clip_grad_norm:
+  min: 0.0
+  max: 5.0
+
+# ============================================================================
+# Model Architecture (FIXED)
+# ============================================================================
+
+# Fixed to current best: 64
+embed_size:
+  - 64
+
+# Fixed to current best: 64
+num_filters:
+  min: 64
+  max: 64
+  step: 16
+
+# Fixed (not directly used, hardcoded as [5,3,5,3,...])
+filter_size:
+  - 5
+
+# Fixed to current best: 2
+num_lstm_layers:
+  min: 2
+  max: 2
+
+# Fixed to current best: 32
+num_lstm_units:
+  min: 32
+  max: 32
+  step: 16
+
+# Fixed to current best: 8
+num_att:
+  - 8
+
+# Fixed to current best: cat
+pair_join:
+  - cat
+
+# ============================================================================
+# Loss Function Parameters (TO BE OPTIMIZED)
+# ============================================================================
+
+loss_func:
+  - hinge
+  - fy
+  - f1
+
+perturb:
+  min: 0.1
+  max: 1.0
+
+nu:
+  min: 0.01
+  max: 1.0
+  log: true
+
+score_loss_weight:
+  min: 0.0
+  max: 0.5
+
+# ============================================================================
+# SHAPE Loss Parameters (TO BE OPTIMIZED)
+# ============================================================================
+
+shape_loss_func:
+  - shape_nll
+  - shape_fy
+  - shape_rank
+
+shape_perturb:
+  min: 0.1
+  max: 1.0
+
+shape_nu:
+  min: 0.1
+  max: 10.0
+  log: true
+
+shape_margin:
+  min: 0.0
+  max: 1.0
+
+# SHAPE pseudo FY weight (only for shape_rank loss)
+shape_pseudo_fy_weight:
+  min: 0.0
+  max: 1.0

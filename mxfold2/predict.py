@@ -11,14 +11,15 @@ import pandas as pd
 import torch
 import torch.nn as nn
 #import torch.nn.functional as F
+from torch.amp import autocast
 from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
 
-from . import interface
-from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset, RibonanzaDataset
-from .fold.fold import AbstractFold
-from .common import Common
+from mxfold2 import interface  # ty:ignore[unresolved-import]
+from mxfold2.compbpseq import accuracy, compare_bpseq
+from mxfold2.dataset import BPseqDataset, FastaDataset, RibonanzaDataset
+from mxfold2.fold.fold import AbstractFold
+from mxfold2.common import Common
 
 
 class Predict(Common):
@@ -26,17 +27,18 @@ class Predict(Common):
         super(Predict, self).__init__()
 
 
-    def predict(self, 
+    def predict(self,
                 model: AbstractFold | AveragedModel,
                 data_loader: DataLoader,
                 shape_model: Optional[list[nn.Module]] = None,
-                output_bpseq: Optional[str] = None, 
-                output_bpp: Optional[str] = None, 
-                result: Optional[str] = None, 
+                output_bpseq: Optional[str] = None,
+                output_bpp: Optional[str] = None,
+                result: Optional[str] = None,
                 use_constraint: bool = False,
-                shape_list: Optional[list[str]] = None,
+                shape_list: Optional[list[Optional[str]]] = None,
                 shape_intercept: float = 0.0,
-                shape_slope: float = 0.0) -> None:
+                shape_slope: float = 0.0,
+                use_amp: bool = False) -> None:
 
         res_fn = open(result, 'w') if result is not None else None
         shape_list = [None] * len(data_loader) if shape_list is None else shape_list
@@ -55,16 +57,19 @@ class Predict(Common):
                     constraint = [ tgt if tp=='BPSEQ' else None for tp, tgt in zip(vals['type'], vals['target'])]
                 else:
                     constraint = None
-                pseudoenergy = [ 
+                pseudoenergy = [
                     self.load_shape_reactivity(shape_file, shape_intercept, shape_slope) \
                         if shape_file is not None else None \
                         for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
                 seq_processed += len(seqs)
-                if output_bpp is None:
-                    scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
-                    pfs = bpps = [None] * len(preds)
-                else:
-                    scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
+
+                # Use autocast for mixed precision inference
+                with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
+                    if output_bpp is None:
+                        scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
+                        pfs = bpps = [None] * len(preds)
+                    else:
+                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 elapsed_time = time.time() - start
                 for batch_j, (header, seq, ref, sc, pred, bp, pf, bpp) in enumerate(zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps)):
                     if shape_model is not None:
@@ -96,7 +101,7 @@ class Predict(Common):
                             print(f'{i}\t{seq[i-1]}\t{bp[i]}')
                     else:
                         fn = os.path.basename(header)
-                        fn = os.path.splitext(fn)[0] 
+                        fn = os.path.splitext(fn)[0]
                         fn = os.path.join(output_bpseq, fn+".bpseq")
                         with open(fn, "w") as f:
                             print(f'# {header} (s={sc:.1f}, {elapsed_time:.5f}s)', file=f)
@@ -111,7 +116,7 @@ class Predict(Common):
                             ref = ref.clip(min=0.0, max=1.0)
                             d = torch.abs(ref[valid]-s[valid])
                             d2 = d**2
-                            x = [header, len(seq), elapsed_time, sc.item(), 
+                            x = [header, len(seq), elapsed_time, sc.item(),
                                 len(d), float(torch.sum(d)/len(d)), float(torch.sum(d2)/len(d))]
                             res_fn.write(', '.join([str(v) for v in x]) + "\n")
                         else:
@@ -120,7 +125,7 @@ class Predict(Common):
                             res_fn.write(', '.join([str(v) for v in x]) + "\n")
                     if output_bpp is not None:
                         fn = os.path.basename(header)
-                        fn = os.path.splitext(fn)[0] 
+                        fn = os.path.splitext(fn)[0]
                         fn = os.path.join(output_bpp, fn+".bpp")
                         with open(fn, "w") as f:
                             for i in range(1, len(bpp)):
@@ -152,6 +157,8 @@ class Predict(Common):
             if not param.exists() and conf is not None:
                 param = Path(conf).parent / param
             p = torch.load(param, map_location='cpu')
+            if isinstance(p, dict) and 'ema_state_dict' in p:
+                p = p['ema_state_dict']
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
             if 'n_averaged' in p:
@@ -170,14 +177,14 @@ class Predict(Common):
             for i, sm in enumerate(shape_model):
                 sm.load_state_dict(p[i])
 
-        if args.gpu >= 0:
-            model.to(torch.device("cuda", args.gpu))
-            if shape_model is not None:
-                for sm in shape_model:
-                    sm.to(torch.device("cuda", args.gpu))
+        device, self.device_type = self.get_device(args.gpu)
+        model.to(device)
+        if shape_model is not None:
+            for sm in shape_model:
+                sm.to(device)
 
         shape_list = None
-        if args.shape is not None: 
+        if args.shape is not None:
             shape_list = []
             with open(args.shape) as f:
                 for l in f:
@@ -186,15 +193,19 @@ class Predict(Common):
         elif args.shape_file is not None:
             shape_list = [args.shape_file]
 
-        self.predict(model=model, shape_model=shape_model, 
-                    data_loader=test_loader, 
+        # Enable mixed precision if GPU is being used and AMP is available
+        use_amp = hasattr(args, 'use_amp') and args.use_amp and self.device_type in ('cuda', 'mps')
+
+        self.predict(model=model, shape_model=shape_model,
+                    data_loader=test_loader,
                     output_bpseq=args.bpseq, output_bpp=args.bpp,
                     result=args.result, use_constraint=args.use_constraint,
                     shape_list=shape_list,
-                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope)
+                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                    use_amp=use_amp)
 
 
-    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.tensor:
+    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.Tensor:
         r = []
         with open(fname) as f:
             for l in f:
@@ -209,8 +220,8 @@ class Predict(Common):
                 while len(r) < idx:
                     r.append(-999)
                 r[idx-1] = val
-        # Deigan’s pseudoenergy approach
-        r = torch.tensor(r, dtype=float)
+        # Deigan's pseudoenergy approach
+        r = torch.tensor(r, dtype=torch.float)
         not_na = r > -1
         r[torch.logical_not(not_na)] = 0
         r[not_na] = slope * torch.log(r[not_na]+1) + intercept
@@ -224,12 +235,12 @@ class Predict(Common):
                             help='FASTA-formatted file or list of BPseq files')
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
-        subparser.add_argument('--gpu', type=int, default=-1, 
+        subparser.add_argument('--gpu', type=int, default=-1,
                             help='use GPU with the specified ID (default: -1 = CPU)')
         subparser.add_argument('--threads', type=int, default=1, metavar='N',
                             help='the number of threads (default: 1)')
         subparser.add_argument('--param', type=str, default='',
-                            help='file name of trained parameters') 
+                            help='file name of trained parameters')
         subparser.add_argument('--use-constraint', default=False, action='store_true')
         subparser.add_argument('--result', type=str, default=None,
                             help='output the prediction accuracy if reference structures are given')
@@ -241,11 +252,13 @@ class Predict(Common):
         subparser.add_argument('--shape-file', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
         subparser.add_argument('--shape-intercept', type=float, default=-0.8,
                             help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
-        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+        subparser.add_argument('--shape-slope', type=float, default=2.6,
                             help='Specify a slope used with SHAPE restraints. Default is 2.6.')
         subparser.add_argument('--shape-param', type=str,
                             help="predict SHAPE reactivity using the SHAPE model with this parameter set.")
         subparser.add_argument('--ribonanza', action="store_true")
+        subparser.add_argument('--use-amp', action='store_true',
+                            help='use automatic mixed precision (AMP) for faster inference on GPUs')
 
         cls.add_fold_args(subparser)
         cls.add_network_args(subparser)
