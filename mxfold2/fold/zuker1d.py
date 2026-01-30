@@ -32,19 +32,34 @@ class ZukerFold1D(AbstractFold):
     def forward(self, seq: list[str], **kwargs: dict[str, Any]):
         return super(ZukerFold1D, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
-    def make_param(self, seq: list[str]) -> list[dict[str, Any]]:
-        score_paired = self.net(seq) 
+    def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if perturb > 0.:
+            return (self._make_param_helper(seq, perturb),
+                    self._make_param_helper(seq, 0.))
+        else:
+            return self._make_param_helper(seq, 0.)
+
+    def _make_param_helper(self, seq: list[str], perturb: float) -> list[dict[str, Any]]:
+        device = next(self.parameters()).device
+        score_paired = self.net(seq)
         B, N, _ = score_paired.shape
 
-        param = [ { 
+        if perturb > 0.:
+            score_paired = score_paired + torch.normal(0., perturb, size=score_paired.shape, device=device)
+
+        score_lengths = { f: cast(LengthLayer, self.fc_length[f]).make_param() for f in self.fc_length.keys() }
+        if perturb > 0.:
+            score_lengths = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in score_lengths.items() }
+
+        param = [ {
             'score_paired': score_paired[i, :, 0],
-            'score_hairpin_length': cast(LengthLayer, self.fc_length['score_hairpin_length']).make_param(),
-            'score_bulge_length': cast(LengthLayer, self.fc_length['score_bulge_length']).make_param(),
-            'score_internal_length': cast(LengthLayer, self.fc_length['score_internal_length']).make_param(),
-            'score_internal_explicit': cast(LengthLayer, self.fc_length['score_internal_explicit']).make_param(),
-            'score_internal_symmetry': cast(LengthLayer, self.fc_length['score_internal_symmetry']).make_param(),
-            'score_internal_asymmetry': cast(LengthLayer, self.fc_length['score_internal_asymmetry']).make_param(),
-            'score_helix_length': cast(LengthLayer, self.fc_length['score_helix_length']).make_param()
+            'score_hairpin_length': score_lengths['score_hairpin_length'],
+            'score_bulge_length': score_lengths['score_bulge_length'],
+            'score_internal_length': score_lengths['score_internal_length'],
+            'score_internal_explicit': score_lengths['score_internal_explicit'],
+            'score_internal_symmetry': score_lengths['score_internal_symmetry'],
+            'score_internal_asymmetry': score_lengths['score_internal_asymmetry'],
+            'score_helix_length': score_lengths['score_helix_length']
         } for i in range(B) ]
 
         return param

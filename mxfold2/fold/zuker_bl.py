@@ -44,20 +44,24 @@ class ZukerFoldBL(AbstractFold):
         return super(ZukerFoldBL, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
 
-    def make_param(self, seq: list[str]):
-        device = next(self.parameters()).device
-        fc_length = { 
-            'score_hairpin_length': cast(LengthLayer, self.fc_length['score_hairpin_length']).make_param(),
-            'score_bulge_length': cast(LengthLayer, self.fc_length['score_bulge_length']).make_param(),
-            'score_internal_length': cast(LengthLayer, self.fc_length['score_internal_length']).make_param(),
-            'score_internal_explicit': cast(LengthLayer, self.fc_length['score_internal_explicit']).make_param(),
-            'score_internal_symmetry': cast(LengthLayer, self.fc_length['score_internal_symmetry']).make_param(),
-            'score_internal_asymmetry': cast(LengthLayer, self.fc_length['score_internal_asymmetry']).make_param(),
-            'score_helix_length': cast(LengthLayer, self.fc_length['score_helix_length']).make_param()
-        } 
-        embeddings = self.net(seq) 
+    def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if perturb > 0.:
+            return (self._make_param_helper(seq, perturb),
+                    self._make_param_helper(seq, 0.))
+        else:
+            return self._make_param_helper(seq, 0.)
 
-        param = [ { 
+    def _make_param_helper(self, seq: list[str], perturb: float) -> list[dict[str, Any]]:
+        device = next(self.parameters()).device
+        fc_length = { f: cast(LengthLayer, self.fc_length[f]).make_param() for f in self.fc_length.keys() }
+        if perturb > 0.:
+            fc_length = { f: p + torch.normal(0., perturb, size=p.shape, device=device) for f, p in fc_length.items() }
+
+        embeddings = self.net(seq)
+        if perturb > 0.:
+            embeddings = embeddings + torch.normal(0., perturb, size=embeddings.shape, device=device)
+
+        param = [ {
             'embedding': embedding,
             'bl_w_helix_stacking': cast(nn.Bilinear, self.bilinears['helix_stacking']).weight[0],
             'bl_b_helix_stacking': cast(nn.Bilinear, self.bilinears['helix_stacking']).bias,

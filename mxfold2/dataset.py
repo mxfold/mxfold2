@@ -109,12 +109,12 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 
 class RibonanzaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, csv_file: str) -> None:
+    def __init__(self, csv_file: str, offset: int = 0) -> None:
         super(Dataset, self).__init__()
         self.csv_file = csv_file
         self.df = pd.read_csv(csv_file)
         ex_type = sorted(self.df['experiment_type'].unique())
-        self.dataset_id = { et: i for i, et in enumerate(ex_type) }
+        self.dataset_id = { et: i + offset for i, et in enumerate(ex_type) }
 
     def  __len__(self) -> int:
         return len(self.df)
@@ -155,21 +155,21 @@ class JsonDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 
 class JsonShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, files: list[str]) -> None:
+    def __init__(self, files: list[str], offset: int = 0) -> None:
         super(Dataset, self).__init__()
         self.data = []
         ex_types = set()
         for file in files:
             with open(file) as f:
                 data = json.load(f)
-                for k, v in data.items(): 
+                for k, v in data.items():
                     for ex in ['dms', 'shape']:
                         if ex in v:
                             ex_types.add(ex)
                             react = torch.tensor([-999.] + v[ex])
                             react[torch.logical_and(react < 0., react > -100.)] = 0.
                             self.data.append((k, v['sequence'], {'type': 'SHAPE', 'target': react, 'dataset_id': ex}))
-        self.dataset_id = { et: i for i, et in enumerate(ex_types) }
+        self.dataset_id = { et: i + offset for i, et in enumerate(ex_types) }
         
     def __len__(self) -> int:
         return len(self.data)

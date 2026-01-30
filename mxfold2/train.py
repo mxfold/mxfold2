@@ -549,16 +549,16 @@ class Train(Common):
             train_dataset = ConcatDataset([train_dataset, json_dataset])
             n_train_samples = len(train_dataset)
         if args.ribonanza is not None:
-            ribonanza_dataset = RibonanzaDataset(args.ribonanza)
-            n_dataset_id = len(ribonanza_dataset.dataset_id)
+            ribonanza_dataset = RibonanzaDataset(args.ribonanza, offset=n_dataset_id)
+            n_dataset_id += len(ribonanza_dataset.dataset_id)
             train_dataset = ConcatDataset([train_dataset, ribonanza_dataset])
         if args.shape is not None:
             shape_dataset = [ ShapeDataset(s, i+n_dataset_id) for i, s in enumerate(args.shape) ]
             n_dataset_id += len(shape_dataset)
             train_dataset = ConcatDataset([train_dataset] + shape_dataset)
         if args.json_shape_dataset is not None:
-            json_shape_dataset = JsonShapeDataset(args.json_shape_dataset)
-            n_dataset_id = len(json_shape_dataset.dataset_id)
+            json_shape_dataset = JsonShapeDataset(args.json_shape_dataset, offset=n_dataset_id)
+            n_dataset_id += len(json_shape_dataset.dataset_id)
             train_dataset = ConcatDataset([train_dataset, json_shape_dataset])
         if args.extra_dataset is not None:
             extra_dataset = [ BPseqDataset(s) for s in args.extra_dataset ]
