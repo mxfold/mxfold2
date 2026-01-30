@@ -21,8 +21,10 @@ class CONTRAMixedFold(AbstractFold):
         score_weight_positional: float = None,
         count_weight_turner: float = None,
         count_weight_positional: float = None,
+        modified_only: bool = False,
         **kwargs) -> None:
-        super(CONTRAMixedFold, self).__init__(interface.CONTRAfoldMixedWrapper())
+        super(CONTRAMixedFold, self).__init__(interface.CONTRAfoldMixedWrapper(),
+                                              modified_only=modified_only)
 
         # Determine weights based on mix_type or explicit weights
         if weight_turner is not None and weight_positional is not None:
@@ -147,13 +149,23 @@ class CONTRAMixedFold(AbstractFold):
         return param_on_cpu
 
 
-    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor | float:
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any],
+                count: dict[str, Any], seq: str | None = None) -> torch.Tensor | float:
+        from ..nucleosides import get_modified_positions, has_modified_in_range
+
         f = ['turner', 'positional'] if self.tune_cf else ['positional']
         s = 0
         for k in f:
             for n, p in param[k].items():
                 if n.startswith("score_"):
-                    s += torch.sum(p * count[k]["count_"+n[6:]].to(p.device))
+                    cnt = count[k]["count_"+n[6:]].to(p.device)
+
+                    # Filter by modified base involvement
+                    if self.modified_only and seq is not None:
+                        mask = self._create_modified_mask(seq, n, cnt)
+                        cnt = cnt * mask
+
+                    s += torch.sum(p * cnt)
         s += -cast(torch.Tensor, s).item() + v
         return s
 

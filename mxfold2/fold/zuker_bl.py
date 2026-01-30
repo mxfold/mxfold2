@@ -13,7 +13,9 @@ from .positional import PositionalScore
 
 class ZukerFoldBL(AbstractFold):
     def __init__(self, bl_size: int = 4, max_helix_length: int = 30, **kwargs: dict[str, Any]):
-        super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper(), kwargs.get('use_fp', False))
+        super(ZukerFoldBL, self).__init__(interface.ZukerPositionalBLWrapper(),
+                                          kwargs.get('use_fp', False),
+                                          kwargs.get('modified_only', False))
 
         self.max_helix_length = max_helix_length
         bilinears = [ nn.Bilinear(bl_size, bl_size, 1) ] * 3
@@ -106,7 +108,11 @@ class ZukerFoldBL(AbstractFold):
         param['cnt'].total_energy = torch.tensor([0.], device=next(self.parameters()).device)
         return param
 
-    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any],
+                count: dict[str, Any], seq: str | None = None) -> torch.Tensor:
+        # ZukerFoldBL uses PositionalScore's total_energy (special case)
+        # modified_only flag is not directly supported in this class,
+        # but is applied through positional processing via MixedFoldBL
         s = param['cnt'].total_energy
         s += -s.item() + v
         return s

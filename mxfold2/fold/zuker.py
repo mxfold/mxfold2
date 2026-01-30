@@ -12,7 +12,9 @@ from mxfold2.fold.layers import LengthLayer, NeuralNet
 
 class ZukerFold(AbstractFold):
     def __init__(self, max_helix_length: int = 30, **kwargs) -> None:
-        super(ZukerFold, self).__init__(interface.ZukerPositionalWrapper(), kwargs.get('use_fp', False))
+        super(ZukerFold, self).__init__(interface.ZukerPositionalWrapper(),
+                                        kwargs.get('use_fp', False),
+                                        kwargs.get('modified_only', False))
 
         exclude_diag = True # default
         model_type = 'C' # default

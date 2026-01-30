@@ -7,12 +7,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..nucleosides import supported_nucleosides
+from ..nucleosides import supported_nucleosides, get_modified_positions, has_modified_in_range
 
 class AbstractFold(nn.Module):
-    def __init__(self, fold_wrapper, use_fp: bool = False) -> None:
+    def __init__(self, fold_wrapper, use_fp: bool = False, modified_only: bool = False) -> None:
         super(AbstractFold, self).__init__()
         self.fold_wrapper = fold_wrapper
+        self.modified_only = modified_only
         if use_fp:
             self.allowed_pairs = ''
             for v in supported_nucleosides.values():
@@ -50,12 +51,81 @@ class AbstractFold(nn.Module):
         return param
 
 
-    def calculate_differentiable_score(self, v: float, param: 
-                dict[str, Any], count: dict[str, Any]) -> torch.Tensor | float:
+    def _create_modified_mask(self, seq: str, score_name: str,
+                              count_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Create a mask for count tensor positions involving modified bases.
+
+        Args:
+            seq: Nucleotide sequence
+            score_name: Score parameter name (e.g., "score_basepair")
+            count_tensor: Corresponding count tensor
+
+        Returns:
+            Mask tensor with 1.0 where modified bases are involved, 0.0 otherwise
+        """
+        mod_positions = get_modified_positions(seq)
+        if not mod_positions:
+            return torch.zeros_like(count_tensor)
+
+        mask = torch.zeros_like(count_tensor)
+
+        # Derive count name from score name (score_basepair -> count_basepair)
+        count_name = "count_" + score_name[6:]
+
+        if count_tensor.dim() == 2:
+            nonzero_indices = (count_tensor != 0).nonzero(as_tuple=False)
+
+            for idx in nonzero_indices:
+                i, j = idx[0].item(), idx[1].item()
+
+                # Base pair score
+                if 'basepair' in count_name:
+                    if i in mod_positions or j in mod_positions:
+                        mask[i, j] = 1.0
+
+                # Helix stacking score: involves (i,j) and (i+1,j-1) pairs
+                elif 'helix_stacking' in count_name:
+                    if (i in mod_positions or j in mod_positions or
+                        (i + 1) in mod_positions or (j - 1) in mod_positions):
+                        mask[i, j] = 1.0
+
+                # Mismatch score: involves closing pair (i,j) and adjacent bases (i+1,j-1)
+                elif 'mismatch' in count_name:
+                    if (i in mod_positions or j in mod_positions or
+                        (i + 1) in mod_positions or (j - 1) in mod_positions):
+                        mask[i, j] = 1.0
+
+                # Unpaired base score (base_hairpin, base_internal, etc.)
+                elif count_name.startswith('count_base_'):
+                    if has_modified_in_range(seq, i, j):
+                        mask[i, j] = 1.0
+
+                # Other 2D scores: check if positions involve modified bases
+                else:
+                    if i in mod_positions or j in mod_positions:
+                        mask[i, j] = 1.0
+
+        elif count_tensor.dim() == 1:
+            # Length parameters: pass all used values
+            # (stricter filtering would require tracking corresponding structures)
+            mask = (count_tensor != 0).float()
+
+        return mask
+
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any],
+                count: dict[str, Any], seq: str | None = None) -> torch.Tensor | float:
         s = 0
         for n, p in param.items():
             if n.startswith("score_"):
-                s += torch.sum(p * count["count_"+n[6:]].to(p.device))
+                cnt = count["count_"+n[6:]].to(p.device)
+
+                # Filter by modified base involvement
+                if self.modified_only and seq is not None:
+                    mask = self._create_modified_mask(seq, n, cnt)
+                    cnt = cnt * mask
+
+                s += torch.sum(p * cnt)
         s += -cast(torch.Tensor, s).item() + v
         return s
 
@@ -146,7 +216,7 @@ class AbstractFold(nn.Module):
                     pfs.append(pf)
                     bpps.append(bpp)
             if torch.is_grad_enabled():
-                v = self.calculate_differentiable_score(v, param[i], param_on_cpu)
+                v = self.calculate_differentiable_score(v, param[i], param_on_cpu, seq[i])
             if return_count:
                 return_param = True
                 for n, p in param_on_cpu.items():

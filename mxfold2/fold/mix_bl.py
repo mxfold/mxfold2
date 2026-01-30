@@ -14,7 +14,9 @@ from .rnafold import RNAFold
 
 class MixedFoldBL(AbstractFold):
     def __init__(self, init_param=None, bl_size: int = 4, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
-        super(MixedFoldBL, self).__init__(interface.ZukerMixedBLWrapper(), kwargs.get('use_fp', False))
+        super(MixedFoldBL, self).__init__(interface.ZukerMixedBLWrapper(),
+                                          kwargs.get('use_fp', False),
+                                          kwargs.get('modified_only', False))
         self.max_helix_length = max_helix_length
         self.turner = RNAFold(init_param=init_param)
         self.positional = ZukerFoldBL(bl_size=bl_size, **kwargs)
@@ -46,8 +48,9 @@ class MixedFoldBL(AbstractFold):
         return param_on_cpu
 
 
-    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor:
-        return self.positional.calculate_differentiable_score(v, param['positional'], count['positional'])
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any],
+                count: dict[str, Any], seq: str | None = None) -> torch.Tensor:
+        return self.positional.calculate_differentiable_score(v, param['positional'], count['positional'], seq)
 
 
     def detect_device(self, param):

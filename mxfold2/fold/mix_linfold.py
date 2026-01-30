@@ -21,8 +21,9 @@ class MixedLinFold(AbstractFold):
                  count_weight_turner: float = None,
                  count_weight_positional: float = None,
                  use_fp: bool = False,
+                 modified_only: bool = False,
                  **kwargs: dict[str, Any]) -> None:
-        super(MixedLinFold, self).__init__(interface.MixedLinFoldPositionalWrapper(beam_size=beam_size), use_fp)
+        super(MixedLinFold, self).__init__(interface.MixedLinFoldPositionalWrapper(beam_size=beam_size), use_fp, modified_only)
 
         # Determine weights based on mix_type or explicit weights
         if weight_turner is not None and weight_positional is not None:
@@ -138,8 +139,9 @@ class MixedLinFold(AbstractFold):
         return param_on_cpu
 
 
-    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor | float:
-        return super().calculate_differentiable_score(v, param['positional'], count['positional'])
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any],
+                count: dict[str, Any], seq: str | None = None) -> torch.Tensor | float:
+        return super().calculate_differentiable_score(v, param['positional'], count['positional'], seq)
 
 
     def detect_device(self, param):

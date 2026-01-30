@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Set
 
 @dataclasses.dataclass
 class Bases:
@@ -24,3 +25,50 @@ supported_nucleosides = {
     '#': Bases('#', 'G', 'CU', 'CO[C@H]1[C@H]([n]2cnc3c2nc(N)[nH]c3=O)O[C@H](CO)[C@H]1O', '2\'-O-methylguanosine'),
     'J': Bases('J', 'U', 'AG', 'CO[C@H]1[C@H]([n]2ccc(=O)[nH]c2=O)O[C@H](CO)[C@H]1O', '2\'-O-methyluridine'),
 }
+
+
+# Standard bases (ACGU)
+STANDARD_BASES: frozenset[str] = frozenset({'A', 'C', 'G', 'U', 'a', 'c', 'g', 'u'})
+
+
+def is_modified_base(base: str) -> bool:
+    """Determine whether a base is a modified base.
+
+    Args:
+        base: Single character code of the base
+
+    Returns:
+        True if modified base, False if standard base (ACGU)
+    """
+    return base not in STANDARD_BASES
+
+
+def get_modified_positions(seq: str) -> Set[int]:
+    """Return positions of modified bases in the sequence (1-indexed).
+
+    mxfold2 uses 1-indexed positions, so returned positions start from 1.
+
+    Args:
+        seq: Nucleotide sequence
+
+    Returns:
+        Set of modified base positions (1-indexed)
+    """
+    return {i + 1 for i, base in enumerate(seq) if is_modified_base(base)}
+
+
+def has_modified_in_range(seq: str, start: int, end: int) -> bool:
+    """Determine whether there are modified bases in the range [start, end] (1-indexed).
+
+    Args:
+        seq: Nucleotide sequence
+        start: Start position (1-indexed, inclusive)
+        end: End position (1-indexed, inclusive)
+
+    Returns:
+        True if there are modified bases in the range
+    """
+    for i in range(max(1, start), min(len(seq) + 1, end + 1)):
+        if is_modified_base(seq[i - 1]):  # seq is 0-indexed
+            return True
+    return False

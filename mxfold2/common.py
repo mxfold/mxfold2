@@ -111,6 +111,7 @@ class Common:
             'weight_positional': args.weight_positional,
             'additional_params': args.additional_params,
             'resnet_every_n': args.resnet_every_n,
+            'modified_only': getattr(args, 'modified_only', False),
         }
 
         model = None
@@ -294,3 +295,7 @@ class Common:
                         help='the number of the hidden units of SHAPE full connected layers (default: 32)')
         gparser.add_argument('--shape-dropout-rate', type=float, default=0.0,
                         help='dropout rate of the SHAPE CNN (default: 0.0)')
+
+        # Modified base training settings
+        gparser.add_argument('--modified-only', default=False, action='store_true',
+                        help='train using only losses involving modified bases (non-ACGU bases)')
