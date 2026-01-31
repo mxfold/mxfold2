@@ -55,7 +55,7 @@ class MixedLinFold(AbstractFold):
 
         self.max_helix_length = max_helix_length
         self.turner = LinFoldV(init_param=init_param)
-        self.zuker = LinFold(**kwargs)
+        self.zuker = LinFold(use_fp=use_fp, **kwargs)
 
     # Score weight properties
     @property

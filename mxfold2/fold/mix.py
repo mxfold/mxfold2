@@ -56,7 +56,7 @@ class MixedFold(AbstractFold):
             self._count_weight_positional = count_weight_positional
 
         self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(max_helix_length=max_helix_length, **kwargs)
+        self.zuker = ZukerFold(max_helix_length=max_helix_length, use_fp=use_fp, **kwargs)
         self.max_helix_length = max_helix_length
 
     # Score weight properties
