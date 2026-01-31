@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import rdFingerprintGenerator
 
 from ..nucleosides import supported_nucleosides
 class OneHotEmbedding(nn.Module):
@@ -61,10 +61,11 @@ class ECFPEmbedding(nn.Module):
         self.n_out = dim
         self.linear = nn.Linear(nbits, dim)
         em = { }
+        fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=nbits)
         for v in supported_nucleosides.values():
             m = Chem.MolFromSmiles(v.smiles)
-            x = AllChem.GetMorganFingerprintAsBitVect(m, radius=radius, nBits=nbits) 
-            em[v.code.lower()] = np.asarray(x, dtype=np.float32)
+            x = fpgen.GetFingerprint(m)
+            em[v.code.lower()] = np.array(list(x), dtype=np.float32)
         em['0'] = np.zeros_like(em['a'])
         self.embedding = defaultdict(lambda: (em['a'] + em['c'] + em['g'] + em['u']) / 4, em)
 
