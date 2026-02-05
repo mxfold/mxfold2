@@ -12,7 +12,7 @@ class LinFold : public Fold
         using ScoreType = S;
 
         struct Options : public Fold::Options {;
-            Options() : Fold::Options(), beam_size_(100) {}
+            Options() : Fold::Options(), beam_size_(100), use_extended_pairs_(false) {}
 
             Options& beam_size(u_int32_t s)
             {
@@ -20,11 +20,22 @@ class LinFold : public Fold
                 return *this;
             }
 
+            Options& use_extended_pairs(bool use)
+            {
+                this->use_extended_pairs_ = use;
+                return *this;
+            }
+
             auto beam_size() const { return beam_size_; }
+            auto use_extended() const { return use_extended_pairs_; }
             auto make_constraint(const std::string& seq, std::string alphabests="acguACGU"s, bool canonical_only=true) const
                 -> std::tuple<std::vector<std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>>;
+            // Extended version using base_id hash map for Unicode support
+            auto make_constraint_extended(const std::string& seq, bool canonical_only=true) const
+                -> std::tuple<std::unordered_map<base_id, std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>, std::vector<base_id>>;
 
             u_int32_t beam_size_;
+            bool use_extended_pairs_;
         };
 
     private:
@@ -122,6 +133,10 @@ class LinFold : public Fold
         void compute_outside(const std::string& seq, const Options& opt = Options());
         auto compute_basepairing_probabilities(const std::string& seq, const Options& opt = Options()) -> std::vector<std::vector<std::pair<u_int32_t, float>>>;
         const P& param_model() const { return *param_; }
+
+    private:
+        // Extended version using base_id hash map for Unicode support
+        auto compute_viterbi_extended(const std::string& seq, const Options& opts) -> ScoreType;
 
     private:
         auto beam_prune(std::unordered_map<u_int32_t, State>& state, u_int32_t beam_size) -> ScoreType;

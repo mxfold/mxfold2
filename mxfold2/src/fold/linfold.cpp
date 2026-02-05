@@ -40,7 +40,7 @@ make_constraint(const std::string& seq, std::string alphabets /*="acgu"s*/, bool
     }
 
     std::vector<bool> allow_unpaired_position(L+1, true);
-    for (auto i=1; i<=L; i++)
+    for (auto i=1u; i<=L; i++)
         allow_unpaired_position[i] = stru[i]==Options::ANY || stru[i]==Options::UNPAIRED;
 
     std::vector<u_int32_t> allow_unpaired_range(L+1, 0);
@@ -56,7 +56,7 @@ make_constraint(const std::string& seq, std::string alphabets /*="acgu"s*/, bool
     for (auto nuc: alphabets)
     {
         next_pair[nuc].resize(L+1, 0);
-        auto next = 0;
+        u_int32_t next = 0;
         for (auto j=L; j>=1; j--)
         {
             next_pair[nuc][j] = next;
@@ -66,6 +66,59 @@ make_constraint(const std::string& seq, std::string alphabets /*="acgu"s*/, bool
     }
 
     return { next_pair, allow_unpaired_range, allow_unpaired_position };
+}
+
+template < typename P, typename S >
+auto
+LinFold<P,S>::Options::
+make_constraint_extended(const std::string& seq, bool canonical_only /*=true*/) const
+    -> std::tuple<std::unordered_map<base_id, std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>, std::vector<base_id>>
+{
+    const auto& enc = get_encoding();
+    std::vector<base_id> seq_ids = enc.encode(seq);
+    const auto L = seq_ids.size();
+
+    if (stru.size() == 0)
+        stru.resize(L+1, Options::ANY);
+
+    for (auto i=L; i>=1; i--)
+    {
+        if (stru[i] > 0 && stru[i] <= L) // paired
+            if ( (canonical_only && !this->allow_paired_extended(seq_ids[i-1], seq_ids[stru[i]-1])) || // delete non-canonical base-pairs
+                    (stru[i] - i <= min_hairpin) ) // delete very short hairpin
+                stru[i] = stru[stru[i]] = Options::UNPAIRED;
+    }
+
+    std::vector<bool> allow_unpaired_position(L+1, true);
+    for (auto i=1u; i<=L; i++)
+        allow_unpaired_position[i] = stru[i]==Options::ANY || stru[i]==Options::UNPAIRED;
+
+    std::vector<u_int32_t> allow_unpaired_range(L+1, 0);
+    auto firstpair = L+1;
+    for (auto i=L; i>=1; i--)
+    {
+        allow_unpaired_range[i] = firstpair;
+        if (!allow_unpaired_position[i])
+            firstpair = i;
+    }
+
+    // Build next_pair using hash map for unique bases in the sequence
+    std::unordered_set<base_id> unique_bases = enc.get_unique_bases(seq_ids);
+    std::unordered_map<base_id, std::vector<u_int32_t>> next_pair;
+
+    for (auto nuc : unique_bases)
+    {
+        next_pair[nuc].resize(L+1, 0);
+        u_int32_t next = 0;
+        for (auto j=L; j>=1; j--)
+        {
+            next_pair[nuc][j] = next;
+            if (stru[j] != Options::UNPAIRED && this->allow_paired_extended(seq_ids[j-1], nuc))
+                next = j;
+        }
+    }
+
+    return { next_pair, allow_unpaired_range, allow_unpaired_position, seq_ids };
 }
 
 template < typename P, typename S >
@@ -155,10 +208,15 @@ beam_prune(std::unordered_map<u_int32_t, State>& states, u_int32_t beam_size) ->
 }
 
 template < typename P, typename S >
-auto 
+auto
 LinFold<P, S>::
 compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 {
+    // Use extended version if enabled
+    if (opts.use_extended() || !opts.extended_pairs_.empty()) {
+        return compute_viterbi_extended(seq, opts);
+    }
+
     // auto wtime = omp_get_wtime();
     const auto beam_size = opts.beam_size();
     const auto L = seq.size();
@@ -1703,6 +1761,571 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
         std::sort(std::begin(bpp2[i]), std::end(bpp2[i]));
     }
     return bpp2;
+}
+
+// Extended version of compute_viterbi using base_id hash map for Unicode support
+template < typename P, typename S >
+auto
+LinFold<P, S>::
+compute_viterbi_extended(const std::string& seq, const Options& opts) -> ScoreType
+{
+    const auto beam_size = opts.beam_size();
+    const auto L = seq.size();
+    const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
+    Hv_.clear();  Hv_.resize(L+1);
+    Cv_.clear();  Cv_.resize(L+1);
+    Mv_.clear();  Mv_.resize(L+1);
+    M1v_.clear(); M1v_.resize(L+1);
+    M2v_.clear(); M2v_.resize(L+1);
+    Fv_.clear();  Fv_.resize(L+1);
+#ifdef HELIX_LENGTH
+    Nv_.clear();  Nv_.resize(L+1);
+    Ev_.clear();  Ev_.resize(L+1);
+#endif
+
+    // Use extended constraint maker with base_id support
+    const auto [next_pair, allow_unpaired_range, allow_unpaired_position, seq_ids] = opts.make_constraint_extended(seq);
+
+    // Helper lambda to get next_pair entry (returns empty vector if not found)
+    auto get_next_pair = [&next_pair](base_id nuc) -> const std::vector<u_int32_t>& {
+        static const std::vector<u_int32_t> empty_vec;
+        auto it = next_pair.find(nuc);
+        return (it != next_pair.end()) ? it->second : empty_vec;
+    };
+
+    // Thread-local buffers for OpenMP parallelization
+#ifdef USE_OPENMP
+    const int num_threads = omp_get_max_threads();
+#else
+    const int num_threads = 1;
+#endif
+    std::vector<ThreadLocalBuffers> tl_buffers(num_threads);
+
+    Fv_[0].update_max(param_->score_external_zero(), TBType::F_START);
+    if (L>0) Fv_[1].update_max(param_->score_external_unpaired(1, 1), TBType::F_UNPAIRED);
+    if (L>1) Fv_[2].update_max(param_->score_external_unpaired(1, 2), TBType::F_UNPAIRED);
+
+    for (size_t j=1; j<=L; j++)
+    {
+        if (opts.stru.size()==0 || opts.stru[j]!=Options::UNPAIRED && opts.stru[j]!=Options::PAIRED_R)
+        {
+            // find a smallest hairpin loop candidate H(j, k)
+            const auto& np = get_next_pair(seq_ids[j-1]);
+            auto k = np.size()>0 ? np[j] : 0u; // nearest k paired with j
+            while (k>0 && k-j<=opts.min_hairpin)
+                k = np[k];
+            if (opts.stru.size()>0 && opts.stru[j]<=L && opts.stru[j]>j) k=opts.stru[j]; // use direct base-pair constraint
+
+            if (k>0 && allow_unpaired_range[j]>=k && opts.allow_paired_extended(seq_ids, j, k))
+                Hv_[k][j].update_max(param_->score_hairpin(j, k), TBType::H_CLOSING);
+        }
+
+        // H: hairpin loops
+        if (beam_size > 0) beam_prune(Hv_[j], beam_size);
+        {
+            const size_t hv_size = Hv_[j].size();
+            std::vector<std::pair<u_int32_t, State const*>> hv_entries;
+            hv_entries.reserve(hv_size);
+            for (const auto& [i, st] : Hv_[j])
+                hv_entries.emplace_back(i, &st);
+
+            for (auto& buf : tl_buffers) buf.Hv_updates.clear();
+
+#ifdef USE_OPENMP
+            #pragma omp parallel if(hv_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+            {
+#ifdef USE_OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t idx = 0; idx < hv_size; ++idx)
+                {
+                    const auto i = hv_entries[idx].first;
+                    const auto& st = *hv_entries[idx].second;
+
+#ifdef HELIX_LENGTH
+                    // N -> ( ... ) - same position update
+                    auto newscore = st.score + opts.additional_paired_score(i, j);
+#ifdef USE_OPENMP
+                    #pragma omp critical(update_Nv_j)
+#endif
+                    Nv_[j][i].update_max(newscore, TBType::N_HAIRPIN_LOOP);
+#else
+                    // C -> ( ... ) - same position update
+                    auto newscore = st.score + opts.additional_paired_score(i, j);
+#ifdef USE_OPENMP
+                    #pragma omp critical(update_Cv_j)
+#endif
+                    Cv_[j][i].update_max(newscore, TBType::C_HAIRPIN_LOOP);
+#endif
+
+                    // extend H(i, j) to H(i, k) - forward update
+                    const auto& np_i = get_next_pair(seq_ids[i-1]);
+                    auto k = np_i.size()>0 ? np_i[j] : 0u;
+                    if (k>0 && allow_unpaired_range[i]>=k && opts.allow_paired_extended(seq_ids, i, k))
+                        local_buf.Hv_updates.emplace_back(k, i, param_->score_hairpin(i, k), TBType::H_CLOSING, 0u);
+                }
+            }
+
+            // Merge Hv updates
+            for (int t = 0; t < num_threads; ++t)
+                for (const auto& upd : tl_buffers[t].Hv_updates)
+                    Hv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, std::get<u_int32_t>(upd.ptr));
+        }
+        if (j==1) continue;
+
+        // M: multi loop candidates
+        if (beam_size > 0) beam_prune(Mv_[j], beam_size);
+        {
+            const size_t mv_size = Mv_[j].size();
+            std::vector<std::pair<u_int32_t, State const*>> mv_entries;
+            mv_entries.reserve(mv_size);
+            for (const auto& [i, st] : Mv_[j])
+                mv_entries.emplace_back(i, &st);
+
+            for (auto& buf : tl_buffers) buf.Mv_updates.clear();
+
+#ifdef USE_OPENMP
+            #pragma omp parallel if(mv_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+            {
+#ifdef USE_OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t idx = 0; idx < mv_size; ++idx)
+                {
+                    const auto i = mv_entries[idx].first;
+                    const auto& st = *mv_entries[idx].second;
+
+#ifdef HELIX_LENGTH
+                    // N -> ( M ) - same position update
+                    auto newscore = st.score + param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+#ifdef USE_OPENMP
+                    #pragma omp critical(update_Nv_j)
+#endif
+                    Nv_[j][i].update_max(newscore, TBType::N_MULTI_LOOP);
+#else
+                    // C -> ( M ) - same position update
+                    auto newscore = st.score + param_->score_multi_loop(i, j) + opts.additional_paired_score(i, j);
+#ifdef USE_OPENMP
+                    #pragma omp critical(update_Cv_j)
+#endif
+                    Cv_[j][i].update_max(newscore, TBType::C_MULTI_LOOP);
+#endif
+
+                    // extend M(i, j) to M(i, k) - forward update
+                    const auto& np_i = get_next_pair(seq_ids[i-1]);
+                    auto k = np_i.size()>0 ? np_i[j] : 0u;
+                    auto [l1, l2] = std::get<1>(st.ptr);
+                    if (k>0 && allow_unpaired_range[j]>=k && opts.allow_paired_extended(seq_ids, i, k))
+                    {
+                        auto newscore_ext = st.score + param_->score_multi_unpaired(j+1, k-1);
+                        local_buf.Mv_updates.emplace_back(k, i, newscore_ext, TBType::M_CLOSING, l1, static_cast<u_int16_t>(l2+k-j));
+                    }
+                }
+            }
+
+            // Merge Mv updates
+            for (int t = 0; t < num_threads; ++t)
+                for (const auto& upd : tl_buffers[t].Mv_updates)
+                {
+                    auto [p1, p2] = std::get<std::pair<u_int16_t, u_int16_t>>(upd.ptr);
+                    Mv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, p1, p2);
+                }
+        }
+
+#ifdef HELIX_LENGTH
+        // N: isolated closed loops
+        if (beam_size > 0) beam_prune(Nv_[j], beam_size);
+        {
+            const size_t nv_size = Nv_[j].size();
+            std::vector<std::pair<u_int32_t, State const*>> nv_entries;
+            nv_entries.reserve(nv_size);
+            for (const auto& [i, st] : Nv_[j])
+                nv_entries.emplace_back(i, &st);
+
+            for (auto& buf : tl_buffers) buf.Cv_updates.clear();
+
+#ifdef USE_OPENMP
+            #pragma omp parallel if(nv_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+            {
+#ifdef USE_OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t idx = 0; idx < nv_size; ++idx)
+                {
+                    const auto i = nv_entries[idx].first;
+                    const auto& st = *nv_entries[idx].second;
+
+                    // E -> N ; terminal of extended helix - same position update
+#ifdef USE_OPENMP
+                    #pragma omp critical(update_Ev_j)
+#endif
+                    Ev_[j][i].update_max(st.score, TBType::E_TERMINAL);
+
+                    if (opts.max_helix > 0)
+                    {
+                        // C -> N ; isolated base-pair - same position update
+#ifdef USE_OPENMP
+                        #pragma omp critical(update_Cv_j)
+#endif
+                        Cv_[j][i].update_max(st.score+param_->score_helix(i, j, 1), TBType::C_TERMINAL);
+
+                        // C -> ((( N ))) ; helix (< max_helix_length) - forward update
+                        ScoreType lp = ScoreType(0.);
+                        for (u_int32_t m=2; m<=opts.max_helix; m++)
+                        {
+                            if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired_extended(seq_ids, i-(m-1), j+(m-1))) break;
+                            lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                            auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                            local_buf.Cv_updates.emplace_back(j+(m-1), i-(m-1), newscore, TBType::C_HELIX, m);
+                        }
+                    }
+                }
+            }
+
+            // Merge Cv updates (from N loop)
+            for (int t = 0; t < num_threads; ++t)
+                for (const auto& upd : tl_buffers[t].Cv_updates)
+                    Cv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, std::get<u_int32_t>(upd.ptr));
+        }
+
+        // E: extended helices
+        if (beam_size > 0) beam_prune(Ev_[j], beam_size);
+        {
+            const size_t ev_size = Ev_[j].size();
+            std::vector<std::pair<u_int32_t, State const*>> ev_entries;
+            ev_entries.reserve(ev_size);
+            for (const auto& [i, st] : Ev_[j])
+                ev_entries.emplace_back(i, &st);
+
+            for (auto& buf : tl_buffers) { buf.Ev_updates.clear(); buf.Cv_updates.clear(); }
+
+#ifdef USE_OPENMP
+            #pragma omp parallel if(ev_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+            {
+#ifdef USE_OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t idx = 0; idx < ev_size; ++idx)
+                {
+                    const auto i = ev_entries[idx].first;
+                    const auto& st = *ev_entries[idx].second;
+
+                    // E -> ( E ) ; extended helix longer than max_helix_length - forward update
+                    if (i-1>=1 && j+1<=L && opts.allow_paired_extended(seq_ids, i-1, j+1))
+                    {
+                        auto newscore = st.score + param_->score_single_loop(i-1, j+1, i, j) + opts.additional_paired_score(i-1, j+1);
+                        local_buf.Ev_updates.emplace_back(j+1, i-1, newscore, TBType::E_HELIX, 0u);
+                    }
+
+                    if (opts.max_helix > 0)
+                    {
+                        // C -> ((( E ))) ; helix (= max_helix_length) - forward update
+                        ScoreType lp = ScoreType(0.);
+                        u_int32_t m;
+                        for (m=2; m<=opts.max_helix; m++)
+                        {
+                            if (i-(m-1)<1 || j+(m-1)>L || !opts.allow_paired_extended(seq_ids, i-(m-1), j+(m-1))) break;
+                            lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                        }
+                        if (m>opts.max_helix && i-(m-1)>=1 && j+(m-1)<=L && opts.allow_paired_extended(seq_ids, i-(m-1), j+(m-1)))
+                        {
+                            lp += opts.additional_paired_score(i-(m-1), j+(m-1));
+                            auto newscore = st.score + param_->score_helix(i-(m-1), j+(m-1), m) + lp;
+                            local_buf.Cv_updates.emplace_back(j+(m-1), i-(m-1), newscore, TBType::C_HELIX_E, m);
+                        }
+                    }
+                    else
+                    {
+                        // same position update
+#ifdef USE_OPENMP
+                        #pragma omp critical(update_Cv_j)
+#endif
+                        Cv_[j][i].update_max(st.score, TBType::C_HELIX_E, 1);
+                    }
+                }
+            }
+
+            // Merge Ev, Cv updates (from E loop)
+            for (int t = 0; t < num_threads; ++t)
+            {
+                for (const auto& upd : tl_buffers[t].Ev_updates)
+                    Ev_[upd.target_j][upd.key].update_max(upd.score, upd.manner, std::get<u_int32_t>(upd.ptr));
+                for (const auto& upd : tl_buffers[t].Cv_updates)
+                    Cv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, std::get<u_int32_t>(upd.ptr));
+            }
+        }
+#endif
+
+        // C: closed loops
+        if (beam_size > 0) beam_prune(Cv_[j], beam_size);
+
+        // Convert hash map to vector for parallelization
+        const size_t cv_size = Cv_[j].size();
+        std::vector<std::pair<u_int32_t, State const*>> cv_entries;
+        cv_entries.reserve(cv_size);
+        for (const auto& [i, st] : Cv_[j])
+            cv_entries.emplace_back(i, &st);
+
+        // Update M1, M2, F (sequential - many updates to same position)
+        for (const auto& [i, st_ptr] : cv_entries)
+        {
+            const auto& st = *st_ptr;
+            // M1 -> C
+            auto newscore = st.score + param_->score_multi_paired(i, j);
+            M1v_[j][i].update_max(newscore, TBType::M1_PAIRED);
+
+            // M2 -> M1 C
+            if (i-1>1 && !M1v_[i-1].empty())
+            {
+                auto M1_score = st.score + param_->score_multi_paired(i, j);
+                auto it = M2v_[j].find(i);
+                if (it==M2v_[j].end() || M1_score>it->second.score)
+                {
+                    for (const auto& [l, st_l]: M1v_[i-1])
+                        M2v_[j][l].update_max(M1_score+st_l.score, TBType::M2_BIFURCATION, i-1);
+                }
+            }
+
+            // F -> F C
+            if (i>=1)
+            {
+                auto newscore_f = Fv_[i-1].score + st.score + param_->score_external_paired(i, j);
+                Fv_[j].update_max(newscore_f, TBType::F_BIFURCATION, i-1);
+            }
+        }
+
+        // Parallelize internal loop computation (most computationally intensive part)
+        // Clear thread-local buffers
+        for (auto& buf : tl_buffers) buf.clear();
+
+#ifdef USE_OPENMP
+        #pragma omp parallel if(cv_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+        {
+#ifdef USE_OPENMP
+            const int tid = omp_get_thread_num();
+#else
+            const int tid = 0;
+#endif
+            auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+            #pragma omp for schedule(dynamic)
+#endif
+            for (size_t idx = 0; idx < cv_size; ++idx)
+            {
+                const auto i = cv_entries[idx].first;
+                const auto& st = *cv_entries[idx].second;
+
+#ifdef HELIX_LENGTH
+                // N -> ( ... C ... )
+                if (i>1 && j<L)
+                {
+                    for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p)
+                    {
+                        const auto& np_p = get_next_pair(seq_ids[p-1]);
+                        auto q = np_p.size()>0 ? np_p[j] : 0u;
+                        while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                        {
+                            if (opts.allow_paired_extended(seq_ids, p, q) && (i-p>1 || q-j>1))
+                            {
+                                auto newscore = st.score + param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                                local_buf.Nv_updates.emplace_back(q, p, newscore, TBType::N_INTERNAL_LOOP,
+                                    static_cast<u_int16_t>(i-p), static_cast<u_int16_t>(q-j));
+                            }
+                            q = np_p[q];
+                        }
+                    }
+                }
+#else
+                // C -> ( ... C ... )
+                if (i>1 && j<L)
+                {
+                    for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p)
+                    {
+                        const auto& np_p = get_next_pair(seq_ids[p-1]);
+                        auto q = np_p.size()>0 ? np_p[j] : 0u;
+                        while (q>0 && allow_unpaired_range[j]>=q && ((i-1)-(p+1)+1)+((q-1)-(j+1)+1)<=opts.max_internal)
+                        {
+                            if (opts.allow_paired_extended(seq_ids, p, q))
+                            {
+                                auto newscore = st.score + param_->score_single_loop(p, q, i, j) + opts.additional_paired_score(p, q);
+                                local_buf.Cv_updates.emplace_back(q, p, newscore, TBType::C_INTERNAL_LOOP,
+                                    static_cast<u_int16_t>(i-p), static_cast<u_int16_t>(q-j));
+                            }
+                            q = np_p[q];
+                        }
+                    }
+                }
+#endif
+            }
+        } // end parallel region
+
+        // Merge thread-local buffers
+        for (int t = 0; t < num_threads; ++t)
+        {
+#ifdef HELIX_LENGTH
+            for (const auto& upd : tl_buffers[t].Nv_updates)
+            {
+                auto [p1, p2] = std::get<std::pair<u_int16_t, u_int16_t>>(upd.ptr);
+                Nv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, p1, p2);
+            }
+#else
+            for (const auto& upd : tl_buffers[t].Cv_updates)
+            {
+                auto [p1, p2] = std::get<std::pair<u_int16_t, u_int16_t>>(upd.ptr);
+                Cv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, p1, p2);
+            }
+#endif
+        }
+
+        // M2: multi loop candidates without unpaired bases
+        if (beam_size>0) beam_prune(M2v_[j], beam_size);
+        {
+            const size_t m2v_size = M2v_[j].size();
+            std::vector<std::pair<u_int32_t, State const*>> m2v_entries;
+            m2v_entries.reserve(m2v_size);
+            for (const auto& [i, st] : M2v_[j])
+                m2v_entries.emplace_back(i, &st);
+
+            for (auto& buf : tl_buffers) buf.Mv_updates.clear();
+
+#ifdef USE_OPENMP
+            #pragma omp parallel if(m2v_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+            {
+#ifdef USE_OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+                #pragma omp for schedule(dynamic)
+#endif
+                for (size_t idx = 0; idx < m2v_size; ++idx)
+                {
+                    const auto i = m2v_entries[idx].first;
+                    const auto& st = *m2v_entries[idx].second;
+
+                    // M1 -> M2 - same position update
+#ifdef USE_OPENMP
+                    #pragma omp critical(update_M1v_j)
+#endif
+                    M1v_[j][i].update_max(st.score, TBType::M1_M2);
+
+                    // M -> ... M2 ... - forward update
+                    for (auto p=i-1; p>=1 && (i-1)-(p+1)+1<=opts.max_internal && allow_unpaired_range[p]>=i; --p)
+                    {
+                        const auto& np_p = get_next_pair(seq_ids[p-1]);
+                        auto q = np_p.size()>0 ? np_p[j] : 0u;
+                        if (q>0 && allow_unpaired_range[j]>=q && opts.allow_paired_extended(seq_ids, p, q))
+                        {
+                            auto newscore = param_->score_multi_unpaired(p+1, i-1) + param_->score_multi_unpaired(j+1, q-1) + st.score;
+                            local_buf.Mv_updates.emplace_back(q, p, newscore, TBType::M_CLOSING,
+                                static_cast<u_int16_t>(i-p), static_cast<u_int16_t>(q-j));
+                        }
+                    }
+                }
+            }
+
+            // Merge Mv updates
+            for (int t = 0; t < num_threads; ++t)
+                for (const auto& upd : tl_buffers[t].Mv_updates)
+                {
+                    auto [p1, p2] = std::get<std::pair<u_int16_t, u_int16_t>>(upd.ptr);
+                    Mv_[upd.target_j][upd.key].update_max(upd.score, upd.manner, p1, p2);
+                }
+        }
+
+        // M1: right-most multi loop candidates
+        if (beam_size>0) beam_prune(M1v_[j], beam_size);
+        {
+            const size_t m1v_size = M1v_[j].size();
+            std::vector<std::pair<u_int32_t, State const*>> m1v_entries;
+            m1v_entries.reserve(m1v_size);
+            for (const auto& [i, st] : M1v_[j])
+                m1v_entries.emplace_back(i, &st);
+
+            for (auto& buf : tl_buffers) buf.M1v_updates.clear();
+
+#ifdef USE_OPENMP
+            #pragma omp parallel if(m1v_size >= PARALLEL_LOOP_THRESHOLD)
+#endif
+            {
+#ifdef USE_OPENMP
+                const int tid = omp_get_thread_num();
+#else
+                const int tid = 0;
+#endif
+                auto& local_buf = tl_buffers[tid];
+
+#ifdef USE_OPENMP
+                #pragma omp for schedule(static)
+#endif
+                for (size_t idx = 0; idx < m1v_size; ++idx)
+                {
+                    const auto i = m1v_entries[idx].first;
+                    const auto& st = *m1v_entries[idx].second;
+
+                    // M1 -> M1 . - forward update
+                    if (j+1<=L && allow_unpaired_position[j+1])
+                    {
+                        auto newscore = st.score + param_->score_multi_unpaired(j+1, j+1);
+                        local_buf.M1v_updates.emplace_back(j+1, i, newscore, TBType::M1_UNPAIRED, 0u);
+                    }
+                }
+            }
+
+            // Merge M1v updates
+            for (int t = 0; t < num_threads; ++t)
+                for (const auto& upd : tl_buffers[t].M1v_updates)
+                    M1v_[upd.target_j][upd.key].update_max(upd.score, upd.manner, std::get<u_int32_t>(upd.ptr));
+        }
+
+        // F: external loops
+        // F -> F .
+        if (j+1<=L && allow_unpaired_position[j+1])
+        {
+            auto newscore = Fv_[j].score + param_->score_external_unpaired(j+1, j+1);
+            Fv_[j+1].update_max(newscore, TBType::F_UNPAIRED);
+        }
+    }
+
+    return Fv_[L].score;
 }
 
 // instantiation

@@ -5,7 +5,9 @@
 #include <tuple>
 #include <variant>
 #include <memory>
+#include <unordered_map>
 #include "trimatrix.h"
+#include "base_encoding.h"
 using namespace std::literals::string_literals;
 
 class Fold
@@ -33,17 +35,22 @@ class Fold
             float pos_unpaired;
             float neg_unpaired;
             std::vector<float> score_paired_position_;
-            std::vector<std::vector<bool>> allowed_pairs_;
+            std::vector<std::vector<bool>> allowed_pairs_;  // ASCII base pairs (backward compatible)
+            std::unordered_map<uint32_t, bool> extended_pairs_;  // Unicode base pairs (hash map)
+            std::shared_ptr<BaseEncoding> encoding_;  // Shared encoding for base ID conversion
+            bool use_extended_pairs_;  // Flag to use extended pairing
 
-            Options() : 
+            Options() :
                 min_hairpin(3),
                 max_internal(30),
                 max_helix(30),
                 pos_paired(0), neg_paired(0),
                 pos_unpaired(0), neg_unpaired(0),
                 use_margin(false),
-                allowed_pairs_(256, std::vector<bool>(256, false))
-            {    
+                allowed_pairs_(256, std::vector<bool>(256, false)),
+                encoding_(nullptr),
+                use_extended_pairs_(false)
+            {
             }
 
             Options& min_hairpin_loop_length(size_t s)
@@ -95,6 +102,45 @@ class Fold
                 return *this;
             }
 
+            // Set extended pair using base IDs (for Unicode support)
+            Options& set_extended_pair(base_id x, base_id y, bool allowed = true)
+            {
+                uint32_t key1 = (static_cast<uint32_t>(x) << 16) | y;
+                uint32_t key2 = (static_cast<uint32_t>(y) << 16) | x;
+                extended_pairs_[key1] = allowed;
+                extended_pairs_[key2] = allowed;
+                return *this;
+            }
+
+            // Set encoding for extended base support
+            Options& set_encoding(std::shared_ptr<BaseEncoding> enc)
+            {
+                encoding_ = enc;
+                return *this;
+            }
+
+            // Get encoding (creates default if not set)
+            const BaseEncoding& get_encoding() const
+            {
+                if (encoding_) {
+                    return *encoding_;
+                }
+                return get_global_encoding();
+            }
+
+            // Set whether to use extended pairing rules
+            Options& use_extended_pairs(bool use)
+            {
+                this->use_extended_pairs_ = use;
+                return *this;
+            }
+
+            // Check if extended pairing is enabled
+            bool use_extended() const
+            {
+                return use_extended_pairs_;
+            }
+
             auto additional_paired_score(u_int32_t i, uint32_t j) const
             {
                 auto s = 0.0f;
@@ -109,10 +155,16 @@ class Fold
                 -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
             auto make_constraint_lin(const std::string& seq, std::string alphabests="acguACGU"s, bool canonical_only=true) const
                 -> std::tuple<std::vector<std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>>;
+            // Extended version using base_id for Unicode support
+            auto make_constraint_lin_extended(const std::string& seq, bool canonical_only=true) const
+                -> std::tuple<std::unordered_map<base_id, std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>, std::vector<base_id>>;
             auto make_additional_scores(size_t L) const
                 -> std::tuple<TriMatrix<float>, std::vector<std::vector<float>>>;
             bool allow_paired(char x, char y) const;
             bool allow_paired(const std::string& seq, u_int32_t i, u_int32_t j) const;
+            // Extended pairing check with fallback to canonical bases
+            bool allow_paired_extended(base_id x, base_id y) const;
+            bool allow_paired_extended(const std::vector<base_id>& seq_ids, u_int32_t i, u_int32_t j) const;
         };
 
     public:

@@ -2,12 +2,14 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <string>
+#include <type_traits>
 #ifdef USE_OPENMP
 #include <omp.h>
 #endif
 #include "fold/zuker.h"
 #include "fold/nussinov.h"
 #include "fold/linfold.h"
+#include "fold/base_encoding.h"
 #include "param/contrafold.h"
 #include "param/turner.h"
 #include "param/positional.h"
@@ -18,6 +20,62 @@
 #include "compbpseq.h"
 
 namespace py = pybind11;
+
+// Setup modified bases information from Python nucleosides module
+void setup_modified_bases(std::shared_ptr<BaseEncoding>& encoding,
+                          py::object nucleosides_info)
+{
+    if (nucleosides_info.is_none()) {
+        return;
+    }
+
+    if (!py::isinstance<py::dict>(nucleosides_info)) {
+        return;
+    }
+
+    if (!encoding) {
+        encoding = std::make_shared<BaseEncoding>();
+    }
+
+    auto info = py::cast<py::dict>(nucleosides_info);
+    for (auto item : info) {
+        std::string code = py::cast<std::string>(item.first);
+        auto props = py::cast<py::dict>(item.second);
+
+        std::string origin_str = py::cast<std::string>(props["origin"]);
+        std::string pairedwith = py::cast<std::string>(props["pairedwith"]);
+
+        // Get origin base ID
+        auto origin_ids = encoding->encode(origin_str);
+        base_id origin_id = origin_ids.empty() ? 0 : origin_ids[0];
+
+        // Register the new base with its canonical parent
+        auto code_ids = encoding->encode(code);
+        base_id new_id;
+        if (code_ids.empty() || code_ids[0] == BASE_ID_INVALID) {
+            new_id = encoding->register_base(code, origin_id);
+        } else {
+            new_id = code_ids[0];
+        }
+
+        // Set origin and pairedwith
+        encoding->set_origin(new_id, origin_id);
+        encoding->set_pairedwith(new_id, pairedwith);
+    }
+}
+
+// Get nucleoside information from Python module
+py::object get_nucleoside_info_from_python()
+{
+    try {
+        py::object nucleosides_module = py::module::import("mxfold2.nucleosides");
+        py::object generate_func = nucleosides_module.attr("generate_nucleoside_info_for_cpp");
+        return generate_func();
+    } catch (const py::error_already_set& e) {
+        // If import fails, return None
+        return py::none();
+    }
+}
 
 template < class FoldClass >
 class FoldWrapper
@@ -87,8 +145,97 @@ protected:
 
     void set_allowed_pairs(Options& options, const std::string& allowed_pairs) const
     {
-        for (auto i=0; i!=allowed_pairs.size(); i+=2)
+        for (size_t i=0; i!=allowed_pairs.size(); i+=2)
             options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
+    }
+
+    // Set extended pairing rules from Python dict
+    // Format: {('base1', 'base2'): True/False, ...} or {(id1, id2): True/False, ...}
+    void set_extended_pairing_rules(Options& options, py::object pairing_rules,
+                                     std::shared_ptr<BaseEncoding> encoding = nullptr) const
+    {
+        if (pairing_rules.is_none()) {
+            return;
+        }
+
+        if (!py::isinstance<py::dict>(pairing_rules)) {
+            return;
+        }
+
+        auto rules = py::cast<py::dict>(pairing_rules);
+        if (rules.empty()) {
+            return;
+        }
+
+        // Create or use provided encoding
+        if (!encoding) {
+            encoding = std::make_shared<BaseEncoding>();
+        }
+        options.set_encoding(encoding);
+
+        for (auto item : rules) {
+            auto key = item.first;
+            bool allowed = py::cast<bool>(item.second);
+
+            if (!py::isinstance<py::tuple>(key)) {
+                continue;
+            }
+
+            auto pair = py::cast<py::tuple>(key);
+            if (pair.size() != 2) {
+                continue;
+            }
+
+            base_id id1, id2;
+
+            // Handle string characters
+            if (py::isinstance<py::str>(pair[0]) && py::isinstance<py::str>(pair[1])) {
+                std::string s1 = py::cast<std::string>(pair[0]);
+                std::string s2 = py::cast<std::string>(pair[1]);
+
+                // Get or register base IDs for the characters
+                auto enc_ids1 = encoding->encode(s1);
+                auto enc_ids2 = encoding->encode(s2);
+
+                if (enc_ids1.empty() || enc_ids2.empty()) {
+                    continue;
+                }
+
+                id1 = enc_ids1[0];
+                id2 = enc_ids2[0];
+            }
+            // Handle integer IDs directly
+            else if (py::isinstance<py::int_>(pair[0]) && py::isinstance<py::int_>(pair[1])) {
+                id1 = static_cast<base_id>(py::cast<int>(pair[0]));
+                id2 = static_cast<base_id>(py::cast<int>(pair[1]));
+            }
+            else {
+                continue;
+            }
+
+            options.set_extended_pair(id1, id2, allowed);
+        }
+
+        // Mark options to use extended pairs
+        options.use_extended_pairs(true);
+    }
+
+    // Register a base with its canonical (parent) base
+    // Returns the assigned base_id
+    static base_id register_base_in_encoding(std::shared_ptr<BaseEncoding>& encoding,
+                                              const std::string& base_char,
+                                              const std::string& canonical_char)
+    {
+        if (!encoding) {
+            encoding = std::make_shared<BaseEncoding>();
+        }
+
+        // Get or assign ID for canonical base first
+        auto canonical_ids = encoding->encode(canonical_char);
+        base_id canonical_id = canonical_ids.empty() ? 0 : canonical_ids[0];
+
+        // Register the new base with its canonical parent
+        return encoding->register_base(base_char, canonical_id);
     }
 
     void set_constraints(Options& options, py::object constraint) const
@@ -130,20 +277,31 @@ class ZukerWrapper : public FoldWrapper<Zuker<ParamClass>>
     using Options = typename FoldWrapper<Zuker<ParamClass>>::Options;
 
 public:
-    ZukerWrapper() : FoldWrapper<Zuker<ParamClass>>() {}
-    
+    ZukerWrapper() : FoldWrapper<Zuker<ParamClass>>() {
+        // Initialize encoding with modified bases information
+        py::object nucleoside_info = get_nucleoside_info_from_python();
+        setup_modified_bases(encoding_, nucleoside_info);
+    }
+
     void set_param(const std::string& seq, py::object pa)
     {
         seq_ = seq;
-        auto param = std::make_unique<ParamClass>(seq, pa);
-        f_ = std::make_unique<Zuker<ParamClass>>(std::move(param));
+        // Use encoding for TurnerNearestNeighbor to support modified bases
+        if constexpr (std::is_same_v<ParamClass, TurnerNearestNeighbor>) {
+            auto param = std::make_unique<ParamClass>(seq, pa, encoding_);
+            f_ = std::make_unique<Zuker<ParamClass>>(std::move(param));
+        } else {
+            auto param = std::make_unique<ParamClass>(seq, pa);
+            f_ = std::make_unique<Zuker<ParamClass>>(std::move(param));
+        }
     }
 
     auto set_options(int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
-            py::object constraint, py::object reference, 
+            py::object constraint, py::object reference,
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
-            py::object paired_position_scores)
+            py::object paired_position_scores,
+            py::object pairing_rules = py::none())
     {
         Options options;
         options.min_hairpin_loop_length(min_hairpin)
@@ -153,6 +311,12 @@ public:
         this->set_constraints(options, constraint);
         this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
         this->set_score_paired_potision(options, paired_position_scores);
+
+        // Set extended pairing rules if provided
+        if (!pairing_rules.is_none()) {
+            this->set_extended_pairing_rules(options, pairing_rules, encoding_);
+        }
+
         std::swap(options, options_);
         return options_;
     }
@@ -160,14 +324,15 @@ public:
     auto compute_viterbi(const std::string& seq, py::object pa,
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
-            py::object constraint, py::object reference, 
+            py::object constraint, py::object reference,
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
-            py::object paired_position_scores)
+            py::object paired_position_scores,
+            py::object pairing_rules = py::none())
     {
         set_param(seq, pa);
-        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs,
                 constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
-                paired_position_scores);
+                paired_position_scores, pairing_rules);
         return f_->compute_viterbi(seq_, options_);
     }
 
@@ -178,17 +343,18 @@ public:
         return std::make_tuple(e, s, p);
     }
 
-    auto compute_basepairing_probabilities(const std::string& seq, py::object pa, 
+    auto compute_basepairing_probabilities(const std::string& seq, py::object pa,
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
-            py::object constraint, py::object reference, 
+            py::object constraint, py::object reference,
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
-            py::object paired_position_scores)
+            py::object paired_position_scores,
+            py::object pairing_rules = py::none())
     {
         set_param(seq, pa);
-        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
-                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired, 
-                paired_position_scores);
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs,
+                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
+                paired_position_scores, pairing_rules);
 
         auto ret = f_->compute_inside(seq_, options_);
         f_->compute_outside(seq_, options_);
@@ -200,6 +366,7 @@ private:
     std::string seq_;
     std::unique_ptr<Zuker<ParamClass>> f_;
     Options options_;
+    std::shared_ptr<BaseEncoding> encoding_;
 };
 
 template < class ParamClass >
@@ -261,20 +428,31 @@ class LinFoldWrapper : public FoldWrapper<LinFold<ParamClass>>
 {
     using Options = typename FoldWrapper<LinFold<ParamClass>>::Options;
 public:
-    LinFoldWrapper(u_int32_t beam_size=100) : beam_size_(beam_size) {}
-    
+    LinFoldWrapper(u_int32_t beam_size=100) : beam_size_(beam_size), encoding_(nullptr) {
+        // Initialize encoding with modified bases information
+        py::object nucleoside_info = get_nucleoside_info_from_python();
+        setup_modified_bases(encoding_, nucleoside_info);
+    }
+
     void set_param(const std::string& seq, py::object pa)
     {
         seq_ = seq;
-        auto param = std::make_unique<ParamClass>(seq, pa);
-        f_ = std::make_unique<LinFold<ParamClass>>(std::move(param));
+        // Use encoding for TurnerNearestNeighbor to support modified bases
+        if constexpr (std::is_same_v<ParamClass, TurnerNearestNeighbor>) {
+            auto param = std::make_unique<ParamClass>(seq, pa, encoding_);
+            f_ = std::make_unique<LinFold<ParamClass>>(std::move(param));
+        } else {
+            auto param = std::make_unique<ParamClass>(seq, pa);
+            f_ = std::make_unique<LinFold<ParamClass>>(std::move(param));
+        }
     }
 
     auto set_options(int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
-            py::object constraint, py::object reference, 
+            py::object constraint, py::object reference,
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
-            py::object paired_position_scores)
+            py::object paired_position_scores,
+            py::object pairing_rules = py::none())
     {
         Options options;
         options.min_hairpin_loop_length(min_hairpin)
@@ -284,6 +462,12 @@ public:
         this->set_constraints(options, constraint);
         this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
         this->set_score_paired_potision(options, paired_position_scores);
+
+        // Set extended pairing rules if provided
+        if (!pairing_rules.is_none()) {
+            this->set_extended_pairing_rules(options, pairing_rules, encoding_);
+        }
+
         std::swap(options, options_);
         return options_;
     }
@@ -291,14 +475,15 @@ public:
     auto compute_viterbi(const std::string& seq, py::object pa,
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
-            py::object constraint, py::object reference, 
+            py::object constraint, py::object reference,
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
-            py::object paired_position_scores)
+            py::object paired_position_scores,
+            py::object pairing_rules = py::none())
     {
         set_param(seq, pa);
-        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs,
                 constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
-                paired_position_scores);
+                paired_position_scores, pairing_rules);
         options_.beam_size(beam_size_);
         return f_->compute_viterbi(seq_, options_);
     }
@@ -310,17 +495,18 @@ public:
         return std::make_tuple(e, s, p);
     }
 
-    auto compute_basepairing_probabilities(const std::string& seq, py::object pa, 
+    auto compute_basepairing_probabilities(const std::string& seq, py::object pa,
             int min_hairpin, int max_internal, int max_helix,
             const std::string& allowed_pairs,
-            py::object constraint, py::object reference, 
+            py::object constraint, py::object reference,
             float pos_paired, float neg_paired, float pos_unpaired, float neg_unpaired,
-            py::object paired_position_scores)
+            py::object paired_position_scores,
+            py::object pairing_rules = py::none())
     {
         set_param(seq, pa);
-        set_options(min_hairpin, max_internal, max_helix, allowed_pairs, 
-                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired, 
-                paired_position_scores);
+        set_options(min_hairpin, max_internal, max_helix, allowed_pairs,
+                constraint, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired,
+                paired_position_scores, pairing_rules);
 
         auto ret = f_->compute_inside(seq_, options_);
         f_->compute_outside(seq_, options_);
@@ -333,6 +519,7 @@ private:
     std::unique_ptr<LinFold<ParamClass>> f_;
     Options options_;
     u_int32_t beam_size_;
+    std::shared_ptr<BaseEncoding> encoding_;
 };
 
 void set_num_threads(int n)
@@ -352,168 +539,178 @@ PYBIND11_MODULE(interface, m)
 
     py::class_<ZukerWrapper<TurnerNearestNeighbor>>(m, "ZukerTurnerWrapper")
         .def(py::init<>())
-        .def("compute_viterbi", &ZukerWrapper<TurnerNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with Turner model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &ZukerWrapper<TurnerNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with Turner model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &ZukerWrapper<TurnerNearestNeighbor>::traceback_viterbi,
             "traceback for Turner model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<TurnerNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with Turner model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with Turner model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<ZukerWrapper<PositionalNearestNeighbor>>(m, "ZukerPositionalWrapper")
         .def(py::init<>())
-        .def("compute_viterbi", &ZukerWrapper<PositionalNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with positional nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &ZukerWrapper<PositionalNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with positional nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &ZukerWrapper<PositionalNearestNeighbor>::traceback_viterbi,
             "traceback for positional nearest neighbor model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<PositionalNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with positional nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with positional nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<ZukerWrapper<CONTRAfoldNearestNeighbor>>(m, "ZukerCONTRAfoldWrapper")
         .def(py::init<>())
-        .def("compute_viterbi", &ZukerWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with Turner model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &ZukerWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with Turner model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &ZukerWrapper<CONTRAfoldNearestNeighbor>::traceback_viterbi,
             "traceback for Turner model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<CONTRAfoldNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with Turner model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with Turner model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<ZukerWrapper<MixedNearestNeighbor>>(m, "ZukerMixedWrapper")
         .def(py::init<>())
-        .def("compute_viterbi", &ZukerWrapper<MixedNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with mixed nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &ZukerWrapper<MixedNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with mixed nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &ZukerWrapper<MixedNearestNeighbor>::traceback_viterbi,
             "traceback for mixed nearest neighbor model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with mixed nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with mixed nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<ZukerWrapper<CFMixedNearestNeighbor>>(m, "CONTRAfoldMixedWrapper")
         .def(py::init<>())
-        .def("compute_viterbi", &ZukerWrapper<CFMixedNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with CONTRAfold-mixed nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &ZukerWrapper<CFMixedNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with CONTRAfold-mixed nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &ZukerWrapper<CFMixedNearestNeighbor>::traceback_viterbi,
             "traceback for CONTRAfold-mixed nearest neighbor model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<CFMixedNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with CONTRAfold-mixed nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with CONTRAfold-mixed nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
 #if 0
     py::class_<ZukerWrapper<PositionalNearestNeighborBL>>(m, "ZukerPositionalBLWrapper")
@@ -584,36 +781,38 @@ PYBIND11_MODULE(interface, m)
 #endif
     py::class_<ZukerWrapper<MixedNearestNeighbor1D>>(m, "ZukerMixed1DWrapper")
         .def(py::init<>())
-        .def("compute_viterbi", &ZukerWrapper<MixedNearestNeighbor1D>::compute_viterbi, 
-            "predict RNA secondary structure with mixed nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &ZukerWrapper<MixedNearestNeighbor1D>::compute_viterbi,
+            "predict RNA secondary structure with mixed nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &ZukerWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
             "traceback for mixed nearest neighbor model")
         .def("compute_basepairing_probabilities", &ZukerWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities,
-            "Partition function with mixed nearest neighbor model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with mixed nearest neighbor model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<NussinovWrapper<PositionalBasePairScore>>(m, "NussinovWrapper")
         .def(py::init<>())
@@ -636,69 +835,73 @@ PYBIND11_MODULE(interface, m)
 
     py::class_<LinFoldWrapper<TurnerNearestNeighbor>>(m, "LinFoldTurnerWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinFold-V model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with LinFold-V model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi, 
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
+        .def("traceback_viterbi", &LinFoldWrapper<TurnerNearestNeighbor>::traceback_viterbi,
             "traceback for LinearFold-V")
         .def("compute_basepairing_probabilities", &LinFoldWrapper<TurnerNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with LinFold-V model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with LinFold-V model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<LinFoldWrapper<CONTRAfoldNearestNeighbor>>(m, "LinFoldCONTRAWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi, 
-            "predict RNA secondary structure with LinFold-C model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::compute_viterbi,
+            "predict RNA secondary structure with LinFold-C model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
-        .def("traceback_viterbi", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::traceback_viterbi, 
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
+        .def("traceback_viterbi", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::traceback_viterbi,
             "traceback for LinearFold-V")
         .def("compute_basepairing_probabilities", &LinFoldWrapper<CONTRAfoldNearestNeighbor>::compute_basepairing_probabilities,
-            "Partition function with LinFold-C model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+            "Partition function with LinFold-C model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 #if 0
     py::class_<LinFoldWrapper<PositionalNearestNeighborBL>>(m, "LinFoldPositionalWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
@@ -763,69 +966,73 @@ PYBIND11_MODULE(interface, m)
 #endif
     py::class_<LinFoldWrapper<PositionalNearestNeighbor>>(m, "LinFoldPositionalWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinFoldWrapper<PositionalNearestNeighbor>::compute_viterbi, 
-            "Predict RNA secondary structure with Mixed LinearFold Model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<PositionalNearestNeighbor>::compute_viterbi,
+            "Predict RNA secondary structure with Mixed LinearFold Model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<PositionalNearestNeighbor>::traceback_viterbi,
             "traceback for LinearFold model")
-        .def("compute_basepairing_probabilities", &LinFoldWrapper<PositionalNearestNeighbor>::compute_basepairing_probabilities, 
-            "Partition function with Mixed LinearFold Model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<PositionalNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with Mixed LinearFold Model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<LinFoldWrapper<MixedNearestNeighbor>>(m, "MixedLinFoldPositionalWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
-        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_viterbi, 
-            "Predict RNA secondary structure with Mixed LinFold Model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_viterbi,
+            "Predict RNA secondary structure with Mixed LinFold Model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
             "traceback for LinFold model")
-        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities, 
-            "Partition function with Mixed LinearFold Model", 
-            "seq"_a, "param"_a, 
-            "min_hairpin_length"_a=3, 
-            "max_internal_length"_a=30, 
+        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities,
+            "Partition function with Mixed LinearFold Model",
+            "seq"_a, "param"_a,
+            "min_hairpin_length"_a=3,
+            "max_internal_length"_a=30,
             "max_helix_length"_a=30,
             "allowed_pairs"_a="aucggu",
-            "constraint"_a=py::none(), 
-            "reference"_a=py::none(), 
-            "loss_pos_paired"_a=0.0, 
+            "constraint"_a=py::none(),
+            "reference"_a=py::none(),
+            "loss_pos_paired"_a=0.0,
             "loss_neg_paired"_a=0.0,
-            "loss_pos_unpaired"_a=0.0, 
+            "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     py::class_<LinFoldWrapper<MixedNearestNeighbor1D>>(m, "MixedLinFoldPositional1DWrapper")
         .def(py::init<int>(), "constructor", "beam_size"_a=100)
@@ -842,7 +1049,8 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none())
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
             "traceback for LinFold model")
         .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities,
@@ -858,7 +1066,8 @@ PYBIND11_MODULE(interface, m)
             "loss_neg_paired"_a=0.0,
             "loss_pos_unpaired"_a=0.0,
             "loss_neg_unpaired"_a=0.0,
-            "paired_position_scores"_a=py::none());
+            "paired_position_scores"_a=py::none(),
+            "pairing_rules"_a=py::none());
 
     // compare_bpseq functions for fast base pair comparison
     m.def("compare_bpseq_pairs", &compare_bpseq_pairs,

@@ -2,8 +2,10 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include "../fold/base_encoding.h"
 
 class TurnerNearestNeighbor
 {
@@ -17,6 +19,8 @@ class TurnerNearestNeighbor
 
     public:
         TurnerNearestNeighbor(const std::string& seq, pybind11::object obj);
+        TurnerNearestNeighbor(const std::string& seq, pybind11::object obj,
+                              std::shared_ptr<BaseEncoding> encoding);
         ~TurnerNearestNeighbor() {};
 
         ScoreType score_hairpin(size_t i, size_t j) const;
@@ -41,9 +45,24 @@ class TurnerNearestNeighbor
 
     private:
         static auto convert_sequence(const std::string& seq) -> SeqType;
+        static auto convert_sequence_extended(const std::string& seq,
+                                               const BaseEncoding& encoding,
+                                               std::vector<base_id>& seq_ids_out) -> SeqType;
+
+        // Get pair type at positions i, j (supports modified bases)
+        int get_pair_type(size_t i, size_t j) const;
+
+        // Static function: compute pair type for two base_ids
+        static int get_pair_type_extended(base_id id1, base_id id2,
+                                           const BaseEncoding& encoding);
+
+        // Convert base_id to index (0-4)
+        static short base_id_to_index(base_id id);
 
     private:
         SeqType seq2_;
+        std::vector<base_id> seq_ids_;              // Original base_id array
+        std::shared_ptr<BaseEncoding> encoding_;
 
         bool use_score_hairpin_at_least_;
         bool use_score_bulge_at_least_;

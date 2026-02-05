@@ -1,27 +1,37 @@
 from __future__ import annotations
 
 from copy import copy, deepcopy
-from typing import Any, Optional, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..nucleosides import supported_nucleosides, get_modified_positions, has_modified_in_range
+from ..nucleosides import (
+    supported_nucleosides,
+    get_modified_positions,
+    has_modified_in_range,
+    generate_pairing_rules,
+)
+
 
 class AbstractFold(nn.Module):
     def __init__(self, fold_wrapper, use_fp: bool = False, modified_only: bool = False) -> None:
         super(AbstractFold, self).__init__()
         self.fold_wrapper = fold_wrapper
         self.modified_only = modified_only
+        self.use_fp = use_fp
         if use_fp:
             self.allowed_pairs = ''
             for v in supported_nucleosides.values():
                 for s in v.pairedwith:
                     self.allowed_pairs += v.code+s
             self.allowed_pairs = self.allowed_pairs.lower()
+            # Generate pairing rules dictionary for extended Unicode support
+            self.pairing_rules: Optional[Dict[Tuple[str, str], bool]] = generate_pairing_rules()
         else:
             self.allowed_pairs = "aucggu"
+            self.pairing_rules = None
 
 
     def __deepcopy__(self, memo):
@@ -198,10 +208,11 @@ class AbstractFold(nn.Module):
                             max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                             max_helix_length=max_helix_length,
                             allowed_pairs=self.allowed_pairs,
-                            constraint=c_i, reference=r_i, 
+                            constraint=c_i, reference=r_i,
                             paired_position_scores=paired_position_scores,
                             loss_pos_paired=loss_pos_paired[i], loss_neg_paired=loss_neg_paired[i],
-                            loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i])
+                            loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i],
+                            pairing_rules=self.pairing_rules)
                 v, pred, pair = self.fold_wrapper.traceback_viterbi()
 
                 if return_partfunc:
@@ -209,10 +220,11 @@ class AbstractFold(nn.Module):
                                 max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
                                 max_helix_length=max_helix_length,
                                 allowed_pairs=self.allowed_pairs,
-                                constraint=c_i, reference=r_i, 
+                                constraint=c_i, reference=r_i,
                                 paired_position_scores=paired_position_scores,
                                 loss_pos_paired=loss_pos_paired[i], loss_neg_paired=loss_neg_paired[i],
-                                loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i])
+                                loss_pos_unpaired=loss_pos_unpaired[i], loss_neg_unpaired=loss_neg_unpaired[i],
+                                pairing_rules=self.pairing_rules)
                     pfs.append(pf)
                     bpps.append(bpp)
             if torch.is_grad_enabled():
