@@ -80,6 +80,7 @@ class Common:
             'max_helix_length': args.max_helix_length,
             'embed_size' : args.embed_size,
             'use_fp': args.use_fp,
+            'use_extended_vocab': args.use_extended_vocab,
             'fp_radius': args.fp_radius,
             'fp_bits': args.fp_bits,
             'num_filters': args.num_filters if args.num_filters is not None else (96,),
@@ -218,6 +219,8 @@ class Common:
                         help='the dimention of embedding (default: 0 == onehot)')
         gparser.add_argument('--use-fp', default=False, action='store_true',
                         help='use ECFP of nucleosides for modifications')
+        gparser.add_argument('--use-extended-vocab', default=False, action='store_true',
+                        help='use extended vocabulary for modified nucleosides')
         gparser.add_argument('--fp-radius', type=int, default=2,
                         help='specify the radius of ECFP')
         gparser.add_argument('--fp-bits', type=int, default=1024,

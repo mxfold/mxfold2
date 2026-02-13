@@ -15,6 +15,7 @@ class LinFold(AbstractFold):
     def __init__(self, beam_size: int = 100, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
         super(LinFold, self).__init__(interface.LinFoldPositionalWrapper(beam_size=beam_size),
                                       kwargs.get('use_fp', False),
+                                      kwargs.get('use_extended_vocab', False),
                                       kwargs.get('modified_only', False))
 
         self.max_helix_length = max_helix_length

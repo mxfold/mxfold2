@@ -166,3 +166,7 @@ poetry.lock
 models
 .tool-versions
 wandb
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+mod-data

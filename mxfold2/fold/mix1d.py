@@ -15,6 +15,7 @@ class MixedFold1D(AbstractFold):
         max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
         super(MixedFold1D, self).__init__(interface.ZukerMixed1DWrapper(),
                                           kwargs.get('use_fp', False),
+                                          kwargs.get('use_extended_vocab', False),
                                           kwargs.get('modified_only', False))
         self.turner = RNAFold(init_param=init_param)
         self.zuker = ZukerFold1D(max_helix_length=max_helix_length, **kwargs)

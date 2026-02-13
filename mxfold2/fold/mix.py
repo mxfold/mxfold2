@@ -23,9 +23,10 @@ class MixedFold(AbstractFold):
         count_weight_turner: float = None,
         count_weight_positional: float = None,
         use_fp: bool = False,
+        use_extended_vocab: bool = False,
         modified_only: bool = False,
         **kwargs) -> None:
-        super(MixedFold, self).__init__(interface.ZukerMixedWrapper(), use_fp, modified_only)
+        super(MixedFold, self).__init__(interface.ZukerMixedWrapper(), use_fp, use_extended_vocab, modified_only)
 
         # Determine weights based on mix_type or explicit weights
         if weight_turner is not None and weight_positional is not None:
@@ -56,7 +57,7 @@ class MixedFold(AbstractFold):
             self._count_weight_positional = count_weight_positional
 
         self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(max_helix_length=max_helix_length, use_fp=use_fp, **kwargs)
+        self.zuker = ZukerFold(max_helix_length=max_helix_length, use_fp=use_fp, use_extended_vocab=use_extended_vocab, **kwargs)
         self.max_helix_length = max_helix_length
 
     # Score weight properties

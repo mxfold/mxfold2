@@ -21,9 +21,10 @@ class MixedLinFold(AbstractFold):
                  count_weight_turner: float = None,
                  count_weight_positional: float = None,
                  use_fp: bool = False,
+                 use_extended_vocab: bool = False,
                  modified_only: bool = False,
                  **kwargs: dict[str, Any]) -> None:
-        super(MixedLinFold, self).__init__(interface.MixedLinFoldPositionalWrapper(beam_size=beam_size), use_fp, modified_only)
+        super(MixedLinFold, self).__init__(interface.MixedLinFoldPositionalWrapper(beam_size=beam_size), use_fp, use_extended_vocab, modified_only)
 
         # Determine weights based on mix_type or explicit weights
         if weight_turner is not None and weight_positional is not None:
@@ -55,7 +56,7 @@ class MixedLinFold(AbstractFold):
 
         self.max_helix_length = max_helix_length
         self.turner = LinFoldV(init_param=init_param)
-        self.zuker = LinFold(use_fp=use_fp, **kwargs)
+        self.zuker = LinFold(use_fp=use_fp, use_extended_vocab=use_extended_vocab, **kwargs)
 
     # Score weight properties
     @property

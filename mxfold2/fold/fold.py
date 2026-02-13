@@ -16,12 +16,13 @@ from ..nucleosides import (
 
 
 class AbstractFold(nn.Module):
-    def __init__(self, fold_wrapper, use_fp: bool = False, modified_only: bool = False) -> None:
+    def __init__(self, fold_wrapper, use_fp: bool = False, use_extended_vocab: bool = False, modified_only: bool = False) -> None:
         super(AbstractFold, self).__init__()
         self.fold_wrapper = fold_wrapper
         self.modified_only = modified_only
         self.use_fp = use_fp
-        if use_fp:
+        self.use_extended_vocab = use_extended_vocab
+        if use_fp or use_extended_vocab:
             self.allowed_pairs = ''
             for v in supported_nucleosides.values():
                 for s in v.pairedwith:

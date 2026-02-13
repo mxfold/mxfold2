@@ -15,6 +15,7 @@ class ZukerFold1D(AbstractFold):
     def __init__(self, max_helix_length: int = 30, **kwargs: dict[str, Any]) -> None:
         super(ZukerFold1D, self).__init__(interface.ZukerPositionalWrapper(),
                                           kwargs.get('use_fp', False),
+                                          kwargs.get('use_extended_vocab', False),
                                           kwargs.get('modified_only', False))
 
         self.max_helix_length = max_helix_length

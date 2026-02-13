@@ -25,6 +25,7 @@ class CONTRAMixedFold(AbstractFold):
         **kwargs) -> None:
         super(CONTRAMixedFold, self).__init__(interface.CONTRAfoldMixedWrapper(),
                                               use_fp=kwargs.get('use_fp', False),
+                                              use_extended_vocab=kwargs.get('use_extended_vocab', False),
                                               modified_only=modified_only)
 
         # Determine weights based on mix_type or explicit weights

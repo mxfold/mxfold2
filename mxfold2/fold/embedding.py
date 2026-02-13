@@ -55,6 +55,48 @@ class SparseEmbedding(nn.Module):
         return self.embedding(seq3).transpose(1, 2)
 
 
+class ExtendedSparseEmbedding(nn.Module):
+    """Extended SparseEmbedding for modified nucleosides.
+
+    Supports standard bases (A, C, G, U/T) plus modified bases defined in nucleosides.py.
+    Vocabulary is dynamically built from supported_nucleosides:
+    - 0: padding
+    - 1-4: a, c, g, u/t (standard bases, fixed)
+    - 5~: modified bases (dynamically added from supported_nucleosides)
+    - last: unknown
+    """
+
+    def __init__(self, dim: int) -> None:
+        super(ExtendedSparseEmbedding, self).__init__()
+        self.n_out = dim
+
+        # Standard bases (fixed IDs)
+        self._unknown_id = 5  # temporary, will be updated
+        self.vocab: defaultdict[str, int] = defaultdict(lambda: self._unknown_id)
+        self.vocab.update({'0': 0, 'a': 1, 'c': 2, 'g': 3, 'u': 4, 't': 4})
+
+        # Dynamically add modified bases from nucleosides.py
+        next_id = 5
+        for code in supported_nucleosides.keys():
+            code_lower = code.lower()
+            if code_lower not in self.vocab:  # exclude standard bases
+                self.vocab[code_lower] = next_id
+                next_id += 1
+
+        # unknown ID is the last
+        self._unknown_id = next_id
+        self.vocab.default_factory = lambda: self._unknown_id
+
+        # Create Embedding layer with dynamic size
+        vocab_size = next_id + 1
+        self.embedding = nn.Embedding(vocab_size, dim, padding_idx=0)
+
+    def forward(self, seq: list[str]) -> torch.Tensor:
+        seq2 = torch.LongTensor([[self.vocab[c] for c in s.lower()] for s in seq])
+        seq3 = seq2.to(self.embedding.weight.device)
+        return self.embedding(seq3).transpose(1, 2)
+
+
 class ECFPEmbedding(nn.Module):
     def __init__(self, dim: int, radius: int = 2, nbits: int = 1024) -> None:
         super(ECFPEmbedding, self).__init__()

@@ -14,6 +14,7 @@ class ZukerFold(AbstractFold):
     def __init__(self, max_helix_length: int = 30, **kwargs) -> None:
         super(ZukerFold, self).__init__(interface.ZukerPositionalWrapper(),
                                         kwargs.get('use_fp', False),
+                                        kwargs.get('use_extended_vocab', False),
                                         kwargs.get('modified_only', False))
 
         exclude_diag = True # default
