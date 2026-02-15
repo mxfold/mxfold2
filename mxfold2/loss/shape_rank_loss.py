@@ -17,7 +17,7 @@ class ShapeRankLoss(nn.Module):
     class ADwrapper(torch.autograd.Function):
         @staticmethod
         def forward(ctx, losses, num_counts, *tensors):
-            ctx.save_for_backward(*tensors[:num_counts * 2])
+            ctx.save_for_backward(*tensors[: num_counts * 2])
             ctx.num_counts = num_counts
             return losses.clone()
 
@@ -26,7 +26,7 @@ class ShapeRankLoss(nn.Module):
             saved = ctx.saved_tensors
             num_counts = ctx.num_counts
             pred_counts = saved[:num_counts]
-            ref_counts = saved[num_counts:num_counts * 2]
+            ref_counts = saved[num_counts : num_counts * 2]
             # Apply grad_output to properly propagate gradients through the chain rule
             # grad_output shape: (batch,) or scalar
             # pred_counts[i], ref_counts[i] shape: (batch, features)
@@ -36,15 +36,20 @@ class ShapeRankLoss(nn.Module):
             )
             return (None, None) + (None,) * (num_counts * 2) + grads
 
-
-    def __init__(self, model: AbstractFold,
-            perturb: float = 0., nu: float = 0.1, margin: float = 0.,
-            l1_weight: float = 0., l2_weight: float = 0.,
-            sl_weight: float = 0.,
-            pseudo_fy_weight: float = 0.,
-            weight_schedule: str = 'none',
-            weight_schedule_start: int = 1,
-            weight_schedule_end: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        model: AbstractFold,
+        perturb: float = 0.0,
+        nu: float = 0.1,
+        margin: float = 0.0,
+        l1_weight: float = 0.0,
+        l2_weight: float = 0.0,
+        sl_weight: float = 0.0,
+        pseudo_fy_weight: float = 0.0,
+        weight_schedule: str = "none",
+        weight_schedule_start: int = 1,
+        weight_schedule_end: Optional[int] = None,
+    ) -> None:
         super(ShapeRankLoss, self).__init__()
         self.model = model
         self.perturb = perturb
@@ -63,7 +68,10 @@ class ShapeRankLoss(nn.Module):
         if sl_weight > 0.0 or pseudo_fy_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
-            self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+
+            self.turner = RNAFold(param_turner2004).to(
+                next(self.model.parameters()).device
+            )
 
     def set_epoch_info(self, epoch: int, total_epochs: int) -> None:
         """Set the current epoch and total epochs for weight scheduling."""
@@ -72,7 +80,9 @@ class ShapeRankLoss(nn.Module):
 
     def _get_scheduled_weights(self) -> tuple[float, float]:
         """Calculate scheduled weights for ref prediction based on current epoch."""
-        if self.weight_schedule == 'none' or not hasattr(self.model, 'score_weight_turner'):
+        if self.weight_schedule == "none" or not hasattr(
+            self.model, "score_weight_turner"
+        ):
             return None, None
 
         schedule_end = self.weight_schedule_end or self.total_epochs
@@ -81,9 +91,11 @@ class ShapeRankLoss(nn.Module):
         elif self.current_epoch >= schedule_end:
             progress = 1.0
         else:
-            progress = (self.current_epoch - self.weight_schedule_start) / (schedule_end - self.weight_schedule_start)
+            progress = (self.current_epoch - self.weight_schedule_start) / (
+                schedule_end - self.weight_schedule_start
+            )
 
-        if self.weight_schedule == 'cosine':
+        if self.weight_schedule == "cosine":
             progress = 0.5 * (1 - math.cos(math.pi * progress))
 
         # Turner: 1.0 -> 0.5, Positional: 0.0 -> 0.5
@@ -91,33 +103,58 @@ class ShapeRankLoss(nn.Module):
         weight_positional = 0.5 * progress
         return weight_turner, weight_positional
 
-
-    def forward(self, seq: list[str], targets: list[torch.Tensor],
-                fname: Optional[list[str]] = None,
-                dataset_id: Optional[list[int]] = None) -> torch.Tensor:
+    def forward(
+        self,
+        seq: list[str],
+        targets: list[torch.Tensor],
+        fname: Optional[list[str]] = None,
+        dataset_id: Optional[list[int]] = None,
+    ) -> torch.Tensor:
         pred: torch.Tensor
         pred_s: list[str]
         pred_bps: list[list[int]]
-        pred, pred_s, pred_bps, param, _ = self.model(seq, return_param=True, return_count=True, perturb=self.perturb)
+        pred, pred_s, pred_bps, param, _ = self.model(
+            seq, return_param=True, return_count=True, perturb=self.perturb
+        )
 
         pred_params, pred_counts = [], []
         for k in sorted(param[0].keys()):
-            if k.startswith('score_'):
+            if k.startswith("score_"):
                 pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            elif k.startswith('count_'):
-                pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            elif k.startswith("count_"):
+                pred_counts.append(
+                    torch.vstack(
+                        [
+                            self.model.apply_modified_only_mask(seq[i], k, param[i][k])
+                            for i in range(len(seq))
+                        ]
+                    )
+                )
             elif isinstance(param[0][k], dict):
                 for kk in sorted(param[0][k].keys()):
-                    if kk.startswith('score_'):
-                        pred_params.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
-                    elif kk.startswith('count_'):
-                        pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                    if kk.startswith("score_"):
+                        pred_params.append(
+                            torch.vstack([param[i][k][kk] for i in range(len(seq))])
+                        )
+                    elif kk.startswith("count_"):
+                        pred_counts.append(
+                            torch.vstack(
+                                [
+                                    self.model.apply_modified_only_mask(
+                                        seq[i], kk, param[i][k][kk]
+                                    )
+                                    for i in range(len(seq))
+                                ]
+                            )
+                        )
 
         paired = []
         losses = []
         for pred_bp, target in zip(pred_bps, targets):
-            p = [ 1 if v > 0 else 0 for v in pred_bp ]
-            p = torch.tensor(p, dtype=torch.float32, requires_grad=True, device=pred.device)
+            p = [1 if v > 0 else 0 for v in pred_bp]
+            p = torch.tensor(
+                p, dtype=torch.float32, requires_grad=True, device=pred.device
+            )
             target = target.to(pred.device)
             paired.append(p)
 
@@ -142,7 +179,10 @@ class ShapeRankLoss(nn.Module):
                 # target[paired_idx][:, None] has shape (n_paired, 1)
                 # target[unpaired_idx][None, :] has shape (1, n_unpaired)
                 # Result has shape (n_paired, n_unpaired)
-                violations = (target[paired_idx][:, None] > target[unpaired_idx][None, :] + self.margin).float()
+                violations = (
+                    target[paired_idx][:, None]
+                    > target[unpaired_idx][None, :] + self.margin
+                ).float()
                 # Weight by p values to maintain gradient connection
                 weights = p[paired_idx][:, None] * (1 - p[unpaired_idx])[None, :]
                 n_violate = (violations * weights).sum()
@@ -154,8 +194,13 @@ class ShapeRankLoss(nn.Module):
 
         losses = torch.stack(losses)
         # Use autograd.grad to get gradients only for paired, without affecting other parameters
-        grads = torch.autograd.grad(losses, paired, grad_outputs=torch.ones_like(losses),
-                                    retain_graph=True, create_graph=False)
+        grads = torch.autograd.grad(
+            losses,
+            paired,
+            grad_outputs=torch.ones_like(losses),
+            retain_graph=True,
+            create_graph=False,
+        )
 
         ref: torch.Tensor
         ref_s: list[str]
@@ -163,9 +208,14 @@ class ShapeRankLoss(nn.Module):
         # Apply weight scheduling for ref prediction (only for Mixed models)
         scheduled_turner, scheduled_positional = self._get_scheduled_weights()
         if scheduled_turner is None:
-            ref, ref_s, ref_stru, param, _ = self.model(seq, param=param, return_param=True, return_count=True,
-                                        pseudoenergy=[self.nu*g for g in grads])
-            
+            ref, ref_s, ref_stru, param, _ = self.model(
+                seq,
+                param=param,
+                return_param=True,
+                return_count=True,
+                pseudoenergy=[self.nu * g for g in grads],
+            )
+
         else:
             # Save original weights (only score weights, not count weights)
             orig_score_turner = self.model.score_weight_turner
@@ -173,25 +223,53 @@ class ShapeRankLoss(nn.Module):
             # Apply scheduled weights
             self.model.score_weight_turner = scheduled_turner
             self.model.score_weight_positional = scheduled_positional
-            logging.debug(f'Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}')
-            ref, ref_s, ref_stru = self.model(seq, param=param, pseudoenergy=[self.nu*g for g in grads])
+            logging.debug(
+                f"Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}"
+            )
+            ref, ref_s, ref_stru = self.model(
+                seq, param=param, pseudoenergy=[self.nu * g for g in grads]
+            )
 
             # Restore original weights
             self.model.score_weight_turner = orig_score_turner
             self.model.score_weight_positional = orig_score_positional
-            ref, ref_s, ref_stru, param, _ = self.model(seq, param=param, return_param=True, return_count=True, constraint=ref_stru)
+            ref, ref_s, ref_stru, param, _ = self.model(
+                seq,
+                param=param,
+                return_param=True,
+                return_count=True,
+                constraint=ref_stru,
+            )
 
         ref_counts = []
         for k in sorted(param[0].keys()):
-            if k.startswith('count_'):
-                ref_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            if k.startswith("count_"):
+                ref_counts.append(
+                    torch.vstack(
+                        [
+                            self.model.apply_modified_only_mask(seq[i], k, param[i][k])
+                            for i in range(len(seq))
+                        ]
+                    )
+                )
             elif isinstance(param[0][k], dict):
                 for kk in sorted(param[0][k].keys()):
-                    if kk.startswith('count_'):
-                        ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                    if kk.startswith("count_"):
+                        ref_counts.append(
+                            torch.vstack(
+                                [
+                                    self.model.apply_modified_only_mask(
+                                        seq[i], kk, param[i][k][kk]
+                                    )
+                                    for i in range(len(seq))
+                                ]
+                            )
+                        )
 
         num_counts = len(pred_counts)
-        losses = self.ADwrapper.apply(losses, num_counts, *pred_counts, *ref_counts, *pred_params)
+        losses = self.ADwrapper.apply(
+            losses, num_counts, *pred_counts, *ref_counts, *pred_params
+        )
         losses = losses.to(pred.device)
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
@@ -201,7 +279,9 @@ class ShapeRankLoss(nn.Module):
             with torch.no_grad():
                 turner_energy, turner_s, turner_stru = self.turner(seq)
 
-            fy_ref, fy_ref_s, _ = self.model(seq, param=param, constraint=turner_stru, max_internal_length=None)
+            fy_ref, fy_ref_s, _ = self.model(
+                seq, param=param, constraint=turner_stru, max_internal_length=None
+            )
             fy_loss = (pred - fy_ref) / l
             losses = losses + self.pseudo_fy_weight * fy_loss
 
@@ -210,7 +290,7 @@ class ShapeRankLoss(nn.Module):
                 ref2: torch.Tensor
                 ref2_s: list[str]
                 ref2, ref2_s, _ = self.turner(seq, constraint=ref_stru)
-            losses += self.sl_weight * (ref-ref2)**2 / l
+            losses += self.sl_weight * (ref - ref2) ** 2 / l
 
         loss = losses.mean()
 
@@ -218,7 +298,7 @@ class ShapeRankLoss(nn.Module):
         logging.debug(seq)
         logging.debug(pred_s)
         logging.debug(ref_s)
-        if float(loss.item())> 1e10 or torch.isnan(loss):
+        if float(loss.item()) > 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
             logging.error(seq)

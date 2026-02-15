@@ -19,7 +19,7 @@ class F1Loss(nn.Module):
     class ADwrapper(torch.autograd.Function):
         @staticmethod
         def forward(ctx, f1_tensor, num_counts, *tensors):
-            ctx.save_for_backward(*tensors[:num_counts * 2])
+            ctx.save_for_backward(*tensors[: num_counts * 2])
             ctx.num_counts = num_counts
             return f1_tensor.clone()
 
@@ -28,7 +28,7 @@ class F1Loss(nn.Module):
             saved = ctx.saved_tensors
             num_counts = ctx.num_counts
             pred_counts = saved[:num_counts]
-            ref_counts = saved[num_counts:num_counts * 2]
+            ref_counts = saved[num_counts : num_counts * 2]
             # Apply grad_output to properly propagate gradients through the chain rule
             # grad_output shape: (batch,) or scalar
             # pred_counts[i], ref_counts[i] shape: (batch, features)
@@ -38,9 +38,15 @@ class F1Loss(nn.Module):
             )
             return (None, None) + (None,) * (num_counts * 2) + grads
 
-    def __init__(self, model: AbstractFold,
-            perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
-            sl_weight: float = 0.) -> None:
+    def __init__(
+        self,
+        model: AbstractFold,
+        perturb: float = 0.0,
+        nu: float = 0.1,
+        l1_weight: float = 0.0,
+        l2_weight: float = 0.0,
+        sl_weight: float = 0.0,
+    ) -> None:
         super(F1Loss, self).__init__()
         self.model = model
         self.perturb = perturb
@@ -51,70 +57,122 @@ class F1Loss(nn.Module):
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
-            self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
 
+            self.turner = RNAFold(param_turner2004).to(
+                next(self.model.parameters()).device
+            )
 
-    def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
+    def forward(
+        self,
+        seq: list[str],
+        pairs: list[torch.Tensor],
+        fname: Optional[list[str]] = None,
+    ) -> torch.Tensor:
         pred: torch.Tensor
         pred_s: list[str]
         pred_bps: list[list[int]]
-        pred, pred_s, pred_bps, param, _ = self.model(seq, return_param=True, return_count=True, perturb=self.perturb)
+        pred, pred_s, pred_bps, param, _ = self.model(
+            seq, return_param=True, return_count=True, perturb=self.perturb
+        )
 
         pred_params, pred_counts = [], []
         for k in sorted(param[0].keys()):
-            if k.startswith('score_'):
+            if k.startswith("score_"):
                 pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            elif k.startswith('count_'):
-                pred_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            elif k.startswith("count_"):
+                pred_counts.append(
+                    torch.vstack(
+                        [
+                            self.model.apply_modified_only_mask(seq[i], k, param[i][k])
+                            for i in range(len(seq))
+                        ]
+                    )
+                )
             elif isinstance(param[0][k], dict):
                 for kk in sorted(param[0][k].keys()):
-                    if kk.startswith('score_'):
-                        pred_params.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
-                    elif kk.startswith('count_'):
-                        pred_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                    if kk.startswith("score_"):
+                        pred_params.append(
+                            torch.vstack([param[i][k][kk] for i in range(len(seq))])
+                        )
+                    elif kk.startswith("count_"):
+                        pred_counts.append(
+                            torch.vstack(
+                                [
+                                    self.model.apply_modified_only_mask(
+                                        seq[i], kk, param[i][k][kk]
+                                    )
+                                    for i in range(len(seq))
+                                ]
+                            )
+                        )
 
         # calculate F1 score
         f1, g_pos, g_neg = [], [], []
         for i in range(len(seq)):
             tp, _, fp, fn = compare_bpseq(list(pairs[i]), pred_bps[i])
-            f1_base = 2.*tp + fp + fn
-            f1.append( (2.*tp) / f1_base if f1_base > 0 else 0. )
-            g_pos.append( (2 - f1[-1]) / f1_base if f1_base > 0 else 0. )
-            g_neg.append( (0 - f1[-1]) / f1_base if f1_base > 0 else 0. )
+            f1_base = 2.0 * tp + fp + fn
+            f1.append((2.0 * tp) / f1_base if f1_base > 0 else 0.0)
+            g_pos.append((2 - f1[-1]) / f1_base if f1_base > 0 else 0.0)
+            g_neg.append((0 - f1[-1]) / f1_base if f1_base > 0 else 0.0)
 
         ref: torch.Tensor
         ref_s: list[str]
-        ref, ref_s, _, param, _ = self.model(seq, param=param,
-                                    return_param=True, return_count=True, reference=pairs,
-                                    loss_pos_paired=[-self.nu*v for v in g_pos],
-                                    loss_neg_paired=[ self.nu*v for v in g_neg])
+        ref, ref_s, _, param, _ = self.model(
+            seq,
+            param=param,
+            return_param=True,
+            return_count=True,
+            reference=pairs,
+            loss_pos_paired=[-self.nu * v for v in g_pos],
+            loss_neg_paired=[self.nu * v for v in g_neg],
+        )
 
         ref_counts = []
         for k in sorted(param[0].keys()):
-            if k.startswith('count_'):
-                ref_counts.append(torch.vstack([param[i][k] for i in range(len(seq))]))
+            if k.startswith("count_"):
+                ref_counts.append(
+                    torch.vstack(
+                        [
+                            self.model.apply_modified_only_mask(seq[i], k, param[i][k])
+                            for i in range(len(seq))
+                        ]
+                    )
+                )
             elif isinstance(param[0][k], dict):
                 for kk in sorted(param[0][k].keys()):
-                    if kk.startswith('count_'):
-                        ref_counts.append(torch.vstack([param[i][k][kk] for i in range(len(seq))]))
+                    if kk.startswith("count_"):
+                        ref_counts.append(
+                            torch.vstack(
+                                [
+                                    self.model.apply_modified_only_mask(
+                                        seq[i], kk, param[i][k][kk]
+                                    )
+                                    for i in range(len(seq))
+                                ]
+                            )
+                        )
 
-        f1_tensor = torch.tensor([1.-v for v in f1], device=pred.device)
+        f1_tensor = torch.tensor([1.0 - v for v in f1], device=pred.device)
         num_counts = len(pred_counts)
-        loss = self.ADwrapper.apply(f1_tensor, num_counts, *pred_counts, *ref_counts, *pred_params)
+        loss = self.ADwrapper.apply(
+            f1_tensor, num_counts, *pred_counts, *ref_counts, *pred_params
+        )
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2: torch.Tensor
                 ref2_s: list[str]
-                ref2, ref2_s, _ = self.turner(seq, constraint=pairs, max_internal_length=None)
-            loss += self.sl_weight * (ref-ref2)**2 / l
+                ref2, ref2_s, _ = self.turner(
+                    seq, constraint=pairs, max_internal_length=None
+                )
+            loss += self.sl_weight * (ref - ref2) ** 2 / l
 
         logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
         logging.debug(seq)
         logging.debug(pred_s)
         logging.debug(ref_s)
-        if float(loss.item())> 1e10 or torch.isnan(loss):
+        if float(loss.item()) > 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
             logging.error(seq)

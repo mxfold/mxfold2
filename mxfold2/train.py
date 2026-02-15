@@ -1425,6 +1425,11 @@ class Train(Common):
             action="store_true",
             help="training only shape model (available for shape_nll loss)",
         )
+        gparser.add_argument(
+            "--modified-only",
+            action="store_true",
+            help="train using only losses involving modified bases (non-ACGU bases)",
+        )
 
         cls.add_network_args(subparser)
 
