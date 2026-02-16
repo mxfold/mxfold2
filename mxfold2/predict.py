@@ -24,6 +24,33 @@ from mxfold2.fold.fold import AbstractFold
 from mxfold2.common import Common
 
 
+def find_common_base(paths: list[str]) -> str | None:
+    if not paths:
+        return None
+    abs_paths = [os.path.abspath(p) for p in paths]
+    common = os.path.commonpath(abs_paths)
+    if os.path.isfile(common):
+        common = os.path.dirname(common)
+    return common
+
+
+def get_output_bpseq_path(
+    header: str, base_dir: str | None, output_dir: str
+) -> tuple[str, str]:
+    if base_dir is not None and os.path.exists(header):
+        abs_header = os.path.abspath(header)
+        rel_path = os.path.relpath(abs_header, base_dir)
+        rel_path_no_ext = os.path.splitext(rel_path)[0]
+        out_rel_path = rel_path_no_ext + ".bpseq"
+        out_path = os.path.join(output_dir, out_rel_path)
+    else:
+        fn = os.path.basename(header)
+        fn = os.path.splitext(fn)[0]
+        out_rel_path = fn + ".bpseq"
+        out_path = os.path.join(output_dir, out_rel_path)
+    return out_path, out_rel_path
+
+
 class Predict(Common):
     def __init__(self):
         super(Predict, self).__init__()
@@ -53,6 +80,18 @@ class Predict(Common):
         if shape_model is not None:
             for sm in shape_model:
                 sm.eval()
+
+        base_dir: str | None = None
+        output_lst_f = None
+        if output_bpseq is not None and output_bpseq != "stdout":
+            headers_all = [
+                data_loader.dataset[i][0] for i in range(len(data_loader.dataset))
+            ]
+            base_dir = find_common_base(headers_all)
+            os.makedirs(output_bpseq, exist_ok=True)
+            output_lst_path = os.path.join(output_bpseq, "output.lst")
+            output_lst_f = open(output_lst_path, "w")
+
         seq_processed = 0
         with torch.no_grad():
             for headers, seqs, vals in data_loader:
@@ -124,15 +163,18 @@ class Predict(Common):
                         for i in range(1, len(bp)):
                             print(f"{i}\t{seq[i - 1]}\t{bp[i]}")
                     else:
-                        fn = os.path.basename(header)
-                        fn = os.path.splitext(fn)[0]
-                        fn = os.path.join(output_bpseq, fn + ".bpseq")
-                        with open(fn, "w") as f:
+                        out_path, out_rel_path = get_output_bpseq_path(
+                            header, base_dir, output_bpseq
+                        )
+                        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                        with open(out_path, "w") as f:
                             print(
                                 f"# {header} (s={sc:.1f}, {elapsed_time:.5f}s)", file=f
                             )
                             for i in range(1, len(bp)):
                                 print(f"{i}\t{seq[i - 1]}\t{bp[i]}", file=f)
+                        if output_lst_f is not None:
+                            output_lst_f.write(out_rel_path + "\n")
                     if bpseq_file is not None:
                         seq_index = seq_processed - len(seqs) + batch_j
                         if seq_index > 0:
@@ -183,6 +225,9 @@ class Predict(Common):
                                 for j, p in bpp[i]:
                                     print(f"{j}:{p:.3f}", end=" ", file=f)
                                 print(file=f)
+
+        if output_lst_f is not None:
+            output_lst_f.close()
 
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         torch.set_num_threads(args.threads)
