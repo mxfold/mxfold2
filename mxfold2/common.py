@@ -41,6 +41,10 @@ class Common:
                 return torch.device("cpu"), "cpu"
 
     def build_model(self, args: Namespace) -> tuple[AbstractFold, dict[str, Any]]:
+        from .nucleosides import set_active_nucleosides
+        vienna_compat = getattr(args, 'modchar_vienna_compat', False)
+        set_active_nucleosides(vienna_compat=vienna_compat)
+
         if args.model == "Turner":
             if args.fold == "Zuker":
                 from .fold.rnafold import RNAFold
@@ -303,6 +307,13 @@ class Common:
             default=False,
             action="store_true",
             help="use extended vocabulary for modified nucleosides",
+        )
+        gparser.add_argument(
+            "--modchar-vienna-compat",
+            default=False,
+            action="store_true",
+            help="use Vienna-compatible modified character codes (supported_nucleosides) "
+                 "instead of the full MODOMICS dictionary",
         )
         gparser.add_argument(
             "--fp-radius", type=int, default=2, help="specify the radius of ECFP"

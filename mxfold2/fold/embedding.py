@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
-from ..nucleosides import supported_nucleosides
+from ..nucleosides import active_nucleosides, normalize_seq
 class OneHotEmbedding(nn.Module):
     def __init__(self, ksize: int = 0) -> None:
         super(OneHotEmbedding, self).__init__()
@@ -19,11 +19,11 @@ class OneHotEmbedding(nn.Module):
         eye = np.identity(4, dtype=np.float32)
         zero = np.zeros(4, dtype=np.float32)
         self.onehot: defaultdict[str, np.ndarray] = defaultdict(
-            lambda: np.ones(4, dtype=np.float32)/4, 
-            {'a': eye[0], 'c': eye[1], 'g': eye[2], 't': eye[3], 'u': eye[3], '0': zero} )
+            lambda: np.ones(4, dtype=np.float32)/4,
+            {'A': eye[0], 'C': eye[1], 'G': eye[2], 'T': eye[3], 'U': eye[3], '0': zero} )
 
     def encode(self, seq: str) -> np.ndarray:
-        seq = [ self.onehot[s] for s in seq.lower() ]
+        seq = [ self.onehot[s] for s in normalize_seq(seq) ]
         seq = np.vstack(seq)
         return seq.transpose()
 
@@ -46,11 +46,11 @@ class SparseEmbedding(nn.Module):
         self.n_out = dim
         self.embedding = nn.Embedding(6, dim, padding_idx=0)
         self.vocb = defaultdict(lambda: 5,
-            {'0': 0, 'a': 1, 'c': 2, 'g': 3, 't': 4, 'u': 4})
+            {'0': 0, 'A': 1, 'C': 2, 'G': 3, 'T': 4, 'U': 4})
 
 
     def forward(self, seq: list[str]) -> torch.tensor:
-        seq2 = torch.LongTensor([[self.vocb[c] for c in s.lower()] for s in seq])
+        seq2 = torch.LongTensor([[self.vocb[c] for c in normalize_seq(s)] for s in seq])
         seq3 = seq2.to(self.embedding.weight.device)
         return self.embedding(seq3).transpose(1, 2)
 
@@ -70,17 +70,16 @@ class ExtendedSparseEmbedding(nn.Module):
         super(ExtendedSparseEmbedding, self).__init__()
         self.n_out = dim
 
-        # Standard bases (fixed IDs)
+        # Standard bases (fixed IDs, uppercase since normalize_seq uppercases them)
         self._unknown_id = 5  # temporary, will be updated
         self.vocab: defaultdict[str, int] = defaultdict(lambda: self._unknown_id)
-        self.vocab.update({'0': 0, 'a': 1, 'c': 2, 'g': 3, 'u': 4, 't': 4})
+        self.vocab.update({'0': 0, 'A': 1, 'C': 2, 'G': 3, 'U': 4, 'T': 4})
 
-        # Dynamically add modified bases from nucleosides.py
+        # Dynamically add modified bases from active nucleoside dictionary
         next_id = 5
-        for code in supported_nucleosides.keys():
-            code_lower = code.lower()
-            if code_lower not in self.vocab:  # exclude standard bases
-                self.vocab[code_lower] = next_id
+        for code in active_nucleosides.keys():
+            if code not in self.vocab:  # use code as-is (case-sensitive)
+                self.vocab[code] = next_id
                 next_id += 1
 
         # unknown ID is the last
@@ -92,7 +91,7 @@ class ExtendedSparseEmbedding(nn.Module):
         self.embedding = nn.Embedding(vocab_size, dim, padding_idx=0)
 
     def forward(self, seq: list[str]) -> torch.Tensor:
-        seq2 = torch.LongTensor([[self.vocab[c] for c in s.lower()] for s in seq])
+        seq2 = torch.LongTensor([[self.vocab[c] for c in normalize_seq(s)] for s in seq])
         seq3 = seq2.to(self.embedding.weight.device)
         return self.embedding(seq3).transpose(1, 2)
 
@@ -104,15 +103,15 @@ class ECFPEmbedding(nn.Module):
         self.linear = nn.Linear(nbits, dim)
         em = { }
         fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=nbits)
-        for v in supported_nucleosides.values():
+        for v in active_nucleosides.values():
             m = Chem.MolFromSmiles(v.smiles)
             x = fpgen.GetFingerprint(m)
-            em[v.code.lower()] = np.array(list(x), dtype=np.float32)
-        em['0'] = np.zeros_like(em['a'])
-        self.embedding = defaultdict(lambda: (em['a'] + em['c'] + em['g'] + em['u']) / 4, em)
+            em[v.code] = np.array(list(x), dtype=np.float32)
+        em['0'] = np.zeros_like(em['A'])
+        self.embedding = defaultdict(lambda: (em['A'] + em['C'] + em['G'] + em['U']) / 4, em)
 
     def encode(self, seq: str) -> np.ndarray:
-        seq = [ self.embedding[s] for s in seq.lower() ]
+        seq = [ self.embedding[s] for s in normalize_seq(seq) ]
         seq = np.vstack(seq)
         return seq.transpose() # (nbits, len)
 

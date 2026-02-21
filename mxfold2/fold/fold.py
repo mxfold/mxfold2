@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ..nucleosides import (
-    supported_nucleosides,
+    active_nucleosides,
     get_modified_positions,
     has_modified_in_range,
     generate_pairing_rules,
@@ -30,10 +30,10 @@ class AbstractFold(nn.Module):
         self.use_extended_vocab = use_extended_vocab
         if use_fp or use_extended_vocab:
             self.allowed_pairs = ""
-            for v in supported_nucleosides.values():
+            for v in active_nucleosides.values():
                 for s in v.pairedwith:
                     self.allowed_pairs += v.code + s
-            self.allowed_pairs = self.allowed_pairs.lower()
+            self.allowed_pairs = self.allowed_pairs.lower()  # C++ allow_paired() uses tolower
             # Generate pairing rules dictionary for extended Unicode support
             self.pairing_rules: Optional[Dict[Tuple[str, str], bool]] = (
                 generate_pairing_rules()

@@ -1,9 +1,11 @@
 import sys
 
-canonicals = {('a', 'u'), ('u', 'a'), ('c', 'g'), ('g', 'c'), ('g', 'u'), ('u', 'g')}
+from mxfold2.nucleosides import normalize_seq
+
+canonicals = {('A', 'U'), ('U', 'A'), ('C', 'G'), ('G', 'C'), ('G', 'U'), ('U', 'G')}
 
 def parse_paren(seq: str, stru: str, parens=["()"], allowed_pairs=None):
-    seq = seq.lower()
+    seq = normalize_seq(seq)
     bp = [0] * (len(stru)+1)
     st = []
     for paren in parens:

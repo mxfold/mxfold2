@@ -6,6 +6,8 @@ from typing import Optional
 
 import torch
 
+from mxfold2.nucleosides import is_modified_base, get_modified_positions
+
 # Try to import C++ implementation for faster compare_bpseq
 try:
     from mxfold2 import interface as _cpp
@@ -13,14 +15,6 @@ try:
     _HAS_CPP = True
 except ImportError:
     _HAS_CPP = False
-
-
-def is_modified_base(c: str) -> bool:
-    return c.upper() not in ("A", "U", "G", "C", "T")
-
-
-def get_modified_positions(bases: list[str]) -> set[int]:
-    return {i for i, c in enumerate(bases) if is_modified_base(c)}
 
 
 def read_bpseq(
@@ -77,6 +71,8 @@ def compare_bpseq_files(
     float,
     float,
     float,
+    float,
+    float,
 ]:
     if use_pdb:
         ref = read_pdb(ref_path)
@@ -86,8 +82,8 @@ def compare_bpseq_files(
         bases = list(seq)
     seq, pred, name, sc, t = read_bpseq(pred_path)
     tp, tn, fp, fn = compare_bpseq(ref, pred, bases=bases, modified_only=modified_only)
-    sen, ppv, fval, mcc = accuracy(tp, tn, fp, fn)
-    return (name, len(seq), t, sc, tp, tn, fp, fn, sen, ppv, fval, mcc)
+    sen, ppv, fval, mcc, spec, acc = accuracy(tp, tn, fp, fn)
+    return (name, len(seq), t, sc, tp, tn, fp, fn, sen, ppv, fval, mcc, spec, acc)
 
 
 def compare_bpseq(
@@ -156,22 +152,38 @@ def _compare_bpseq_pairs_python(
 def _compare_bpseq_array_python(
     ref, pred, L: int, modified_positions: set[int] | None = None
 ) -> tuple[int, int, int, int]:
-    tp = fp = fn = 0
     assert len(ref) == len(pred)
-    for i, (j1, j2) in enumerate(zip(ref, pred)):
-        if modified_positions is not None:
-            if i not in modified_positions and j1 not in modified_positions:
-                continue
-        if j1 > 0 and i < j1:
-            if j1 == j2:
-                tp += 1
+    if modified_positions is not None:
+        ref_set = {
+            (i, ref[i])
+            for i in range(1, L + 1)
+            if ref[i] > 0
+            and i < ref[i]
+            and (i in modified_positions or ref[i] in modified_positions)
+        }
+        pred_set = {
+            (i, pred[i])
+            for i in range(1, L + 1)
+            if pred[i] > 0
+            and i < pred[i]
+            and (i in modified_positions or pred[i] in modified_positions)
+        }
+        tp = len(ref_set & pred_set)
+        fp = len(pred_set - ref_set)
+        fn = len(ref_set - pred_set)
+    else:
+        tp = fp = fn = 0
+        for i, (j1, j2) in enumerate(zip(ref, pred)):
+            if j1 > 0 and i < j1:
+                if j1 == j2:
+                    tp += 1
+                elif j2 > 0 and i < j2:
+                    fp += 1
+                    fn += 1
+                else:
+                    fn += 1
             elif j2 > 0 and i < j2:
                 fp += 1
-                fn += 1
-            else:
-                fn += 1
-        elif j2 > 0 and i < j2:
-            fp += 1
     if modified_positions is not None:
         n_modified = len(modified_positions)
         total_pairs = n_modified * (n_modified - 1) // 2 + n_modified * (L - n_modified)
@@ -181,24 +193,47 @@ def _compare_bpseq_array_python(
     return (tp, tn, fp, fn)
 
 
-def accuracy(tp: int, tn: int, fp: int, fn: int) -> tuple[float, float, float, float]:
+def accuracy(
+    tp: int, tn: int, fp: int, fn: int
+) -> tuple[float, float, float, float, float, float]:
+    # 特殊ケース1: 正解も予測もペアなし（完璧な陰性予測）
+    if tp == 0 and fn == 0 and fp == 0 and tn > 0:
+        return (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # sen, ppv, fval, mcc, spec, acc
+
+    # 通常の計算
     sen = tp / (tp + fn) if tp + fn > 0.0 else 0.0
     ppv = tp / (tp + fp) if tp + fp > 0.0 else 0.0
     fval = 2 * sen * ppv / (sen + ppv) if sen + ppv > 0.0 else 0.0
-    mcc = (
-        ((tp * tn) - (fp * fn))
-        / math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-        if (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn) > 0.0
-        else 0.0
-    )
-    return (sen, ppv, fval, mcc)
+
+    # MCC計算（修正版）
+    denominator = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
+    if denominator > 0:
+        mcc = ((tp * tn) - (fp * fn)) / math.sqrt(denominator)
+    else:
+        # 特殊ケース: すべて陰性で正しく予測
+        if tp == 0 and fn == 0 and fp == 0 and tn > 0:
+            mcc = 1.0
+        # 特殊ケース: すべて陰性が正解だが誤検出あり
+        elif tp == 0 and fn == 0 and fp > 0:
+            mcc = -1.0
+        else:
+            mcc = 0.0
+
+    # Specificity（特異度）: 「ペアを形成しない」と正しく予測した割合
+    specificity = tn / (tn + fp) if tn + fp > 0 else 0.0
+
+    # Accuracy（正解率）: 全体の正解率
+    total = tp + tn + fp + fn
+    acc = (tp + tn) / total if total > 0 else 0.0
+
+    return (sen, ppv, fval, mcc, specificity, acc)
 
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
 
     parser = ArgumentParser(
-        description="calculate SEN, PPV, F, MCC for the predicted RNA secondary structure",
+        description="calculate SEN, PPV, F, MCC, Specificity, Accuracy for the predicted RNA secondary structure",
         add_help=True,
     )
     parser.add_argument("ref", type=str, help="BPSEQ file or list of BPSEQ files")
@@ -224,21 +259,25 @@ if __name__ == "__main__":
                 f"list length mismatch: ref={len(ref_files)}, pred={len(pred_files)}"
             )
 
-        print("name,length,time,score,tp,tn,fp,fn,sen,ppv,fval,mcc")
+        print("name,length,time,score,tp,tn,fp,fn,sen,ppv,fval,mcc,specificity,accuracy")
         all_sen: list[float] = []
         all_ppv: list[float] = []
         all_fval: list[float] = []
         all_mcc: list[float] = []
+        all_spec: list[float] = []
+        all_acc: list[float] = []
 
         for ref_path, pred_path in zip(ref_files, pred_files):
             result = compare_bpseq_files(
                 ref_path, pred_path, modified_only=args.modified_only, use_pdb=args.pdb
             )
-            name, length, t, sc, tp, tn, fp, fn, sen, ppv, fval, mcc = result
+            name, length, t, sc, tp, tn, fp, fn, sen, ppv, fval, mcc, spec, acc = result
             all_sen.append(sen)
             all_ppv.append(ppv)
             all_fval.append(fval)
             all_mcc.append(mcc)
+            all_spec.append(spec)
+            all_acc.append(acc)
             print(",".join(str(v) for v in result))
 
         n = len(all_sen)
@@ -247,6 +286,8 @@ if __name__ == "__main__":
             f"avg_ppv={sum(all_ppv) / n:.4f}, "
             f"avg_f1={sum(all_fval) / n:.4f}, "
             f"avg_mcc={sum(all_mcc) / n:.4f}, "
+            f"avg_specificity={sum(all_spec) / n:.4f}, "
+            f"avg_accuracy={sum(all_acc) / n:.4f}, "
             f"n={n}"
         )
     else:

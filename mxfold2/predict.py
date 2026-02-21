@@ -174,7 +174,9 @@ class Predict(Common):
                             for i in range(1, len(bp)):
                                 print(f"{i}\t{seq[i - 1]}\t{bp[i]}", file=f)
                         if output_lst_f is not None:
-                            output_lst_f.write(out_rel_path + "\n")
+                            output_lst_f.write(
+                                os.path.join(output_bpseq, out_rel_path) + "\n"
+                            )
                     if bpseq_file is not None:
                         seq_index = seq_processed - len(seqs) + batch_j
                         if seq_index > 0:
