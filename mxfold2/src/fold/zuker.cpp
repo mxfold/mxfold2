@@ -55,7 +55,9 @@ Zuker<P, S>::
 compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
 {
     // auto wtime = omp_get_wtime();
-    const auto L = seq.size();
+    const size_t L = opts.use_extended_pairs_ ?
+        opts.get_encoding().encode(seq).size() : seq.size();
+    if (L == 0) return ScoreType(0);
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
     Cv_.clear();  Cv_.resize(L+1, NEG_INF);
     Mv_.clear();  Mv_.resize(L+1, NEG_INF);
@@ -72,7 +74,8 @@ compute_viterbi(const std::string& seq, const Options& opts) -> ScoreType
     Et_.clear();  Et_.resize(L+1);
 #endif
 
-    const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
+    const auto [allow_paired, allow_unpaired] = opts.use_extended_pairs_ ?
+        opts.make_constraint_extended(seq) : opts.make_constraint(seq);
     // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
 #ifdef SIMPLE_SPARSIFICATION
@@ -706,7 +709,9 @@ auto
 Zuker<P, S>::
 compute_inside(const std::string& seq, const Options& opts) -> ScoreType
 {
-    const auto L = seq.size();
+    const size_t L = opts.use_extended_pairs_ ?
+        opts.get_encoding().encode(seq).size() : seq.size();
+    if (L == 0) return ScoreType(0);
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
     Ci_.clear();  Ci_.resize(L+1, NEG_INF);
     Mi_.clear();  Mi_.resize(L+1, NEG_INF);
@@ -717,7 +722,8 @@ compute_inside(const std::string& seq, const Options& opts) -> ScoreType
     Ei_.clear();  Ei_.resize(L+1, NEG_INF);
 #endif
 
-    const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
+    const auto [allow_paired, allow_unpaired] = opts.use_extended_pairs_ ?
+        opts.make_constraint_extended(seq) : opts.make_constraint(seq);
     // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
     for (auto i=L; i>=1; i--)
@@ -893,7 +899,9 @@ void
 Zuker<P, S>::
 compute_outside(const std::string& seq, const Options& opts)
 {
-    const auto L = seq.size();
+    const size_t L = opts.use_extended_pairs_ ?
+        opts.get_encoding().encode(seq).size() : seq.size();
+    if (L == 0) return;
     const ScoreType NEG_INF = std::numeric_limits<ScoreType>::lowest();
     Co_.clear();  Co_.resize(L+1, NEG_INF);
     Mo_.clear();  Mo_.resize(L+1, NEG_INF);
@@ -904,7 +912,8 @@ compute_outside(const std::string& seq, const Options& opts)
     Eo_.clear();  Eo_.resize(L+1, NEG_INF);
 #endif
 
-    const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
+    const auto [allow_paired, allow_unpaired] = opts.use_extended_pairs_ ?
+        opts.make_constraint_extended(seq) : opts.make_constraint(seq);
     // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
     Fo_[1] = param_->score_external_zero();
@@ -1091,11 +1100,14 @@ auto
 Zuker<P, S>::
 compute_basepairing_probabilities(const std::string& seq, const Options& opts) -> std::vector<std::vector<std::pair<u_int32_t, float>>>
 {
-    const auto L = seq.size();
+    const size_t L = opts.use_extended_pairs_ ?
+        opts.get_encoding().encode(seq).size() : seq.size();
+    if (L == 0) return {};
     std::vector<std::vector<float>> bpp(L+1, std::vector<float>(L+1, 0.0));
     const auto log_partition_coefficient = Fi_[1];
 
-    const auto [allow_paired, allow_unpaired] = opts.make_constraint(seq);
+    const auto [allow_paired, allow_unpaired] = opts.use_extended_pairs_ ?
+        opts.make_constraint_extended(seq) : opts.make_constraint(seq);
     // const auto [loss_paired, loss_unpaired] = opts.make_additional_scores();
 
     for (auto i=L; i>=1; i--)

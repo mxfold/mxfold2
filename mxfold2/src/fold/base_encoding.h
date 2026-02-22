@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -199,7 +200,11 @@ public:
 
             base_id id = get_id(ch);
             if (id == BASE_ID_INVALID) {
-                // Unknown character, use ASCII value or 0
+                if (ch >= 256) {
+                    std::cerr << "Warning: unknown Unicode character U+"
+                              << std::hex << static_cast<uint32_t>(ch) << std::dec
+                              << " in sequence, treating as unknown base" << std::endl;
+                }
                 id = (ch < 256) ? static_cast<base_id>(ch) : 0;
             }
             result.push_back(id);

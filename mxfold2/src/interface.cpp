@@ -1,6 +1,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
+#include <iostream>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #ifdef USE_OPENMP
@@ -39,28 +41,29 @@ void setup_modified_bases(std::shared_ptr<BaseEncoding>& encoding,
 
     auto info = py::cast<py::dict>(nucleosides_info);
     for (auto item : info) {
-        std::string code = py::cast<std::string>(item.first);
-        auto props = py::cast<py::dict>(item.second);
+        try {
+            std::string code = py::cast<std::string>(item.first);
+            auto props = py::cast<py::dict>(item.second);
 
-        std::string origin_str = py::cast<std::string>(props["origin"]);
-        std::string pairedwith = py::cast<std::string>(props["pairedwith"]);
+            std::string origin_str = py::cast<std::string>(props["origin"]);
+            std::string pairedwith = py::cast<std::string>(props["pairedwith"]);
 
-        // Get origin base ID
-        auto origin_ids = encoding->encode(origin_str);
-        base_id origin_id = origin_ids.empty() ? 0 : origin_ids[0];
+            // Get origin base ID
+            auto origin_ids = encoding->encode(origin_str);
+            base_id origin_id = origin_ids.empty() ? 0 : origin_ids[0];
 
-        // Register the new base with its canonical parent
-        auto code_ids = encoding->encode(code);
-        base_id new_id;
-        if (code_ids.empty() || code_ids[0] == BASE_ID_INVALID) {
-            new_id = encoding->register_base(code, origin_id);
-        } else {
-            new_id = code_ids[0];
+            // Always register the base (handles already-registered case correctly,
+            // and ensures Unicode chars get proper base_ids instead of fallback 0)
+            base_id new_id = encoding->register_base(code, origin_id);
+
+            // Set origin and pairedwith
+            encoding->set_origin(new_id, origin_id);
+            encoding->set_pairedwith(new_id, pairedwith);
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: failed to register modified base: "
+                      << e.what() << std::endl;
+            continue;
         }
-
-        // Set origin and pairedwith
-        encoding->set_origin(new_id, origin_id);
-        encoding->set_pairedwith(new_id, pairedwith);
     }
 }
 
@@ -72,7 +75,8 @@ py::object get_nucleoside_info_from_python()
         py::object generate_func = nucleosides_module.attr("generate_nucleoside_info_for_cpp");
         return generate_func();
     } catch (const py::error_already_set& e) {
-        // If import fails, return None
+        std::cerr << "Warning: failed to load nucleoside info from Python: "
+                  << e.what() << std::endl;
         return py::none();
     }
 }
@@ -145,6 +149,10 @@ protected:
 
     void set_allowed_pairs(Options& options, const std::string& allowed_pairs) const
     {
+        if (allowed_pairs.size() % 2 != 0) {
+            throw std::invalid_argument("allowed_pairs must have even length, got "
+                                        + std::to_string(allowed_pairs.size()));
+        }
         for (size_t i=0; i!=allowed_pairs.size(); i+=2)
             options.set_allowed_pair(allowed_pairs[i], allowed_pairs[i+1]);
     }

@@ -32,7 +32,10 @@ class AbstractFold(nn.Module):
             self.allowed_pairs = ""
             for v in active_nucleosides.values():
                 for s in v.pairedwith:
-                    self.allowed_pairs += v.code + s
+                    # C++ allowed_pairs_ is 256x256 ASCII matrix; Unicode pairs
+                    # are handled via pairing_rules -> set_extended_pairing_rules
+                    if ord(v.code) < 128 and ord(s) < 128:
+                        self.allowed_pairs += v.code + s
             self.allowed_pairs = self.allowed_pairs.lower()  # C++ allow_paired() uses tolower
             # Generate pairing rules dictionary for extended Unicode support
             self.pairing_rules: Optional[Dict[Tuple[str, str], bool]] = (

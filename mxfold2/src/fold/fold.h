@@ -153,6 +153,9 @@ class Fold
 
             auto make_constraint(const std::string& seq, bool canonical_only=true) const
                 -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
+            // Extended version for Zuker using base_id for Unicode support
+            auto make_constraint_extended(const std::string& seq, bool canonical_only=true) const
+                -> std::pair<std::vector<std::vector<bool>>, std::vector<std::vector<bool>>>;
             auto make_constraint_lin(const std::string& seq, std::string alphabests="acguACGU"s, bool canonical_only=true) const
                 -> std::tuple<std::vector<std::vector<u_int32_t>>, std::vector<u_int32_t>, std::vector<bool>>;
             // Extended version using base_id for Unicode support
