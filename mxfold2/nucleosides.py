@@ -10,6 +10,7 @@ class Bases:
     smiles: str
     description: str
 
+# fmt: off
 supported_nucleosides = {
     'A': Bases('A', 'A', 'U', 'Nc1ncnc2c1nc[n]2[C@@H]1O[C@H](CO)[C@@H](O)[C@H]1O', 'adenosine'),
     'C': Bases('C', 'C', 'G', 'Nc1nc(=O)[n]([C@H]2[C@H](O)[C@H](O)[C@@H](CO)O2)cc1', 'cytidine'),
@@ -28,13 +29,13 @@ supported_nucleosides = {
     '7': Bases('7', 'A', 'U', 'Nc1ncnc2c1ccn2[C@@H]1O[C@H](CO)[C@@H](O)[C@H]1O', '7-deaza-adenonsine (7DA)'),
     'D': Bases('D', 'U', 'A', 'OC[C@H]1O[C@@H](N2CCC(=O)NC2=O)[C@H](O)[C@@H]1O', 'dihydrouridine')
 }
+# fmt: on
 
+STANDARD_BASES: frozenset[str] = frozenset(
+    {"A", "C", "G", "U", "T", "a", "c", "g", "u", "t"}
+)
 
-# Standard bases (ACGU)
-STANDARD_BASES: frozenset[str] = frozenset({'A', 'C', 'G', 'U', 'T', 'a', 'c', 'g', 'u', 't'})
-
-# Characters that should be uppercased during normalization
-_STANDARD_LOWER: frozenset[str] = frozenset({'a', 'c', 'g', 'u', 't'})
+_STANDARD_LOWER: frozenset[str] = frozenset({"a", "c", "g", "u", "t"})
 
 
 def normalize_seq(seq: str) -> str:
@@ -50,7 +51,7 @@ def normalize_seq(seq: str) -> str:
     Returns:
         Sequence with only standard bases uppercased
     """
-    return ''.join(c.upper() if c in _STANDARD_LOWER else c for c in seq)
+    return "".join(c.upper() if c in _STANDARD_LOWER else c for c in seq)
 
 
 def is_modified_base(base: str) -> bool:
@@ -91,7 +92,7 @@ def has_modified_in_range(seq: str, start: int, end: int) -> bool:
         True if there are modified bases in the range
     """
     for i in range(max(1, start), min(len(seq) + 1, end + 1)):
-        if is_modified_base(seq[i - 1]):  # seq is 0-indexed
+        if is_modified_base(seq[i - 1]):
             return True
     return False
 
@@ -147,21 +148,19 @@ def generate_pairing_rules(
     rules: Dict[Tuple[str, str], bool] = {}
 
     if include_standard:
-        # Standard Watson-Crick and wobble pairs (uppercase, since
-        # standard bases are always normalized to uppercase by normalize_seq)
         standard_pairs = [
-            ('A', 'U'), ('U', 'A'),
-            ('G', 'C'), ('C', 'G'),
-            ('G', 'U'), ('U', 'G'),
+            ("A", "U"),
+            ("U", "A"),
+            ("G", "C"),
+            ("C", "G"),
+            ("G", "U"),
+            ("U", "G"),
         ]
         for pair in standard_pairs:
             rules[pair] = True
 
-    # Add pairing rules for all active nucleosides
     for code, base in active_nucleosides.items():
         for partner in base.pairedwith:
-            # Use code as-is (case-sensitive) and partner as uppercase
-            # (partners in Bases definitions are standard uppercase letters)
             rules[(code, partner)] = True
             rules[(partner, code)] = True
 
@@ -184,7 +183,6 @@ def generate_allowed_pairs_string() -> str:
             pair = tuple(sorted([code, partner]))
             pairs_set.add(pair)
 
-    # Convert to string format
     result = ""
     for p1, p2 in sorted(pairs_set):
         result += p1 + p2
@@ -203,9 +201,8 @@ def get_canonical_base(code: str) -> str:
     """
     if code in active_nucleosides:
         return active_nucleosides[code].origin
-    # For standard bases, return themselves
-    if code.upper() in {'A', 'C', 'G', 'U', 'T'}:
-        return 'U' if code.upper() == 'T' else code.upper()
+    if code.upper() in {"A", "C", "G", "U", "T"}:
+        return "U" if code.upper() == "T" else code.upper()
     return code
 
 
@@ -220,13 +217,17 @@ def get_pairing_partners(code: str) -> str:
     """
     if code in active_nucleosides:
         return active_nucleosides[code].pairedwith
-    # For standard bases, return standard pairing partners
     standard_pairs = {
-        'A': 'U', 'a': 'u',
-        'U': 'AG', 'u': 'ag',
-        'G': 'CU', 'g': 'cu',
-        'C': 'G', 'c': 'g',
-        'T': 'A', 't': 'a',
+        "A": "U",
+        "a": "u",
+        "U": "AG",
+        "u": "ag",
+        "G": "CU",
+        "g": "cu",
+        "C": "G",
+        "c": "g",
+        "T": "A",
+        "t": "a",
     }
     return standard_pairs.get(code, "")
 
@@ -244,12 +245,14 @@ def generate_nucleoside_info_for_cpp() -> Dict[str, Dict[str, str]]:
     result: Dict[str, Dict[str, str]] = {}
     for code, base in active_nucleosides.items():
         result[code] = {
-            'origin': base.origin,
-            'pairedwith': base.pairedwith,
+            "origin": base.origin,
+            "pairedwith": base.pairedwith,
         }
     return result
 
+
 # obtained from MODOMICS (https://genesilico.pl/modomics/modifications)
+# fmt: off
 modomics_nucleosides: Dict[str, Bases] = {
     '!': Bases('!', 'U', 'AG', 'OC[C@@H]1[C@@H](O)[C@@H](O)[C@H]([n]2c(=O)[nH]c(=O)c(CNCC(=O)O)c2)O1', '5-carboxymethylaminomethyluridine'),
     'Ѣ': Bases('Ѣ', 'A', 'U', 'C[n]1c(=N)c2c([n]([C@H]3[C@H](O)[C@H](O)[C@@H](CO)O3)cn2)nc1', '1-methyladenosine'),
@@ -393,11 +396,10 @@ modomics_nucleosides: Dict[str, Bases] = {
     '⊇': Bases('⊇', 'G', 'CU', 'Cc1nc2[nH]c3c(c(=O)[n]2c1C)nc[n]3[C@@H]1O[C@H](CO)[C@@H](O)[C@H]1O', 'isowyosine'),
     '⊥': Bases('⊥', 'U', 'AG', 'OC(CNCc1c[n]([C@@H]2O[C@H](CO)[C@@H](O)[C@H]2O)c(=[Se])[nH]c1=O)=O', '5-carboxymethylaminomethyl-2-selenouridine'),
     '◊': Bases('◊', 'U', 'AG', 'OC[C@@H]1[C@@H](O)[C@@H](O)[C@H]([n]2c(=O)[nH]c(=O)c(CC(=O)O)c2)O1', '5-carboxymethyluridine'),
+    '۷': Bases('۷', 'A', 'U', 'Nc1ncnc2c1ccn2[C@@H]1O[C@H](CO)[C@@H](O)[C@H]1O', '7-deaza-adenosine (7DA)'),
 }
+# fmt: on
 
-# The currently active nucleoside dictionary.
-# Default: modomics_nucleosides (full MODOMICS catalog)
-# When --modchar-vienna-compat is used: supported_nucleosides
 active_nucleosides: Dict[str, Bases] = modomics_nucleosides
 
 
@@ -409,4 +411,6 @@ def set_active_nucleosides(vienna_compat: bool = False) -> None:
                        If False (default), use modomics_nucleosides.
     """
     global active_nucleosides
-    active_nucleosides = supported_nucleosides if vienna_compat else modomics_nucleosides
+    active_nucleosides = (
+        supported_nucleosides if vienna_compat else modomics_nucleosides
+    )

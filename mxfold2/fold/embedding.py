@@ -105,6 +105,12 @@ class ECFPEmbedding(nn.Module):
         fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=nbits)
         for v in active_nucleosides.values():
             m = Chem.MolFromSmiles(v.smiles)
+            if m is None:
+                m = Chem.MolFromSmiles(v.smiles, sanitize=False)
+                if m is not None:
+                    Chem.SanitizeMol(m, Chem.SanitizeFlags.SANITIZE_ALL ^ Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            if m is None:
+                continue
             x = fpgen.GetFingerprint(m)
             em[v.code] = np.array(list(x), dtype=np.float32)
         em['0'] = np.zeros_like(em['A'])
