@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import random
 import time
@@ -42,10 +43,17 @@ from mxfold2.dataset import (
     JsonDataset,
     JsonShapeDataset,
 )
+from mxfold2.compbpseq import compare_bpseq, accuracy
+from mxfold2.compreactivity import read_shape_reactivity, pairwise_consistency
 from mxfold2.fold.fold import AbstractFold
 from mxfold2.common import Common
 
 import wandb
+
+
+def read_shape_list(path: str) -> list[str]:
+    with open(path) as f:
+        return [line.strip().split()[0] for line in f if line.strip()]
 
 
 class Train(Common):
@@ -360,12 +368,17 @@ class Train(Common):
         loss_fn: nn.Module | dict[str, nn.Module],
         data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
         use_amp: bool = False,
+        shape_paths: list[str] | None = None,
+        metric_prefix: str = "test",
     ) -> None:
         model.eval()
         if not isinstance(loss_fn, dict):
             loss_fn = {"BPSEQ": loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
+        all_tp, all_tn, all_fp, all_fn = 0, 0, 0, 0
+        shape_scores: list[float] = []
+        sample_idx = 0
         start = time.time()
         with (
             torch.no_grad(),
@@ -387,6 +400,21 @@ class Train(Common):
                                     fname=fnames[i : i + 1],
                                 )
                             )
+                            # Get predictions for F1 calculation
+                            _, _, bps = model(seqs[i : i + 1])
+                            ref = vals["target"][i]
+                            tp, tn, fp, fn = compare_bpseq(ref, bps[0])
+                            all_tp += tp
+                            all_tn += tn
+                            all_fp += fp
+                            all_fn += fn
+                            # SHAPE consistency
+                            if shape_paths is not None and sample_idx < len(shape_paths):
+                                shape_data = read_shape_reactivity(shape_paths[sample_idx])
+                                score, _, _ = pairwise_consistency(bps[0], shape_data)
+                                if not math.isnan(score):
+                                    shape_scores.append(score)
+                            sample_idx += 1
                         elif vals["type"][i] == "SHAPE":
                             loss = torch.sum(
                                 loss_fn["SHAPE"](
@@ -404,18 +432,44 @@ class Train(Common):
                 pbar.update(n_batch)
 
         elapsed_time = time.time() - start
+
+        # Calculate accuracy metrics
+        sen = ppv = fval = mcc = 0.0
+        has_metrics = all_tp + all_fn + all_fp > 0
+        if has_metrics:
+            sen, ppv, fval, mcc, _, _ = accuracy(all_tp, all_tn, all_fp, all_fn)
+
         if self.use_wandb:
-            wandb.log(
-                {
-                    "test/loss": loss_total / num,
-                    "test/epoch": epoch,
-                }
-            )
-        print(
-            "Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s".format(
-                epoch, loss_total / num, elapsed_time
-            )
+            log_dict: dict[str, float] = {
+                f"{metric_prefix}/loss": loss_total / num,
+                f"{metric_prefix}/epoch": epoch,
+            }
+            if has_metrics:
+                log_dict.update({
+                    f"{metric_prefix}/f1": fval,
+                    f"{metric_prefix}/sensitivity": sen,
+                    f"{metric_prefix}/ppv": ppv,
+                    f"{metric_prefix}/mcc": mcc,
+                })
+            if shape_scores:
+                log_dict[f"{metric_prefix}/shape_consistency"] = (
+                    sum(shape_scores) / len(shape_scores)
+                )
+            wandb.log(log_dict)
+
+        msg = "Test[{}] Epoch: {}\tLoss: {:.6f}".format(
+            metric_prefix, epoch, loss_total / num
         )
+        if has_metrics:
+            msg += "\tF1: {:.4f}\tSEN: {:.4f}\tPPV: {:.4f}\tMCC: {:.4f}".format(
+                fval, sen, ppv, mcc
+            )
+        if shape_scores:
+            msg += "\tSHAPE_consistency: {:.4f}".format(
+                sum(shape_scores) / len(shape_scores)
+            )
+        msg += "\tTime: {:.3f}s".format(elapsed_time)
+        print(msg)
 
     def save_checkpoint(
         self,
@@ -788,16 +842,26 @@ class Train(Common):
             generator=generator,
         )  # works well only for batch_size=1!!
 
+        test_loaders: list[tuple[DataLoader, list[str] | None]] = []
         if args.test_input is not None:
-            test_dataset = BPseqDataset(
-                args.test_input,
-                convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
-            )
-            test_loader = DataLoader(
-                test_dataset, batch_size=1, shuffle=False
-            )  # works well only for batch_size=1!!
-        else:
-            test_loader = None
+            test_shape_lists = getattr(args, "test_shape", None) or []
+            for idx, test_path in enumerate(args.test_input):
+                test_dataset = BPseqDataset(
+                    test_path,
+                    convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
+                )
+                test_loader = DataLoader(
+                    test_dataset, batch_size=1, shuffle=False
+                )  # works well only for batch_size=1!!
+                shape_paths = None
+                if idx < len(test_shape_lists) and test_shape_lists[idx].lower() != "none":
+                    shape_paths = read_shape_list(test_shape_lists[idx])
+                    if len(shape_paths) != len(test_dataset):
+                        raise ValueError(
+                            f"SHAPE list length ({len(shape_paths)}) != "
+                            f"test dataset length ({len(test_dataset)}) for {test_path}"
+                        )
+                test_loaders.append((test_loader, shape_paths))
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
@@ -981,7 +1045,7 @@ class Train(Common):
             if ema is not None and epoch > ema_start:
                 ema.update(model)
 
-            if test_loader is not None:
+            if test_loaders:
                 # Save RNG states before test() to ensure test data doesn't affect training reproducibility
                 rng_state_torch = torch.get_rng_state()
                 rng_state_python = random.getstate()
@@ -997,13 +1061,17 @@ class Train(Common):
                     or (ema.shadow if ema and epoch > ema_start else None)
                     or model
                 )
-                self.test(
-                    epoch,
-                    model=eval_model,
-                    loss_fn=loss_fn,
-                    data_loader=test_loader,
-                    use_amp=use_amp,
-                )
+                for test_idx, (t_loader, t_shape_paths) in enumerate(test_loaders):
+                    prefix = "test" if len(test_loaders) == 1 else f"test_{test_idx}"
+                    self.test(
+                        epoch,
+                        model=eval_model,
+                        loss_fn=loss_fn,
+                        data_loader=t_loader,
+                        use_amp=use_amp,
+                        shape_paths=t_shape_paths,
+                        metric_prefix=prefix,
+                    )
 
                 # Restore RNG states after test()
                 torch.set_rng_state(rng_state_torch)
@@ -1057,7 +1125,16 @@ class Train(Common):
         subparser.add_argument(
             "--test-input",
             type=str,
-            help="Test data of the list of BPSEQ-formatted files",
+            action="append",
+            help="Test data of the list of BPSEQ-formatted files (can be specified multiple times)",
+        )
+        subparser.add_argument(
+            "--test-shape",
+            type=str,
+            action="append",
+            help="SHAPE reactivity list file for test data "
+                 "(pairs with --test-input by position; use 'none' to skip, "
+                 "can be specified multiple times)",
         )
         subparser.add_argument(
             "--gpu",
