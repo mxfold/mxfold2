@@ -14,10 +14,14 @@ from mxfold2.fold.fold import AbstractFold
 # from .fold.linearfold import LinearFold
 
 class FenchelYoungLoss(nn.Module):
-    def __init__(self, model: AbstractFold, 
-            perturb: float = 0., l1_weight: float = 0., l2_weight: float = 0., sl_weight: float = 0.) -> None:
+    def __init__(self, model: AbstractFold,
+            loss_pos_paired: float = 0., loss_neg_paired: float = 0.,
+            perturb: float = 0., l1_weight: float = 0., l2_weight: float = 0.,
+            sl_weight: float = 0., **kwargs) -> None:
         super(FenchelYoungLoss, self).__init__()
         self.model = model
+        self.loss_pos_paired = loss_pos_paired
+        self.loss_neg_paired = loss_neg_paired
         self.perturb = perturb
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
@@ -29,14 +33,22 @@ class FenchelYoungLoss(nn.Module):
 
 
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
+        use_hinge = self.loss_pos_paired != 0. or self.loss_neg_paired != 0.
+        hinge_kwargs = dict(
+            reference=pairs,
+            loss_pos_paired=self.loss_pos_paired,
+            loss_neg_paired=self.loss_neg_paired,
+        ) if use_hinge else {}
+
         pred: torch.Tensor
         pred_s: list[str]
-        #pred_model = self.model.duplicate()
-        pred, pred_s, _, _, param_without_perturb = self.model(seq, return_param=True, perturb=self.perturb)
+        pred, pred_s, _, _, param_without_perturb = self.model(
+            seq, return_param=True, perturb=self.perturb, **hinge_kwargs)
         ref: torch.Tensor
         ref_s: list[str]
-        #ref_model = self.model.duplicate()
-        ref, ref_s, _ = self.model(seq, param=param_without_perturb, constraint=pairs, max_internal_length=None)
+        ref, ref_s, _ = self.model(
+            seq, param=param_without_perturb, constraint=pairs,
+            max_internal_length=None, **hinge_kwargs)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         if self.sl_weight > 0.0:

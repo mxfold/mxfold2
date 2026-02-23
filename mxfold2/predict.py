@@ -251,6 +251,8 @@ class Predict(Common):
         if args.seed >= 0:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
         model, _ = self.build_model(args)
         if args.param != "":

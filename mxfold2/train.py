@@ -8,7 +8,7 @@ import time
 from argparse import Namespace
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, cast, Callable
 
 import pytorch_optimizer as po
 
@@ -273,7 +273,7 @@ class Train(Common):
         self,
         model: AbstractFold,
         optimizer: SAM,
-        compute_loss: callable,
+        compute_loss: Callable[[], torch.Tensor],
         clip_grad_value: float,
         clip_grad_norm: float,
         scaler: Optional[GradScaler],
@@ -409,8 +409,12 @@ class Train(Common):
                             all_fp += fp
                             all_fn += fn
                             # SHAPE consistency
-                            if shape_paths is not None and sample_idx < len(shape_paths):
-                                shape_data = read_shape_reactivity(shape_paths[sample_idx])
+                            if shape_paths is not None and sample_idx < len(
+                                shape_paths
+                            ):
+                                shape_data = read_shape_reactivity(
+                                    shape_paths[sample_idx]
+                                )
                                 score, _, _ = pairwise_consistency(bps[0], shape_data)
                                 if not math.isnan(score):
                                     shape_scores.append(score)
@@ -445,16 +449,18 @@ class Train(Common):
                 f"{metric_prefix}/epoch": epoch,
             }
             if has_metrics:
-                log_dict.update({
-                    f"{metric_prefix}/f1": fval,
-                    f"{metric_prefix}/sensitivity": sen,
-                    f"{metric_prefix}/ppv": ppv,
-                    f"{metric_prefix}/mcc": mcc,
-                })
-            if shape_scores:
-                log_dict[f"{metric_prefix}/shape_consistency"] = (
-                    sum(shape_scores) / len(shape_scores)
+                log_dict.update(
+                    {
+                        f"{metric_prefix}/f1": fval,
+                        f"{metric_prefix}/sensitivity": sen,
+                        f"{metric_prefix}/ppv": ppv,
+                        f"{metric_prefix}/mcc": mcc,
+                    }
                 )
+            if shape_scores:
+                log_dict[f"{metric_prefix}/shape_consistency"] = sum(
+                    shape_scores
+                ) / len(shape_scores)
             wandb.log(log_dict)
 
         msg = "Test[{}] Epoch: {}\tLoss: {:.6f}".format(
@@ -770,8 +776,16 @@ class Train(Common):
                 config=wandb_config,
             )
 
-        train_dataset = BPseqDataset(
-            args.input, convert_t_to_u_flag=getattr(args, "convert_t_to_u", False)
+        train_datasets = [
+            BPseqDataset(
+                inp, convert_t_to_u_flag=getattr(args, "convert_t_to_u", False)
+            )
+            for inp in args.input
+        ]
+        train_dataset = (
+            ConcatDataset(train_datasets)
+            if len(train_datasets) > 1
+            else train_datasets[0]
         )
         n_train_samples = len(train_dataset)
         n_dataset_id = 0
@@ -854,7 +868,10 @@ class Train(Common):
                     test_dataset, batch_size=1, shuffle=False
                 )  # works well only for batch_size=1!!
                 shape_paths = None
-                if idx < len(test_shape_lists) and test_shape_lists[idx].lower() != "none":
+                if (
+                    idx < len(test_shape_lists)
+                    and test_shape_lists[idx].lower() != "none"
+                ):
                     shape_paths = read_shape_list(test_shape_lists[idx])
                     if len(shape_paths) != len(test_dataset):
                         raise ValueError(
@@ -1120,7 +1137,10 @@ class Train(Common):
         subparser = parser.add_parser("train", help="training")
         # input
         subparser.add_argument(
-            "input", type=str, help="Training data of the list of BPSEQ-formatted files"
+            "input",
+            type=str,
+            nargs="+",
+            help="Training data of the list(s) of BPSEQ-formatted files (can specify multiple files)",
         )
         subparser.add_argument(
             "--test-input",
@@ -1133,8 +1153,8 @@ class Train(Common):
             type=str,
             action="append",
             help="SHAPE reactivity list file for test data "
-                 "(pairs with --test-input by position; use 'none' to skip, "
-                 "can be specified multiple times)",
+            "(pairs with --test-input by position; use 'none' to skip, "
+            "can be specified multiple times)",
         )
         subparser.add_argument(
             "--gpu",
@@ -1430,18 +1450,6 @@ class Train(Common):
             type=float,
             default=0.005,
             help="the penalty for negative base-pairs for loss augmentation (default: 0.005)",
-        )
-        gparser.add_argument(
-            "--loss-pos-unpaired",
-            type=float,
-            default=0.0,
-            help="the penalty for positive unpaired bases for loss augmentation (default: 0)",
-        )
-        gparser.add_argument(
-            "--loss-neg-unpaired",
-            type=float,
-            default=0.0,
-            help="the penalty for negative unpaired bases for loss augmentation (default: 0)",
         )
         gparser.add_argument(
             "--shape-loss-func",

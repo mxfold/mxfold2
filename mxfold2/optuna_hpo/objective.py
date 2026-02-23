@@ -191,8 +191,6 @@ class MXFold2Objective:
             score_loss_weight=params["score_loss_weight"],
             loss_pos_paired=0.5,
             loss_neg_paired=0.005,
-            loss_pos_unpaired=0.0,
-            loss_neg_unpaired=0.0,
             # SHAPE settings
             shape=self.shape_data,
             shape_model="Wu",
