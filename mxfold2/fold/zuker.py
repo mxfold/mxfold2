@@ -17,6 +17,8 @@ class ZukerFold(AbstractFold):
                                         kwargs.get('use_extended_vocab', False),
                                         kwargs.get('modified_only', False))
 
+        self.use_bulge_one_stacking = kwargs.get('use_bulge_one_stacking', False)
+
         exclude_diag = True # default
         model_type = 'C' # default
         if model_type == "S":
@@ -73,6 +75,10 @@ class ZukerFold(AbstractFold):
     def forward(self, seq: list[str], **kwargs: dict[str, Any]):
         return super(ZukerFold, self).forward(seq, max_helix_length=self.max_helix_length, **kwargs)
 
+    def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
+        result = super().make_param_on_cpu(param)
+        result['use_bulge_one_stacking'] = self.use_bulge_one_stacking
+        return result
 
     def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         score_paired: torch.Tensor

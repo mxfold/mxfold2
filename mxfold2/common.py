@@ -137,6 +137,7 @@ class Common:
             "weight_positional": args.weight_positional,
             "additional_params": args.additional_params,
             "resnet_every_n": args.resnet_every_n,
+            "use_bulge_one_stacking": args.use_bulge_one_stacking,
         }
 
         modified_only = getattr(args, "modified_only", False)
@@ -290,6 +291,12 @@ class Common:
             help="select parameter model (default: 'Mix')",
         )
         gparser.add_argument("--additional-params", default=None, action="store_true")
+        gparser.add_argument(
+            "--use-bulge-one-stacking",
+            default=False,
+            action="store_true",
+            help="use bulge one stacking in positional model (default: False)",
+        )
         gparser.add_argument(
             "--embed-size",
             type=int,

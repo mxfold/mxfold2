@@ -56,6 +56,7 @@ class MixedFold(AbstractFold):
         if count_weight_positional is not None:
             self._count_weight_positional = count_weight_positional
 
+        self.use_bulge_one_stacking = kwargs.get('use_bulge_one_stacking', False)
         self.turner = RNAFold(init_param=init_param)
         self.zuker = ZukerFold(max_helix_length=max_helix_length, use_fp=use_fp, use_extended_vocab=use_extended_vocab, **kwargs)
         self.max_helix_length = max_helix_length
@@ -139,6 +140,7 @@ class MixedFold(AbstractFold):
         }
         param_on_cpu['turner'] = self.clear_count(param_on_cpu['turner'])
         param_on_cpu['positional'] = self.clear_count(param_on_cpu['positional'])
+        param_on_cpu['positional']['use_bulge_one_stacking'] = self.use_bulge_one_stacking
         return param_on_cpu
 
 

@@ -15,7 +15,7 @@ class PositionalNearestNeighbor
         template<int D> using CountType = pybind11::detail::unchecked_mutable_reference<float, D> ;
 
     public:
-        PositionalNearestNeighbor(const std::string& seq, pybind11::object obj);
+        PositionalNearestNeighbor(const std::string& seq, pybind11::object obj, bool use_bulge_one_stacking=false);
         ~PositionalNearestNeighbor() {};
 
         ScoreType score_hairpin(size_t i, size_t j) const;
@@ -82,6 +82,8 @@ class PositionalNearestNeighbor
         CountType<1> count_multi_paired_;
         ParamType<1> score_external_paired_;
         CountType<1> count_external_paired_;
+
+        bool use_bulge_one_stacking_;
 
     public:
         const u_int32_t MAX_HAIRPIN_LENGTH;

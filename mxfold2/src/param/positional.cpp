@@ -8,7 +8,7 @@
 namespace py = pybind11;
 
 PositionalNearestNeighbor::
-PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
+PositionalNearestNeighbor(const std::string& seq, pybind11::object obj, bool use_bulge_one_stacking) :
     score_basepair_(::get_unchecked<2>(obj, "score_basepair")),
     count_basepair_(::get_mutable_unchecked<2>(obj, "count_basepair")),
     score_helix_stacking_(::get_unchecked<2>(obj, "score_helix_stacking")),
@@ -53,6 +53,8 @@ PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
     score_external_paired_(::get_unchecked<1>(obj, "score_external_paired")),
     count_external_paired_(::get_mutable_unchecked<1>(obj, "count_external_paired")),
 
+    use_bulge_one_stacking_(use_bulge_one_stacking),
+
     MAX_HAIRPIN_LENGTH(score_hairpin_length_.shape(0)-1),
     MAX_BULGE_LENGTH(score_bulge_length_.shape(0)-1),
     MAX_INTERNAL_LENGTH(score_internal_length_.shape(0)-1),
@@ -62,7 +64,10 @@ PositionalNearestNeighbor(const std::string& seq, pybind11::object obj) :
     MAX_INTERNAL_EXPLICIT_LENGTH(score_internal_explicit_.shape(0)-1),
     MAX_HELIX_LENGTH(score_helix_length_.shape(0)-1)
 {
-
+    auto dict = py::cast<py::dict>(obj);
+    if (dict.contains("use_bulge_one_stacking")) {
+        use_bulge_one_stacking_ = py::cast<bool>(dict["use_bulge_one_stacking"]);
+    }
 }
 
 auto
@@ -115,11 +120,26 @@ score_single_loop(size_t i, size_t j, size_t k, size_t l) const -> ScoreType
     }
     else if (ls==0) // bulge
     {
-        auto e = score_bulge_length_[std::min<u_int32_t>(ll, MAX_BULGE_LENGTH)];
-        e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
-        e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
-        e += score_basepair_(i, j);
-        return e;
+        if (ll==1 && use_bulge_one_stacking_) // bulge one
+        {
+            auto e = score_bulge_length_[ll];
+            e += score_helix_stacking_(i, j);
+            e += score_helix_stacking_(l, k);
+            e += score_basepair_(i, j);
+            e += l1>0 ? score_base_internal_(i+1, k-1) : score_base_internal_(l+1, j-1);
+            return e;
+        }
+        else
+        {
+            auto e = score_bulge_length_[std::min<u_int32_t>(ll, MAX_BULGE_LENGTH)];
+            if (use_bulge_one_stacking_)
+                e += l1>0 ? score_base_internal_(i+1, k-1) : score_base_internal_(l+1, j-1);
+            else
+                e += score_base_internal_(i+1, k-1) + score_base_internal_(l+1, j-1);
+            e += score_mismatch_internal_(i, j) + score_mismatch_internal_(l, k);
+            e += score_basepair_(i, j);
+            return e;
+        }
     }
     else // internal loop
     {
@@ -154,17 +174,41 @@ count_single_loop(size_t i, size_t j, size_t k, size_t l, ScoreType v)
     }
     else if (ls==0) // bulge
     {
-#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
-        count_bulge_length_[std::min<u_int32_t>(ll, 30)] += v;
-#else
-        if (ll <= MAX_BULGE_LENGTH)
+        if (ll==1 && use_bulge_one_stacking_) // bulge one
+        {
             count_bulge_length_[ll] += v;
+            count_helix_stacking_(i, j) += v;
+            count_helix_stacking_(l, k) += v;
+            count_basepair_(i, j) += v;
+            if (l1>0)
+                count_base_internal_(i+1, k-1) += v;
+            else
+                count_base_internal_(l+1, j-1) += v;
+        }
+        else
+        {
+#if 0 // ignore very long unpaired regions that cannot be parsed in prediction
+            count_bulge_length_[std::min<u_int32_t>(ll, 30)] += v;
+#else
+            if (ll <= MAX_BULGE_LENGTH)
+                count_bulge_length_[ll] += v;
 #endif
-        count_base_internal_(i+1, k-1) += v;
-        count_base_internal_(l+1, j-1) += v;
-        count_mismatch_internal_(i, j) += v;
-        count_mismatch_internal_(l, k) += v;
-        count_basepair_(i, j) += v;
+            if (use_bulge_one_stacking_)
+            {
+                if (l1>0)
+                    count_base_internal_(i+1, k-1) += v;
+                else
+                    count_base_internal_(l+1, j-1) += v;
+            }
+            else 
+            {
+                count_base_internal_(i+1, k-1) += v;
+                count_base_internal_(l+1, j-1) += v;
+            }
+            count_mismatch_internal_(i, j) += v;
+            count_mismatch_internal_(l, k) += v;
+            count_basepair_(i, j) += v;
+        }
     }
     else // internal loop
     {
