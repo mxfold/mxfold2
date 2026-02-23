@@ -34,7 +34,7 @@ from tqdm import tqdm
 from mxfold2.ema import EMA
 from mxfold2.sam import SAM, ASAM, GSAM
 
-from mxfold2 import interface
+from mxfold2 import interface  # type: ignore[attr-defined]
 from mxfold2.dataset import (
     BPseqDataset,
     FastaDataset,
@@ -74,7 +74,9 @@ class Train(Common):
         loss_fn: nn.Module | dict[str, nn.Module],
         data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
         n_dataset: Optional[int] = None,
-        loss_weight=defaultdict(lambda: 1.0),
+        loss_weight: defaultdict[str, float] | dict[str, float] = defaultdict(
+            lambda: 1.0
+        ),
         clip_grad_value: float = 0.0,
         clip_grad_norm: float = 0.0,
         scaler: Optional[GradScaler] = None,
@@ -117,7 +119,7 @@ class Train(Common):
                         ):
                             if vals["type"][i] == "BPSEQ":
                                 loss = torch.sum(
-                                    loss_fn["BPSEQ"](
+                                    loss_fn["BPSEQ"](  # type: ignore[operator]
                                         seqs[i : i + 1],
                                         vals["target"][i : i + 1],
                                         fname=fnames[i : i + 1],
@@ -125,7 +127,7 @@ class Train(Common):
                                 )
                             elif vals["type"][i] == "SHAPE":
                                 loss = torch.sum(
-                                    loss_fn["SHAPE"](
+                                    loss_fn["SHAPE"](  # type: ignore[operator]
                                         seqs[i : i + 1],
                                         vals["target"][i : i + 1],
                                         fname=fnames[i : i + 1],
@@ -140,7 +142,7 @@ class Train(Common):
                         # SAM two-step optimization with gradient accumulation
                         loss = self._sam_step(
                             model,
-                            optimizer,
+                            optimizer, # type: ignore
                             compute_loss,
                             clip_grad_value,
                             clip_grad_norm,
@@ -325,7 +327,7 @@ class Train(Common):
 
             # Apply perturbation (first step)
             if is_gsam:
-                optimizer.first_step(zero_grad=True, loss=loss)
+                optimizer.first_step(zero_grad=True, loss=loss) # type: ignore
             else:
                 optimizer.first_step(zero_grad=True)
 
@@ -351,7 +353,7 @@ class Train(Common):
 
             # Restore weights and apply update (second step)
             if is_gsam:
-                optimizer.second_step(zero_grad=False, loss=loss_perturbed)
+                optimizer.second_step(zero_grad=False, loss=loss_perturbed) # type: ignore
             else:
                 optimizer.second_step(zero_grad=False)
 
@@ -376,7 +378,10 @@ class Train(Common):
             loss_fn = {"BPSEQ": loss_fn}
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
-        all_tp, all_tn, all_fp, all_fn = 0, 0, 0, 0
+        all_sen: list[float] = []
+        all_ppv: list[float] = []
+        all_fval: list[float] = []
+        all_mcc: list[float] = []
         shape_scores: list[float] = []
         sample_idx = 0
         start = time.time()
@@ -394,7 +399,7 @@ class Train(Common):
                     ):
                         if vals["type"][i] == "BPSEQ":
                             loss = torch.sum(
-                                loss_fn["BPSEQ"](
+                                loss_fn["BPSEQ"](  # type: ignore[operator]
                                     seqs[i : i + 1],
                                     vals["target"][i : i + 1],
                                     fname=fnames[i : i + 1],
@@ -404,10 +409,11 @@ class Train(Common):
                             _, _, bps = model(seqs[i : i + 1])
                             ref = vals["target"][i]
                             tp, tn, fp, fn = compare_bpseq(ref, bps[0])
-                            all_tp += tp
-                            all_tn += tn
-                            all_fp += fp
-                            all_fn += fn
+                            sen, ppv, fval, mcc, _, _ = accuracy(tp, tn, fp, fn)
+                            all_sen.append(sen)
+                            all_ppv.append(ppv)
+                            all_fval.append(fval)
+                            all_mcc.append(mcc)
                             # SHAPE consistency
                             if shape_paths is not None and sample_idx < len(
                                 shape_paths
@@ -421,7 +427,7 @@ class Train(Common):
                             sample_idx += 1
                         elif vals["type"][i] == "SHAPE":
                             loss = torch.sum(
-                                loss_fn["SHAPE"](
+                                loss_fn["SHAPE"](  # type: ignore[operator]
                                     seqs[i : i + 1],
                                     vals["target"][i : i + 1],
                                     fname=fnames[i : i + 1],
@@ -439,9 +445,12 @@ class Train(Common):
 
         # Calculate accuracy metrics
         sen = ppv = fval = mcc = 0.0
-        has_metrics = all_tp + all_fn + all_fp > 0
+        has_metrics = len(all_sen) > 0
         if has_metrics:
-            sen, ppv, fval, mcc, _, _ = accuracy(all_tp, all_tn, all_fp, all_fn)
+            sen = sum(all_sen) / len(all_sen)
+            ppv = sum(all_ppv) / len(all_ppv)
+            fval = sum(all_fval) / len(all_fval)
+            mcc = sum(all_mcc) / len(all_mcc)
 
         if self.use_wandb:
             log_dict: dict[str, float] = {
@@ -512,6 +521,8 @@ class Train(Common):
             checkpoint["ema_state_dict"] = ema.state_dict()
         if scaler is not None:
             checkpoint["scaler_state_dict"] = scaler.state_dict()
+        if self.use_wandb and wandb.run is not None:
+            checkpoint["wandb_run_id"] = wandb.run.id
         torch.save(checkpoint, filename)
 
     def resume_checkpoint(
@@ -524,7 +535,7 @@ class Train(Common):
         ema: Optional[EMA] = None,
         scaler: Optional[GradScaler] = None,
         gpu: int = -1,
-    ) -> tuple[int, Optional[GradScaler]]:
+    ) -> tuple[int, Optional[GradScaler], Optional[str]]:
         checkpoint = torch.load(filename)
         epoch = checkpoint["epoch"]
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -561,7 +572,9 @@ class Train(Common):
         elif scaler is not None and "scaler_state_dict" in checkpoint:
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
-        return epoch, scaler
+        wandb_run_id = checkpoint.get("wandb_run_id", None)
+
+        return epoch, scaler, wandb_run_id
 
     def build_optimizer(
         self,
@@ -602,9 +615,9 @@ class Train(Common):
         # Apply SAM wrapper if requested
         if sam_type is None or sam_type == "None":
             # Create regular optimizer
-            return base_optimizer_class(optim_params, **base_kwargs)
+            return base_optimizer_class(optim_params, **base_kwargs) # type: ignore
         elif sam_type == "SAM":
-            return SAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
+            return SAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs) # type: ignore
         elif sam_type == "ASAM":
             return ASAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
         elif sam_type == "GSAM":
@@ -665,7 +678,7 @@ class Train(Common):
         loss_func: str,
         model: AbstractFold,
         args: Namespace,
-        shape_model: Optional[nn.Module] = None,
+        shape_model: Optional[list[nn.Module]] = None,
         lwf_model: Optional[AbstractFold] = None,
     ) -> nn.Module:
         if loss_func == "shape_nll":
@@ -673,7 +686,7 @@ class Train(Common):
 
             return ShapeNLLLoss(
                 model=model,
-                shape_model=shape_model,
+                shape_model=shape_model,  # type: ignore[arg-type]
                 perturb=args.shape_perturb,
                 nu=args.shape_nu,
                 l1_weight=args.l1_weight,
@@ -764,17 +777,6 @@ class Train(Common):
             format="%(asctime)s - %(levelname)s - %(message)s",
             level=getattr(logging, loglevel, None),
         )
-
-        # Initialize wandb if project is specified
-        self.use_wandb = args.wandb_project is not None
-        if self.use_wandb:
-            wandb_config = vars(args).copy()
-            wandb.init(
-                project=args.wandb_project,
-                name=args.wandb_run_name,
-                tags=args.wandb_tags,
-                config=wandb_config,
-            )
 
         train_datasets = [
             BPseqDataset(
@@ -984,21 +986,43 @@ class Train(Common):
             ema_start = args.epochs
 
         checkpoint_epoch = 0
+        resumed_wandb_run_id: Optional[str] = None
         if args.resume is not None:
-            checkpoint_epoch, resumed_scaler = self.resume_checkpoint(
-                args.resume,
-                model,
-                optimizer,
-                scheduler,
-                shape_model,
-                ema,
-                scaler,
-                args.gpu,
+            checkpoint_epoch, resumed_scaler, resumed_wandb_run_id = (
+                self.resume_checkpoint(
+                    args.resume,
+                    model,
+                    optimizer,
+                    scheduler,
+                    shape_model,
+                    ema,
+                    scaler,
+                    args.gpu,
+                )
             )
             if resumed_scaler is not None:
                 scaler = resumed_scaler
                 use_amp = True
                 logging.info("Resumed with Automatic Mixed Precision (AMP) training")
+
+        # Initialize wandb if project is specified
+        self.use_wandb = args.wandb_project is not None
+        if self.use_wandb:
+            wandb_config = vars(args).copy()
+            if resumed_wandb_run_id is not None:
+                wandb.init(
+                    project=args.wandb_project,
+                    id=resumed_wandb_run_id,
+                    resume="allow",
+                )
+                logging.info(f"Resumed wandb run: {resumed_wandb_run_id}")
+            else:
+                wandb.init(
+                    project=args.wandb_project,
+                    name=args.wandb_run_name,
+                    tags=args.wandb_tags,
+                    config=wandb_config,
+                )
 
         if args.swa:
             swa_model = AveragedModel(model)
@@ -1024,7 +1048,7 @@ class Train(Common):
 
             # Update epoch info for Shape loss functions (for weight scheduling inside loss)
             if "SHAPE" in loss_fn and hasattr(loss_fn["SHAPE"], "set_epoch_info"):
-                loss_fn["SHAPE"].set_epoch_info(epoch, args.epochs)
+                loss_fn["SHAPE"].set_epoch_info(epoch, args.epochs)  # type: ignore[union-attr]
 
             epoch_start = time.time()
             self.train(
@@ -1073,10 +1097,11 @@ class Train(Common):
                 )
 
                 # Use SWA model if available, otherwise EMA model (if started), otherwise regular model
-                eval_model = (
+                eval_model = cast(
+                    AbstractFold | AveragedModel,
                     swa_model
                     or (ema.shadow if ema and epoch > ema_start else None)
-                    or model
+                    or model,
                 )
                 for test_idx, (t_loader, t_shape_paths) in enumerate(test_loaders):
                     prefix = "test" if len(test_loaders) == 1 else f"test_{test_idx}"
