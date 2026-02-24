@@ -1009,7 +1009,7 @@ class Train(Common):
         self.use_wandb = args.wandb_project is not None
         if self.use_wandb:
             wandb_config = vars(args).copy()
-            if resumed_wandb_run_id is not None:
+            if resumed_wandb_run_id is not None and not args.wandb_new_run:
                 wandb.init(
                     project=args.wandb_project,
                     id=resumed_wandb_run_id,
@@ -1302,6 +1302,11 @@ class Train(Common):
             nargs="*",
             default=None,
             help="wandb tags (optional)",
+        )
+        gparser.add_argument(
+            "--wandb-new-run",
+            action="store_true",
+            help="start a new wandb run even when resuming from a checkpoint with a saved run ID",
         )
 
         cls.add_fold_args(subparser)
