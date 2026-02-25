@@ -267,7 +267,7 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj) :
 TurnerNearestNeighbor::
 TurnerNearestNeighbor(const std::string& seq, pybind11::object obj,
                       std::shared_ptr<BaseEncoding> encoding) :
-    seq2_(convert_sequence(seq)),  // Initialize with standard conversion first
+    seq2_(),  // Will be initialized in constructor body (avoid convert_sequence UB on multi-byte UTF-8)
     seq_ids_(),
     encoding_(encoding),
 #if 0
@@ -338,10 +338,9 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj,
     cache_score_bulge_(score_bulge_.size(), 0),
     cache_score_internal_(score_internal_.size(), 0)
 {
-    // Re-initialize seq_ids_ and seq2_ if encoding is provided
+    // Initialize seq2_ using encoding (character-based) or fallback to byte-based conversion
     if (encoding_) {
         seq_ids_ = encoding_->encode(seq);
-        // Re-compute seq2_ using origin bases
         const auto L = seq_ids_.size();
         seq2_.resize(L + 2);
         for (size_t i = 0; i < L; ++i) {
@@ -350,6 +349,8 @@ TurnerNearestNeighbor(const std::string& seq, pybind11::object obj,
         }
         seq2_[0] = seq2_[L];
         seq2_[L + 1] = seq2_[1];
+    } else {
+        seq2_ = convert_sequence(seq);  // Fallback for non-encoding path
     }
 
     if (use_score_hairpin_at_least_)

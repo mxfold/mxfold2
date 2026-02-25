@@ -29,7 +29,11 @@ class FenchelYoungLoss(nn.Module):
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
-            self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+            self.turner = RNAFold(
+                param_turner2004,
+                use_fp=getattr(model, 'use_fp', False),
+                use_extended_vocab=getattr(model, 'use_extended_vocab', False),
+            ).to(next(self.model.parameters()).device)
 
 
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:

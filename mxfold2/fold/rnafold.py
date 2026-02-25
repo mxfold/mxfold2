@@ -11,8 +11,8 @@ from .fold import AbstractFold
 
 
 class RNAFold(AbstractFold):
-    def __init__(self, init_param=None):
-        super(RNAFold, self).__init__(interface.ZukerTurnerWrapper())
+    def __init__(self, init_param=None, use_fp: bool = False, use_extended_vocab: bool = False):
+        super(RNAFold, self).__init__(interface.ZukerTurnerWrapper(), use_fp=use_fp, use_extended_vocab=use_extended_vocab)
         if init_param is None:
             self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))

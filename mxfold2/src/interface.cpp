@@ -221,6 +221,9 @@ protected:
                 continue;
             }
 
+            // Apply to_lower to match the lookup in allow_paired_extended
+            id1 = BaseEncoding::to_lower(id1);
+            id2 = BaseEncoding::to_lower(id2);
             options.set_extended_pair(id1, id2, allowed);
         }
 
@@ -327,6 +330,15 @@ public:
         // Set extended pairing rules if provided
         if (!pairing_rules.is_none()) {
             this->set_extended_pairing_rules(options, pairing_rules, encoding_);
+        }
+
+        // Enable use_extended_pairs when seq contains multi-byte UTF-8 characters
+        if (encoding_ && !options.use_extended()) {
+            auto encoded = encoding_->encode(seq_);
+            if (encoded.size() != seq_.size()) {
+                options.use_extended_pairs(true);
+                options.set_encoding(encoding_);
+            }
         }
 
         std::swap(options, options_);
@@ -484,6 +496,15 @@ public:
             this->set_extended_pairing_rules(options, pairing_rules, encoding_);
         }
 
+        // Enable use_extended_pairs when seq contains multi-byte UTF-8 characters
+        if (encoding_ && !options.use_extended()) {
+            auto encoded = encoding_->encode(seq_);
+            if (encoded.size() != seq_.size()) {
+                options.use_extended_pairs(true);
+                options.set_encoding(encoding_);
+            }
+        }
+
         std::swap(options, options_);
         return options_;
     }
@@ -552,6 +573,8 @@ PYBIND11_MODULE(interface, m)
     m.doc() = "module for RNA secondary predicton with DNN";
 
     m.def("set_num_threads", &set_num_threads, "set number of threads for OpenMP");
+    m.def("_build_version", []() { return "2026-02-26-encoding-fix-v2"; },
+          "return the build version string for verifying binary currency");
 
     py::class_<ZukerWrapper<TurnerNearestNeighbor>>(m, "ZukerTurnerWrapper")
         .def(py::init<>())

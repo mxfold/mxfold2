@@ -144,9 +144,12 @@ class Fold
             auto additional_paired_score(u_int32_t i, uint32_t j) const
             {
                 auto s = 0.0f;
-                if (use_margin) 
+                if (use_margin && i < ref.size() && j < ref.size())
                     s += ref[i]==j ? -pos_paired : neg_paired;
-                if (score_paired_position_.size() > 0)
+                if (score_paired_position_.size() > 0
+                    && i > 0 && j > 0
+                    && (i-1) < score_paired_position_.size()
+                    && (j-1) < score_paired_position_.size())
                     s += score_paired_position_[i-1] + score_paired_position_[j-1];
                 return s;
             }

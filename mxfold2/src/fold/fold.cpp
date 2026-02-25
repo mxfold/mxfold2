@@ -160,6 +160,8 @@ make_constraint(const std::string& seq, bool canonical_only /*=true*/) const
     //std::copy(std::begin(this->stru), std::end(this->stru), std::begin(stru));
     if (stru.size() == 0)
         stru.resize(L+1, Options::ANY);
+    if (stru.size() < L+1)
+        stru.resize(L+1, Options::ANY);
 
     for (auto i=L; i>=1; i--)
         if (stru[i] > 0 && stru[i] <= L) // paired
