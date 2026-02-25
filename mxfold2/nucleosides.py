@@ -10,6 +10,7 @@ class Bases:
     smiles: str
     description: str
 
+
 # fmt: off
 supported_nucleosides = {
     'A': Bases('A', 'A', 'U', 'Nc1ncnc2c1nc[n]2[C@@H]1O[C@H](CO)[C@@H](O)[C@H]1O', 'adenosine'),
@@ -66,18 +67,23 @@ def is_modified_base(base: str) -> bool:
     return base not in STANDARD_BASES
 
 
-def get_modified_positions(seq: str) -> Set[int]:
+def get_modified_positions(seq: str, types: Set[str] | None = None) -> Set[int]:
     """Return positions of modified bases in the sequence (1-indexed).
 
     mxfold2 uses 1-indexed positions, so returned positions start from 1.
 
     Args:
         seq: Nucleotide sequence
+        types: Optional set of specific base codes to filter (e.g., {'6', '?', 'P', 'I'}).
+               If None, returns all modified base positions.
 
     Returns:
         Set of modified base positions (1-indexed)
     """
-    return {i + 1 for i, base in enumerate(seq) if is_modified_base(base)}
+    if types is None:
+        return {i + 1 for i, base in enumerate(seq) if is_modified_base(base)}
+    else:
+        return {i + 1 for i, base in enumerate(seq) if base in types}
 
 
 def has_modified_in_range(seq: str, start: int, end: int) -> bool:
@@ -259,6 +265,7 @@ modomics_nucleosides: Dict[str, Bases] = {
     '＃': Bases('＃', 'G', 'CU', 'CO[C@H]1[C@H]([n]2cnc3c2nc(N)[nH]c3=O)O[C@H](CO)[C@H]1O', "2'-O-methylguanosine"),
     '$': Bases('$', 'U', 'AG', 'OC(CNCc1c[n]([C@@H]2O[C@H](CO)[C@@H](O)[C@H]2O)c(=S)[nH]c1=O)=O', '5-carboxymethylaminomethyl-2-thiouridine'),
     'ʤ': Bases('ʤ', 'C', 'G', 'Nc1nc(=S)[n]([C@H]2[C@H](O)[C@H](O)[C@@H](CO)O2)cc1', '2-thiocytidine'),
+    'ʩ': Bases('ʩ', 'A', 'U', '[O-]P(OC[C@H]1O[C@H]([C@@H]([C@@H]1O)O)O[C@@H]1[C@@H]([C@H](O[C@H]1[n]1c2[n]c[n]c(c2[n]c1)N)CO)O)(=O)[O-]', "2'-O-ribosyladenosine (phosphate)"),
     '&': Bases('&', 'U', 'AG', 'NC(Cc1c(=O)[nH]c(=O)[n]([C@H]2[C@H](O)[C@H](O)[C@@H](CO)O2)c1)=O', '5-carbamoylmethyluridine'),
     'Щ': Bases('Щ', 'C', 'G', 'C[n+]1c(N)cc[n]([C@@H]2O[C@H](CO)[C@@H](O)[C@H]2O)c1=O', '3-methylcytidine'),
     '(': Bases('(', 'G', 'CU', 'Nc1[nH]c(=O)c2c(c[n]([C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O)c2n1)C(N)=N', 'archaeosine'),
@@ -397,6 +404,9 @@ modomics_nucleosides: Dict[str, Bases] = {
     '⊥': Bases('⊥', 'U', 'AG', 'OC(CNCc1c[n]([C@@H]2O[C@H](CO)[C@@H](O)[C@H]2O)c(=[Se])[nH]c1=O)=O', '5-carboxymethylaminomethyl-2-selenouridine'),
     '◊': Bases('◊', 'U', 'AG', 'OC[C@@H]1[C@@H](O)[C@@H](O)[C@H]([n]2c(=O)[nH]c(=O)c(CC(=O)O)c2)O1', '5-carboxymethyluridine'),
     '۷': Bases('۷', 'A', 'U', 'Nc1ncnc2c1ccn2[C@@H]1O[C@H](CO)[C@@H](O)[C@H]1O', '7-deaza-adenosine (7DA)'),
+    # Unknown modified bases - fallback to parent base
+    'ʆ': Bases('ʆ', 'G', 'CU', 'Nc1[nH]c(=O)c2nc[n]([C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O)c2n1', 'unknown modified guanosine'),
+    'Ѵ': Bases('Ѵ', 'C', 'G', 'Nc1nc(=O)[n]([C@H]2[C@H](O)[C@H](O)[C@@H](CO)O2)cc1', 'unknown modified cytidine'),
 }
 # fmt: on
 

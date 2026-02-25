@@ -44,13 +44,14 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
             if self.convert_t_to_u_flag:
                 seq = convert_t_to_u(seq)
 
-            yield (headerStr, seq, {"type": "FASTA", "target": torch.Tensor([])})
+            yield (headerStr, seq, {"type": "FASTA", "target": torch.Tensor([]), "weight": 1.0})
 
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, bpseq_list: str, convert_t_to_u_flag: bool = False) -> None:
+    def __init__(self, bpseq_list: str, convert_t_to_u_flag: bool = False, weight: float = 1.0) -> None:
         super(Dataset, self).__init__()
         self.convert_t_to_u_flag = convert_t_to_u_flag
+        self.weight = weight
         self.data = []
         with open(bpseq_list) as f:
             for l in f:
@@ -82,7 +83,7 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         seq = "".join(s)
         if self.convert_t_to_u_flag:
             seq = convert_t_to_u(seq)
-        return (filename, seq, {"type": "BPSEQ", "target": torch.tensor(p)})
+        return (filename, seq, {"type": "BPSEQ", "target": torch.tensor(p), "weight": self.weight})
 
 
 class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
@@ -127,7 +128,7 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         return (
             filename,
             seq,
-            {"type": "SHAPE", "target": torch.tensor(p), "dataset_id": dataset_id},
+            {"type": "SHAPE", "target": torch.tensor(p), "dataset_id": dataset_id, "weight": 1.0},
         )
 
 
@@ -163,6 +164,7 @@ class RibonanzaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                 "type": "SHAPE",
                 "target": react,
                 "dataset_id": self.dataset_id[df_i["experiment_type"]],
+                "weight": 1.0,
             },
         )
 
@@ -186,7 +188,7 @@ class JsonDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                         (
                             k,
                             seq,
-                            {"type": "BPSEQ", "target": torch.tensor(stru)},
+                            {"type": "BPSEQ", "target": torch.tensor(stru), "weight": 1.0},
                         )
                     )
 
@@ -241,5 +243,6 @@ class JsonShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                 "type": "SHAPE",
                 "target": d[2]["target"],
                 "dataset_id": self.dataset_id[d[2]["dataset_id"]],
+                "weight": 1.0,
             },
         )

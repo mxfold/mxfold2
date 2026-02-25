@@ -136,7 +136,8 @@ class Train(Common):
                                 )
                             else:
                                 raise RuntimeError("not implemented")
-                            return loss * loss_weight[vals["type"][i]]
+                            sample_weight = vals["weight"][i].item() if "weight" in vals else 1.0
+                            return loss * loss_weight[vals["type"][i]] * sample_weight
 
                     if is_sam:
                         # SAM two-step optimization with gradient accumulation
@@ -778,11 +779,21 @@ class Train(Common):
             level=getattr(logging, loglevel, None),
         )
 
+        dataset_weights = (
+            [float(w) for w in args.dataset_weight.split(",")]
+            if args.dataset_weight
+            else [1.0] * len(args.input)
+        )
+        if len(dataset_weights) != len(args.input):
+            raise ValueError(
+                f"Number of --dataset-weight values ({len(dataset_weights)}) "
+                f"does not match number of input files ({len(args.input)})"
+            )
         train_datasets = [
             BPseqDataset(
-                inp, convert_t_to_u_flag=getattr(args, "convert_t_to_u", False)
+                inp, convert_t_to_u_flag=getattr(args, "convert_t_to_u", False), weight=w
             )
-            for inp in args.input
+            for inp, w in zip(args.input, dataset_weights)
         ]
         train_dataset = (
             ConcatDataset(train_datasets)
@@ -1242,6 +1253,15 @@ class Train(Common):
             "--convert-t-to-u",
             action="store_true",
             help="convert T to U in input sequences",
+        )
+        subparser.add_argument(
+            "--dataset-weight",
+            type=str,
+            default=None,
+            help="comma-separated weights for each input dataset "
+            "(must match the number of input files). "
+            "e.g., --dataset-weight 1.0,0.5 means the first dataset has weight 1.0 "
+            "and the second has weight 0.5. Default: all 1.0",
         )
 
         gparser = subparser.add_argument_group("Training environment")

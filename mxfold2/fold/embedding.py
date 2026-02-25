@@ -5,12 +5,14 @@ from collections import defaultdict
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 from rdkit.Chem import rdFingerprintGenerator
+from mxfold2.nucleosides import active_nucleosides, normalize_seq
 
-from ..nucleosides import active_nucleosides, normalize_seq
+RDLogger.logger().setLevel(RDLogger.CRITICAL)
+
+
 class OneHotEmbedding(nn.Module):
     def __init__(self, ksize: int = 0) -> None:
         super(OneHotEmbedding, self).__init__()
@@ -19,25 +21,33 @@ class OneHotEmbedding(nn.Module):
         eye = np.identity(4, dtype=np.float32)
         zero = np.zeros(4, dtype=np.float32)
         self.onehot: defaultdict[str, np.ndarray] = defaultdict(
-            lambda: np.ones(4, dtype=np.float32)/4,
-            {'A': eye[0], 'C': eye[1], 'G': eye[2], 'T': eye[3], 'U': eye[3], '0': zero} )
+            lambda: np.ones(4, dtype=np.float32) / 4,
+            {
+                "A": eye[0],
+                "C": eye[1],
+                "G": eye[2],
+                "T": eye[3],
+                "U": eye[3],
+                "0": zero,
+            },
+        )
 
     def encode(self, seq: str) -> np.ndarray:
-        seq = [ self.onehot[s] for s in normalize_seq(seq) ]
-        seq = np.vstack(seq)
-        return seq.transpose()
+        encoded = [self.onehot[s] for s in normalize_seq(seq)]
+        stacked = np.vstack(encoded)
+        return stacked.transpose()
 
     def pad_all(self, seq: list[str], pad_size: int) -> list[str]:
-        pad = 'n' * pad_size
-        seq = [ pad + s + pad for s in seq ]
+        pad = "n" * pad_size
+        seq = [pad + s + pad for s in seq]
         l = max([len(s) for s in seq])
-        seq = [ s + '0' * (l-len(s)) for s in seq ]
+        seq = [s + "0" * (l - len(s)) for s in seq]
         return seq
 
-    def forward(self, seq: list[str]) -> torch.tensor:
-        seq2 = self.pad_all(seq, self.ksize//2)
-        seq3 = [ self.encode(s) for s in seq2 ]
-        return torch.from_numpy(np.stack(seq3)) # pylint: disable=no-member
+    def forward(self, seq: list[str]) -> torch.Tensor:
+        seq2 = self.pad_all(seq, self.ksize // 2)
+        seq3 = [self.encode(s) for s in seq2]
+        return torch.from_numpy(np.stack(seq3))  # pylint: disable=no-member
 
 
 class SparseEmbedding(nn.Module):
@@ -45,11 +55,11 @@ class SparseEmbedding(nn.Module):
         super(SparseEmbedding, self).__init__()
         self.n_out = dim
         self.embedding = nn.Embedding(6, dim, padding_idx=0)
-        self.vocb = defaultdict(lambda: 5,
-            {'0': 0, 'A': 1, 'C': 2, 'G': 3, 'T': 4, 'U': 4})
+        self.vocb = defaultdict(
+            lambda: 5, {"0": 0, "A": 1, "C": 2, "G": 3, "T": 4, "U": 4}
+        )
 
-
-    def forward(self, seq: list[str]) -> torch.tensor:
+    def forward(self, seq: list[str]) -> torch.Tensor:
         seq2 = torch.LongTensor([[self.vocb[c] for c in normalize_seq(s)] for s in seq])
         seq3 = seq2.to(self.embedding.weight.device)
         return self.embedding(seq3).transpose(1, 2)
@@ -73,7 +83,7 @@ class ExtendedSparseEmbedding(nn.Module):
         # Standard bases (fixed IDs, uppercase since normalize_seq uppercases them)
         self._unknown_id = 5  # temporary, will be updated
         self.vocab: defaultdict[str, int] = defaultdict(lambda: self._unknown_id)
-        self.vocab.update({'0': 0, 'A': 1, 'C': 2, 'G': 3, 'U': 4, 'T': 4})
+        self.vocab.update({"0": 0, "A": 1, "C": 2, "G": 3, "U": 4, "T": 4})
 
         # Dynamically add modified bases from active nucleoside dictionary
         next_id = 5
@@ -91,7 +101,9 @@ class ExtendedSparseEmbedding(nn.Module):
         self.embedding = nn.Embedding(vocab_size, dim, padding_idx=0)
 
     def forward(self, seq: list[str]) -> torch.Tensor:
-        seq2 = torch.LongTensor([[self.vocab[c] for c in normalize_seq(s)] for s in seq])
+        seq2 = torch.LongTensor(
+            [[self.vocab[c] for c in normalize_seq(s)] for s in seq]
+        )
         seq3 = seq2.to(self.embedding.weight.device)
         return self.embedding(seq3).transpose(1, 2)
 
@@ -101,41 +113,47 @@ class ECFPEmbedding(nn.Module):
         super(ECFPEmbedding, self).__init__()
         self.n_out = dim
         self.linear = nn.Linear(nbits, dim)
-        em = { }
+        em = {}
         fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=nbits)
         for v in active_nucleosides.values():
             m = Chem.MolFromSmiles(v.smiles)
             if m is None:
                 m = Chem.MolFromSmiles(v.smiles, sanitize=False)
                 if m is not None:
-                    Chem.SanitizeMol(m, Chem.SanitizeFlags.SANITIZE_ALL ^ Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+                    Chem.SanitizeMol(
+                        m,
+                        Chem.SanitizeFlags.SANITIZE_ALL
+                        ^ Chem.SanitizeFlags.SANITIZE_KEKULIZE,
+                    )
             if m is None:
                 continue
             x = fpgen.GetFingerprint(m)
             em[v.code] = np.array(list(x), dtype=np.float32)
-        em['0'] = np.zeros_like(em['A'])
-        self.embedding = defaultdict(lambda: (em['A'] + em['C'] + em['G'] + em['U']) / 4, em)
+        em["0"] = np.zeros_like(em["A"])
+        self.embedding = defaultdict(
+            lambda: (em["A"] + em["C"] + em["G"] + em["U"]) / 4, em
+        )
 
     def encode(self, seq: str) -> np.ndarray:
-        seq = [ self.embedding[s] for s in normalize_seq(seq) ]
-        seq = np.vstack(seq)
-        return seq.transpose() # (nbits, len)
+        encoded = [self.embedding[s] for s in normalize_seq(seq)]
+        stacked = np.vstack(encoded)
+        return stacked.transpose()  # (nbits, len)
 
     def pad_all(self, seq: list[str], pad_size: int) -> list[str]:
-        pad = 'n' * pad_size
-        seq = [ pad + s + pad for s in seq ]
+        pad = "n" * pad_size
+        seq = [pad + s + pad for s in seq]
         l = max([len(s) for s in seq])
-        seq = [ s + '0' * (l-len(s)) for s in seq ]
+        seq = [s + "0" * (l - len(s)) for s in seq]
         return seq
 
-    def forward(self, seq: list[str]) -> torch.tensor:
-        seq = self.pad_all(seq, 0)
-        seq = [ self.encode(s) for s in seq ]
-        seq = torch.from_numpy(np.stack(seq)) # (B, nbits, L)
-        seq = seq.to(self.linear.weight.device)
-        B, _, L = seq.shape
-        seq = seq.transpose(1, 2) # (B, L, nbits)
-        seq = seq.reshape(B*L, -1) # (B * L, nbits)
-        seq = self.linear(seq) # (B * L, dim)
-        seq = seq.reshape(B, L, -1) # (B, L, dim)
-        return seq.transpose(1, 2) # (B, dim, L)
+    def forward(self, seq: list[str]) -> torch.Tensor:
+        padded = self.pad_all(seq, 0)
+        encoded_list = [self.encode(s) for s in padded]
+        tensor = torch.from_numpy(np.stack(encoded_list))  # (B, nbits, L)
+        tensor = tensor.to(self.linear.weight.device)
+        B, _, L = tensor.shape
+        tensor = tensor.transpose(1, 2)  # (B, L, nbits)
+        tensor = tensor.reshape(B * L, -1)  # (B * L, nbits)
+        tensor = self.linear(tensor)  # (B * L, dim)
+        tensor = tensor.reshape(B, L, -1)  # (B, L, dim)
+        return tensor.transpose(1, 2)  # (B, dim, L)

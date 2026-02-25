@@ -8,6 +8,15 @@ import torch
 
 from mxfold2.nucleosides import is_modified_base, get_modified_positions
 
+MODIFIED_BASE_ALIASES: dict[str, str] = {
+    "m6A": "Ж",
+    "m5C": "?",
+    "psi": "P",
+    "pseudouridine": "P",
+    "I": "I",
+    "inosine": "I",
+}
+
 # Try to import C++ implementation for faster compare_bpseq
 try:
     from mxfold2 import interface as _cpp
@@ -58,22 +67,26 @@ def compare_bpseq_files(
     pred_path: str,
     modified_only: bool = False,
     use_pdb: bool = False,
-) -> tuple[
-    str | None,
-    int,
-    float | None,
-    float | None,
-    int,
-    int,
-    int,
-    int,
-    float,
-    float,
-    float,
-    float,
-    float,
-    float,
-]:
+    modified_types: set[str] | None = None,
+) -> (
+    tuple[
+        str | None,
+        int,
+        float | None,
+        float | None,
+        int,
+        int,
+        int,
+        int,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+    ]
+    | None
+):
     if use_pdb:
         ref = read_pdb(ref_path)
         bases = None
@@ -81,17 +94,32 @@ def compare_bpseq_files(
         seq, ref, _, _, _ = read_bpseq(ref_path)
         bases = list(seq)
     seq, pred, name, sc, t = read_bpseq(pred_path)
-    tp, tn, fp, fn = compare_bpseq(ref, pred, bases=bases, modified_only=modified_only)
+    tp, tn, fp, fn = compare_bpseq(
+        ref,
+        pred,
+        bases=bases,
+        modified_only=modified_only,
+        modified_types=modified_types,
+    )
+    if tp == 0 and tn == 0 and fp == 0 and fn == 0:
+        return None
     sen, ppv, fval, mcc, spec, acc = accuracy(tp, tn, fp, fn)
     return (name, len(seq), t, sc, tp, tn, fp, fn, sen, ppv, fval, mcc, spec, acc)
 
 
 def compare_bpseq(
-    ref, pred, bases: list[str] | None = None, modified_only: bool = False
+    ref,
+    pred,
+    bases: list[str] | None = None,
+    modified_only: bool = False,
+    modified_types: set[str] | None = None,
 ) -> tuple[int, int, int, int]:
     modified_positions: set[int] | None = None
     if modified_only and bases is not None:
-        modified_positions = get_modified_positions(bases)
+        seq_str = "".join(bases)
+        modified_positions = get_modified_positions(seq_str, types=modified_types)
+        if modified_types is not None and len(modified_positions) == 0:
+            return (0, 0, 0, 0)
 
     if (len(ref) > 0 and isinstance(ref[0], list)) or (
         isinstance(ref, torch.Tensor) and ref.ndim == 2
@@ -245,11 +273,27 @@ if __name__ == "__main__":
         help="calculate scores only for base pairs involving modified bases",
     )
     parser.add_argument(
+        "--modified-types",
+        type=str,
+        help="calculate scores only for specific modified base types (comma-separated: m6A,m5C,psi,I). Implies --modified-only",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="treat ref and pred as list files containing multiple BPSEQ paths",
     )
     args = parser.parse_args()
+
+    modified_types: set[str] | None = None
+    if args.modified_types:
+        modified_types = set()
+        for t in args.modified_types.split(","):
+            t = t.strip()
+            if t in MODIFIED_BASE_ALIASES:
+                modified_types.add(MODIFIED_BASE_ALIASES[t])
+            else:
+                modified_types.add(t)
+        args.modified_only = True
 
     if args.list:
         ref_files = read_list_file(args.ref)
@@ -259,7 +303,9 @@ if __name__ == "__main__":
                 f"list length mismatch: ref={len(ref_files)}, pred={len(pred_files)}"
             )
 
-        print("name,length,time,score,tp,tn,fp,fn,sen,ppv,fval,mcc,specificity,accuracy")
+        print(
+            "name,length,time,score,tp,tn,fp,fn,sen,ppv,fval,mcc,specificity,accuracy"
+        )
         all_sen: list[float] = []
         all_ppv: list[float] = []
         all_fval: list[float] = []
@@ -269,8 +315,14 @@ if __name__ == "__main__":
 
         for ref_path, pred_path in zip(ref_files, pred_files):
             result = compare_bpseq_files(
-                ref_path, pred_path, modified_only=args.modified_only, use_pdb=args.pdb
+                ref_path,
+                pred_path,
+                modified_only=args.modified_only,
+                use_pdb=args.pdb,
+                modified_types=modified_types,
             )
+            if result is None:
+                continue
             name, length, t, sc, tp, tn, fp, fn, sen, ppv, fval, mcc, spec, acc = result
             all_sen.append(sen)
             all_ppv.append(ppv)
@@ -281,17 +333,23 @@ if __name__ == "__main__":
             print(",".join(str(v) for v in result))
 
         n = len(all_sen)
-        print(
-            f"# avg_sen={sum(all_sen) / n:.4f}, "
-            f"avg_ppv={sum(all_ppv) / n:.4f}, "
-            f"avg_f1={sum(all_fval) / n:.4f}, "
-            f"avg_mcc={sum(all_mcc) / n:.4f}, "
-            f"avg_specificity={sum(all_spec) / n:.4f}, "
-            f"avg_accuracy={sum(all_acc) / n:.4f}, "
-            f"n={n}"
-        )
+        if n > 0:
+            print(
+                f"# avg_sen={sum(all_sen) / n:.4f}, "
+                f"avg_ppv={sum(all_ppv) / n:.4f}, "
+                f"avg_f1={sum(all_fval) / n:.4f}, "
+                f"avg_mcc={sum(all_mcc) / n:.4f}, "
+                f"avg_specificity={sum(all_spec) / n:.4f}, "
+                f"avg_accuracy={sum(all_acc) / n:.4f}, "
+                f"n={n}"
+            )
     else:
         result = compare_bpseq_files(
-            args.ref, args.pred, modified_only=args.modified_only, use_pdb=args.pdb
+            args.ref,
+            args.pred,
+            modified_only=args.modified_only,
+            use_pdb=args.pdb,
+            modified_types=modified_types,
         )
-        print(", ".join(str(v) for v in result))
+        if result is not None:
+            print(", ".join(str(v) for v in result))
