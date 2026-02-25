@@ -15,6 +15,8 @@ class MixedNearestNeighborTempl
 
     public:
         MixedNearestNeighborTempl(const std::string& seq, pybind11::object obj);
+        MixedNearestNeighborTempl(const std::string& seq, pybind11::object obj,
+                                  std::shared_ptr<BaseEncoding> encoding);
         ~MixedNearestNeighborTempl() {};
 
         auto score_hairpin(size_t i, size_t j) const -> ScoreType;

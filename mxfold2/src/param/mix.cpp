@@ -5,10 +5,58 @@
 
 namespace py = pybind11;
 
+namespace {
+template <class T>
+T make_turner_with_encoding(const std::string& seq, pybind11::object obj,
+                            std::shared_ptr<BaseEncoding> encoding) {
+    if constexpr (std::is_same_v<T, TurnerNearestNeighbor>) {
+        return T(seq, obj, encoding);
+    } else {
+        return T(seq, obj);
+    }
+}
+} // namespace
+
 template <class T, class P>
 MixedNearestNeighborTempl<T, P>::
 MixedNearestNeighborTempl(const std::string& seq, pybind11::object obj)
     :   turner_(seq, py::cast<py::dict>(obj)["turner"]),
+        positional_(seq, py::cast<py::dict>(obj)["positional"]),
+        score_weight_turner_(1.0f),
+        score_weight_positional_(1.0f),
+        count_weight_turner_(1.0f),
+        count_weight_positional_(1.0f)
+{
+    auto dict = py::cast<py::dict>(obj);
+
+    // Backward compatibility: weight_turner/weight_positional sets both score and count weights
+    if (dict.contains("weight_turner")) {
+        float w = py::cast<float>(dict["weight_turner"]);
+        score_weight_turner_ = w;
+        count_weight_turner_ = w;
+    }
+    if (dict.contains("weight_positional")) {
+        float w = py::cast<float>(dict["weight_positional"]);
+        score_weight_positional_ = w;
+        count_weight_positional_ = w;
+    }
+
+    // New parameters override if specified
+    if (dict.contains("weight_score_turner"))
+        score_weight_turner_ = py::cast<float>(dict["weight_score_turner"]);
+    if (dict.contains("weight_score_positional"))
+        score_weight_positional_ = py::cast<float>(dict["weight_score_positional"]);
+    if (dict.contains("weight_count_turner"))
+        count_weight_turner_ = py::cast<float>(dict["weight_count_turner"]);
+    if (dict.contains("weight_count_positional"))
+        count_weight_positional_ = py::cast<float>(dict["weight_count_positional"]);
+}
+
+template <class T, class P>
+MixedNearestNeighborTempl<T, P>::
+MixedNearestNeighborTempl(const std::string& seq, pybind11::object obj,
+                          std::shared_ptr<BaseEncoding> encoding)
+    :   turner_(make_turner_with_encoding<T>(seq, py::cast<py::dict>(obj)["turner"], encoding)),
         positional_(seq, py::cast<py::dict>(obj)["positional"]),
         score_weight_turner_(1.0f),
         score_weight_positional_(1.0f),

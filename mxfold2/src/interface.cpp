@@ -294,8 +294,12 @@ public:
     void set_param(const std::string& seq, py::object pa)
     {
         seq_ = seq;
-        // Use encoding for TurnerNearestNeighbor to support modified bases
-        if constexpr (std::is_same_v<ParamClass, TurnerNearestNeighbor>) {
+        // Use encoding for types that contain TurnerNearestNeighbor to support modified bases
+        if constexpr (std::is_same_v<ParamClass, TurnerNearestNeighbor> ||
+                      std::is_same_v<ParamClass, MixedNearestNeighbor> ||
+                      std::is_same_v<ParamClass, CFMixedNearestNeighbor> ||
+                      std::is_same_v<ParamClass, MixedNearestNeighborBL> ||
+                      std::is_same_v<ParamClass, MixedNearestNeighbor1D>) {
             auto param = std::make_unique<ParamClass>(seq, pa, encoding_);
             f_ = std::make_unique<Zuker<ParamClass>>(std::move(param));
         } else {
@@ -445,8 +449,12 @@ public:
     void set_param(const std::string& seq, py::object pa)
     {
         seq_ = seq;
-        // Use encoding for TurnerNearestNeighbor to support modified bases
-        if constexpr (std::is_same_v<ParamClass, TurnerNearestNeighbor>) {
+        // Use encoding for types that contain TurnerNearestNeighbor to support modified bases
+        if constexpr (std::is_same_v<ParamClass, TurnerNearestNeighbor> ||
+                      std::is_same_v<ParamClass, MixedNearestNeighbor> ||
+                      std::is_same_v<ParamClass, CFMixedNearestNeighbor> ||
+                      std::is_same_v<ParamClass, MixedNearestNeighborBL> ||
+                      std::is_same_v<ParamClass, MixedNearestNeighbor1D>) {
             auto param = std::make_unique<ParamClass>(seq, pa, encoding_);
             f_ = std::make_unique<LinFold<ParamClass>>(std::move(param));
         } else {
