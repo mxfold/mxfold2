@@ -45,6 +45,7 @@ from mxfold2.dataset import (
 )
 from mxfold2.compbpseq import compare_bpseq, accuracy
 from mxfold2.compreactivity import read_shape_reactivity, pairwise_consistency
+from mxfold2.nucleosides import get_modified_positions
 from mxfold2.fold.fold import AbstractFold
 from mxfold2.common import Common
 
@@ -382,7 +383,9 @@ class Train(Common):
         all_sen: list[float] = []
         all_ppv: list[float] = []
         all_fval: list[float] = []
-        all_mcc: list[float] = []
+        mod_all_sen: list[float] = []
+        mod_all_ppv: list[float] = []
+        mod_all_fval: list[float] = []
         shape_scores: list[float] = []
         sample_idx = 0
         start = time.time()
@@ -410,11 +413,23 @@ class Train(Common):
                             _, _, bps = model(seqs[i : i + 1])
                             ref = vals["target"][i]
                             tp, tn, fp, fn = compare_bpseq(ref, bps[0])
-                            sen, ppv, fval, mcc, _, _ = accuracy(tp, tn, fp, fn)
+                            sen, ppv, fval, _, _, _ = accuracy(tp, tn, fp, fn)
                             all_sen.append(sen)
                             all_ppv.append(ppv)
                             all_fval.append(fval)
-                            all_mcc.append(mcc)
+                            # Modified-base-only metrics
+                            mod_positions = get_modified_positions(seqs[i])
+                            if mod_positions:
+                                mod_tp, mod_tn, mod_fp, mod_fn = compare_bpseq(
+                                    ref, bps[0], bases=list(seqs[i]), modified_only=True,
+                                )
+                                if mod_tp + mod_fp + mod_fn > 0:
+                                    m_sen, m_ppv, m_fval, _, _, _ = accuracy(
+                                        mod_tp, mod_tn, mod_fp, mod_fn
+                                    )
+                                    mod_all_sen.append(m_sen)
+                                    mod_all_ppv.append(m_ppv)
+                                    mod_all_fval.append(m_fval)
                             # SHAPE consistency
                             if shape_paths is not None and sample_idx < len(
                                 shape_paths
@@ -445,13 +460,20 @@ class Train(Common):
         elapsed_time = time.time() - start
 
         # Calculate accuracy metrics
-        sen = ppv = fval = mcc = 0.0
+        sen = ppv = fval = 0.0
         has_metrics = len(all_sen) > 0
         if has_metrics:
             sen = sum(all_sen) / len(all_sen)
             ppv = sum(all_ppv) / len(all_ppv)
             fval = sum(all_fval) / len(all_fval)
-            mcc = sum(all_mcc) / len(all_mcc)
+
+        # Modified-base-only metrics
+        mod_f1 = mod_sen = mod_ppv = 0.0
+        has_mod_metrics = len(mod_all_fval) > 0
+        if has_mod_metrics:
+            mod_sen = sum(mod_all_sen) / len(mod_all_sen)
+            mod_ppv = sum(mod_all_ppv) / len(mod_all_ppv)
+            mod_f1 = sum(mod_all_fval) / len(mod_all_fval)
 
         if self.use_wandb:
             log_dict: dict[str, float] = {
@@ -464,7 +486,14 @@ class Train(Common):
                         f"{metric_prefix}/f1": fval,
                         f"{metric_prefix}/sensitivity": sen,
                         f"{metric_prefix}/ppv": ppv,
-                        f"{metric_prefix}/mcc": mcc,
+                    }
+                )
+            if has_mod_metrics:
+                log_dict.update(
+                    {
+                        f"{metric_prefix}/mod_f1": mod_f1,
+                        f"{metric_prefix}/mod_sensitivity": mod_sen,
+                        f"{metric_prefix}/mod_ppv": mod_ppv,
                     }
                 )
             if shape_scores:
@@ -477,8 +506,12 @@ class Train(Common):
             metric_prefix, epoch, loss_total / num
         )
         if has_metrics:
-            msg += "\tF1: {:.4f}\tSEN: {:.4f}\tPPV: {:.4f}\tMCC: {:.4f}".format(
-                fval, sen, ppv, mcc
+            msg += "\tF1: {:.4f}\tSEN: {:.4f}\tPPV: {:.4f}".format(
+                fval, sen, ppv
+            )
+        if has_mod_metrics:
+            msg += "\tmod_F1: {:.4f}\tmod_SEN: {:.4f}\tmod_PPV: {:.4f}".format(
+                mod_f1, mod_sen, mod_ppv
             )
         if shape_scores:
             msg += "\tSHAPE_consistency: {:.4f}".format(
