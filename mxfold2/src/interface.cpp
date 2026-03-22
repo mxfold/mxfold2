@@ -1057,7 +1057,7 @@ PYBIND11_MODULE(interface, m)
             "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::traceback_viterbi,
             "traceback for LinFold model")
-        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities,
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<MixedNearestNeighbor>::compute_basepairing_probabilities,
             "Partition function with Mixed LinearFold Model",
             "seq"_a, "param"_a,
             "min_hairpin_length"_a=3,
@@ -1092,7 +1092,7 @@ PYBIND11_MODULE(interface, m)
             "pairing_rules"_a=py::none())
         .def("traceback_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::traceback_viterbi,
             "traceback for LinFold model")
-        .def("compute_viterbi", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities,
+        .def("compute_basepairing_probabilities", &LinFoldWrapper<MixedNearestNeighbor1D>::compute_basepairing_probabilities,
             "Partition function with Mixed LinearFold Model",
             "seq"_a, "param"_a,
             "min_hairpin_length"_a=3,

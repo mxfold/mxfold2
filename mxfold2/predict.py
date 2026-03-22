@@ -22,6 +22,7 @@ from mxfold2.compbpseq import accuracy, compare_bpseq
 from mxfold2.dataset import BPseqDataset, FastaDataset, RibonanzaDataset
 from mxfold2.fold.fold import AbstractFold
 from mxfold2.common import Common
+from mxfold2.windowed_bpp import centroid_from_bpp, compute_windowed_bpp
 
 
 def find_common_base(paths: list[str]) -> str | None:
@@ -69,6 +70,8 @@ class Predict(Common):
         shape_intercept: float = 0.0,
         shape_slope: float = 0.0,
         use_amp: bool = False,
+        bpp_window_size: Optional[int] = None,
+        bpp_window_step: Optional[int] = None,
     ) -> None:
 
         res_fn = open(result, "w") if result is not None else None
@@ -117,7 +120,34 @@ class Predict(Common):
                 with autocast(
                     device_type=self.device_type, dtype=torch.float16, enabled=use_amp
                 ):
-                    if output_bpp is None:
+                    if output_bpp is not None and bpp_window_size is not None:
+                        # Windowed BPP mode: skip Viterbi, compute BPP only
+                        fold_model = (
+                            model.module
+                            if isinstance(model, AveragedModel)
+                            else model
+                        )
+                        bpps = []
+                        for i in range(len(seqs)):
+                            bpp = compute_windowed_bpp(
+                                fold_model,
+                                seqs[i],
+                                bpp_window_size,
+                                bpp_window_step,
+                                max_helix_length=fold_model.max_helix_length
+                                if hasattr(fold_model, "max_helix_length")
+                                else 30,
+                            )
+                            bpps.append(bpp)
+                        scs = torch.zeros(len(seqs))
+                        preds = []
+                        bps = []
+                        for i, s in enumerate(seqs):
+                            pred, bp = centroid_from_bpp(bpps[i], len(s))
+                            preds.append(pred)
+                            bps.append(bp)
+                        pfs = [None] * len(seqs)
+                    elif output_bpp is None:
                         scs, preds, bps = model(
                             seqs, constraint=constraint, pseudoenergy=pseudoenergy
                         )
@@ -316,6 +346,8 @@ class Predict(Common):
             shape_intercept=args.shape_intercept,
             shape_slope=args.shape_slope,
             use_amp=use_amp,
+            bpp_window_size=getattr(args, "bpp_window_size", None),
+            bpp_window_step=getattr(args, "bpp_window_step", None),
         )
 
     def load_shape_reactivity(
@@ -392,6 +424,18 @@ class Predict(Common):
             type=str,
             default=None,
             help="output the base-pairing probability matrix to the specified directory",
+        )
+        subparser.add_argument(
+            "--bpp-window-size",
+            type=int,
+            default=None,
+            help="window size for windowed BPP computation (requires --bpp)",
+        )
+        subparser.add_argument(
+            "--bpp-window-step",
+            type=int,
+            default=None,
+            help="step size between windows for windowed BPP computation (requires --bpp)",
         )
         subparser.add_argument(
             "--shape",
