@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 import torch
@@ -11,13 +12,17 @@ from .implicit_mle import AdaptiveStepConfig, estimate_implicit_mle
 
 
 class ShapeNLLLoss(nn.Module):
-    def __init__(self, model: AbstractFold, 
+    def __init__(self, model: AbstractFold,
             shape_model: list[nn.Module],
             perturb: float = 0., nu: float = 0.1, l1_weight: float = 0., l2_weight: float = 0.,
             sl_weight: float = 0., alignment: str = "aligned",
             normalization: str = "none", estimator_scale: str = "divide_nu",
             difference_mode: str = "forward", num_samples: int = 1,
-            adaptive: AdaptiveStepConfig | None = None) -> None:
+            adaptive: AdaptiveStepConfig | None = None,
+            pseudo_fy_weight: float = 0.,
+            weight_schedule: str = "none",
+            weight_schedule_start: int = 1,
+            weight_schedule_end: Optional[int] = None) -> None:
         super(ShapeNLLLoss, self).__init__()
         self.model = model
         self.shape_model = shape_model
@@ -32,11 +37,46 @@ class ShapeNLLLoss(nn.Module):
         self.difference_mode = difference_mode
         self.num_samples = num_samples
         self.adaptive = adaptive or AdaptiveStepConfig()
+        self.pseudo_fy_weight = pseudo_fy_weight
+        self.weight_schedule = weight_schedule
+        self.weight_schedule_start = weight_schedule_start
+        self.weight_schedule_end = weight_schedule_end
+        self.current_epoch = 1
+        self.total_epochs = 1
         self.last_imle_stats: dict[str, list[float]] = {}
-        if sl_weight > 0.0:
+        if sl_weight > 0.0 or pseudo_fy_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
             self.turner = RNAFold(param_turner2004).to(next(self.model.parameters()).device)
+
+    def set_epoch_info(self, epoch: int, total_epochs: int) -> None:
+        self.current_epoch = epoch
+        self.total_epochs = total_epochs
+
+    def _get_reference_model_weights(self) -> dict[str, float] | None:
+        if self.weight_schedule == "none" or not hasattr(self.model, "score_weight_turner"):
+            return None
+
+        schedule_end = self.weight_schedule_end or self.total_epochs
+        if schedule_end <= self.weight_schedule_start:
+            progress = float(self.current_epoch >= schedule_end)
+        elif self.current_epoch < self.weight_schedule_start:
+            progress = 0.0
+        elif self.current_epoch >= schedule_end:
+            progress = 1.0
+        else:
+            progress = (self.current_epoch - self.weight_schedule_start) / (
+                schedule_end - self.weight_schedule_start
+            )
+        if self.weight_schedule == "cosine":
+            progress = 0.5 * (1.0 - math.cos(math.pi * progress))
+        elif self.weight_schedule != "linear":
+            raise ValueError(f"unknown weight schedule: {self.weight_schedule}")
+
+        return {
+            "score_weight_turner": 1.0 - 0.5 * progress,
+            "score_weight_positional": 0.5 * progress,
+        }
 
 
     def forward(self, seq: list[str], targets: list[torch.Tensor],
@@ -69,6 +109,7 @@ class ShapeNLLLoss(nn.Module):
             num_samples=self.num_samples,
             adaptive=self.adaptive,
             propagate_value_gradient=True,
+            reference_model_weights=self._get_reference_model_weights(),
         )
         loss = estimate.loss
         self.last_imle_stats = {
@@ -77,14 +118,25 @@ class ShapeNLLLoss(nn.Module):
         }
 
         l = torch.tensor([len(s) for s in seq], device=estimate.loss.device)
+        if self.pseudo_fy_weight > 0.0:
+            with torch.no_grad():
+                _, _, turner_structures = self.turner(seq)
+            fy_ref, _, _ = self.model(
+                seq,
+                constraint=turner_structures,
+                max_internal_length=None,
+            )
+            loss = loss + self.pseudo_fy_weight * (
+                estimate.prediction_score - fy_ref
+            ) / l
+
         if self.sl_weight > 0.0:
             with torch.no_grad():
-                ref2: torch.Tensor
-                ref2_s: list[str]
-                ref2, ref2_s, _ = self.turner(seq)
-            
-            # loss += self.sl_weight * (ref-ref2)**2 / l
-            loss = loss + self.sl_weight * ((estimate.target_score - ref2) ** 2).sum() / l
+                ref2, _, _ = self.turner(
+                    seq,
+                    constraint=estimate.target_structures,
+                )
+            loss = loss + self.sl_weight * (estimate.target_score - ref2) ** 2 / l
 
         logging.debug(
             "Loss = %s = (%s - %s)",

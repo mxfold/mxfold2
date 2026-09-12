@@ -207,6 +207,7 @@ def estimate_implicit_mle(
     num_samples: int = 1,
     adaptive: AdaptiveStepConfig | None = None,
     propagate_value_gradient: bool = False,
+    reference_model_weights: dict[str, float] | None = None,
 ) -> ImplicitMLEResult:
     """Estimate an I-MLE gradient using coupled perturb-and-MAP folds."""
     if num_samples < 1:
@@ -272,20 +273,20 @@ def estimate_implicit_mle(
                     positive_pairs,
                     parameters,
                     _,
-                ) = model(
+                ) = _reference_fold(
+                    model,
                     sequences,
-                    param=parameters,
-                    return_param=True,
-                    return_count=True,
-                    pseudoenergy=[-0.5 * energy for energy in pseudoenergy],
+                    parameters,
+                    [-0.5 * energy for energy in pseudoenergy],
+                    reference_model_weights,
                 )
                 _, positive_counts = collect_parameters_and_counts(parameters)
-                target_score, target_structures, negative_pairs, parameters, _ = model(
+                target_score, target_structures, negative_pairs, parameters, _ = _reference_fold(
+                    model,
                     sequences,
-                    param=parameters,
-                    return_param=True,
-                    return_count=True,
-                    pseudoenergy=[0.5 * energy for energy in pseudoenergy],
+                    parameters,
+                    [0.5 * energy for energy in pseudoenergy],
+                    reference_model_weights,
                 )
                 _, negative_counts = collect_parameters_and_counts(parameters)
                 fractions = paired_flip_fraction(
@@ -296,12 +297,12 @@ def estimate_implicit_mle(
                 positive_pairs = pred_pairs
                 positive_score = pred_score
                 positive_structures = pred_structures
-                target_score, target_structures, negative_pairs, parameters, _ = model(
+                target_score, target_structures, negative_pairs, parameters, _ = _reference_fold(
+                    model,
                     sequences,
-                    param=parameters,
-                    return_param=True,
-                    return_count=True,
-                    pseudoenergy=pseudoenergy,
+                    parameters,
+                    pseudoenergy,
+                    reference_model_weights,
                 )
                 _, negative_counts = collect_parameters_and_counts(parameters)
                 fractions = paired_flip_fraction(
@@ -382,6 +383,48 @@ def estimate_implicit_mle(
         target_structures=first_target_structures,
         selected_nu=selected_nus,
         flip_fraction=flip_fractions,
+    )
+
+
+def _reference_fold(
+    model: Any,
+    sequences: list[str],
+    parameters: list[dict[str, Any]],
+    pseudoenergy: list[torch.Tensor],
+    reference_model_weights: dict[str, float] | None,
+):
+    if not reference_model_weights:
+        return model(
+            sequences,
+            param=parameters,
+            return_param=True,
+            return_count=True,
+            pseudoenergy=pseudoenergy,
+        )
+
+    missing = [name for name in reference_model_weights if not hasattr(model, name)]
+    if missing:
+        raise ValueError(f"reference model weights are unavailable: {missing}")
+
+    original = {name: getattr(model, name) for name in reference_model_weights}
+    try:
+        for name, value in reference_model_weights.items():
+            setattr(model, name, value)
+        _, structures, _ = model(
+            sequences,
+            param=parameters,
+            pseudoenergy=pseudoenergy,
+        )
+    finally:
+        for name, value in original.items():
+            setattr(model, name, value)
+
+    return model(
+        sequences,
+        param=parameters,
+        return_param=True,
+        return_count=True,
+        constraint=structures,
     )
 
 

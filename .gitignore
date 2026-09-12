@@ -166,3 +166,8 @@ experiments
 poetry.lock
 models
 .tool-versions
+wandb
+
+# Local TSUBAME experiment artifacts
+qsub_logs/
+imle_*.o[0-9]*

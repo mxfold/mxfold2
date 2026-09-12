@@ -172,6 +172,58 @@ class _FakeFold(torch.nn.Module):
         return score, structures, pairs
 
 
+class _WeightedFakeFold(_FakeFold):
+    def __init__(self):
+        super().__init__()
+        self.weight.data.fill_(-0.2)
+        self.score_weight_turner = 1.0
+        self.score_weight_positional = 0.0
+        self.selection_weights = []
+
+    def forward(
+        self,
+        seq,
+        return_param=False,
+        return_count=False,
+        param=None,
+        pseudoenergy=None,
+        perturb=0.0,
+        constraint=None,
+        **kwargs,
+    ):
+        del kwargs
+        if constraint is None:
+            self.selection_weights.append(
+                (self.score_weight_turner, self.score_weight_positional)
+            )
+        if param is None:
+            noise = torch.tensor([perturb], device=self.weight.device)
+            param = [{"score_pair": self.weight + noise} for _ in seq]
+        scores = []
+        structures = []
+        pairs = []
+        for index, _ in enumerate(seq):
+            if constraint is not None:
+                is_paired = constraint[index] == "()"
+            else:
+                penalty = 0.0 if pseudoenergy is None else float(pseudoenergy[index].mean())
+                is_paired = (
+                    float(param[index]["score_pair"].detach())
+                    + self.score_weight_positional
+                    - penalty
+                    > 0
+                )
+            count = torch.tensor([float(is_paired)], device=self.weight.device)
+            param[index]["count_pair"] = count
+            scores.append(param[index]["score_pair"].sum() * count)
+            structures.append("()" if is_paired else "..")
+            pairs.append([0, 2, 1] if is_paired else [0, 0, 0])
+        score = torch.stack(scores)
+        if return_param:
+            return score, structures, pairs, param, param
+        return score, structures, pairs
+
+
 class EstimatorTest(unittest.TestCase):
     @staticmethod
     def objective(paired):
@@ -258,6 +310,28 @@ class EstimatorTest(unittest.TestCase):
         )
         result.loss.sum().backward()
         torch.testing.assert_close(objective_weight.grad, torch.tensor(1.0))
+
+    def test_reference_weight_override_selects_then_restores_model_weights(self):
+        model = _WeightedFakeFold()
+        result = estimate_implicit_mle(
+            model,
+            ["AC"],
+            self.objective,
+            perturb=0.0,
+            nu=0.2,
+            alignment="aligned",
+            normalization="none",
+            estimator_scale="divide_nu",
+            reference_model_weights={
+                "score_weight_turner": 0.0,
+                "score_weight_positional": 2.0,
+            },
+        )
+        self.assertEqual(result.prediction_structures, [".."])
+        self.assertEqual(result.target_structures, ["()"])
+        self.assertIn((0.0, 2.0), model.selection_weights)
+        self.assertEqual(model.score_weight_turner, 1.0)
+        self.assertEqual(model.score_weight_positional, 0.0)
 
 
 if __name__ == "__main__":

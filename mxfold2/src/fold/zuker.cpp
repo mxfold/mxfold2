@@ -1225,10 +1225,8 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
 template class Zuker<TurnerNearestNeighbor>;
 template class Zuker<PositionalNearestNeighbor>;
 template class Zuker<MixedNearestNeighbor>;
-template class Zuker<MixedNearestNeighbor2>;
 template class Zuker<PositionalNearestNeighborBL>;
 template class Zuker<MixedNearestNeighborBL>;
 template class Zuker<MixedNearestNeighbor1D>;
 template class Zuker<CONTRAfoldNearestNeighbor>;
 template class Zuker<CFMixedNearestNeighbor>;
-template class Zuker<CFMixedNearestNeighbor2>;
