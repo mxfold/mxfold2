@@ -6,10 +6,10 @@ from typing import Optional, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.autograd
 
 from ..fold.fold import AbstractFold
 from ..fold.shape_layers import _mask_and_clip_targets
+from .implicit_mle import AdaptiveStepConfig, estimate_implicit_mle
 
 
 class ShapeRankLoss(nn.Module):
@@ -18,11 +18,12 @@ class ShapeRankLoss(nn.Module):
 
     - 1回目の fold で予測構造 pred_bps を得る
     - pred_bps から paired ベクトル (0/1, requires_grad=True) を作る
-    - paired と SHAPE targets から，ペアワイズな順位ロス（Mann–Whitney U / AUC の
-      logistic 近似）を計算する
-    - rank loss を paired で backward して dL/dpaired を得る
-    - その勾配を pseudoenergy (= nu * grad / max_abs) に変換して 2 回目の fold
-    - 1 回目と 2 回目の count 差分を，構造モデルパラメータへの勾配として流す
+    - SHAPE targets の大小関係を教師として，低SHAPE位置のpairednessが
+      高SHAPE位置より大きくなるようペアワイズlogistic lossを計算する
+    - rank loss の dL/dpaired を pseudoenergy に変換する
+    - forward または central finite difference で count 差分を計算する
+    - 必要なら摂動幅 nu を paired-state flip率に合わせて配列ごとに調整する
+    - 複数の coupled perturb-and-MAP 標本を平均して構造モデルへ勾配を流す
     """
 
     def __init__(
@@ -35,6 +36,14 @@ class ShapeRankLoss(nn.Module):
         l2_weight: float = 0.0,
         sl_weight: float = 0.0,
         margin: float = 0.0,
+        rank_delta: float = 0.0,
+        alignment: str = "aligned",
+        normalization: str = "none",
+        estimator_scale: str = "divide_nu",
+        clip_targets: bool = False,
+        difference_mode: str = "forward",
+        num_samples: int = 1,
+        adaptive: AdaptiveStepConfig | None = None,
     ) -> None:
         super().__init__()
         self.model = model
@@ -45,6 +54,19 @@ class ShapeRankLoss(nn.Module):
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
         self.margin = margin
+        self.rank_delta = rank_delta
+        self.alignment = alignment
+        self.normalization = normalization
+        self.estimator_scale = estimator_scale
+        self.clip_targets = clip_targets
+        self.difference_mode = difference_mode
+        self.num_samples = num_samples
+        self.adaptive = adaptive or AdaptiveStepConfig()
+        self.last_imle_stats: dict[str, list[float]] = {}
+        if tau <= 0.0:
+            raise ValueError("rank tau must be positive")
+        if rank_delta < 0.0:
+            raise ValueError("rank delta must be non-negative")
         if sl_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
@@ -66,8 +88,13 @@ class ShapeRankLoss(nn.Module):
         """
         device = paired_vec.device
 
-        # 対象外 (-1 以下) をマスクし，[min,max] に clip
-        valid, t_all = _mask_and_clip_targets(shape_vec, min_val=0.01, max_val=1.0)
+        if self.clip_targets:
+            valid, t_all = _mask_and_clip_targets(
+                shape_vec, min_val=0.01, max_val=1.0
+            )
+        else:
+            valid = shape_vec > -10
+            t_all = shape_vec
 
         # valid な点が全く無い場合：loss=0だが paired 依存にして勾配経路だけ残す
         if not valid.any():
@@ -76,44 +103,22 @@ class ShapeRankLoss(nn.Module):
         t_valid = t_all[valid].to(device)
         p_mask = paired_vec[valid].to(device)
 
-        # paired / unpaired weight
-        w_p = p_mask          # [M]
-        w_u = 1.0 - p_mask    # [M]
-
-        # paired or unpaired のどちらかしか無い場合も、順位ロスは定義できない
-        # → loss=0 だが p_mask 経由で 0 を返して勾配経路は維持
-        if (w_p.sum() <= 0) or (w_u.sum() <= 0):
-            return p_mask.sum() * 0.0
-
-        # 要素数が 1 以下でもペアが作れないので同様に 0
+        # 要素数が 1 以下ではSHAPEの大小関係を作れない。
         if t_valid.numel() <= 1:
             return p_mask.sum() * 0.0
 
-        # s_j - s_i の差分行列 (i: paired, j: unpaired を想定)
-        # diff[i,j] = t_valid[j] - t_valid[i]
-        diff = t_valid[None, :] - t_valid[:, None]   # [M,M]
-
-        # 重み行列: i 側が paired, j 側が unpaired のときに効く
-        w = w_p[:, None] * w_u[None, :]              # [M,M]
-
-        # 自分自身とのペア (i==j) は無視したいので対角成分を 0 に
-        M = t_valid.shape[0]
-        if M > 0:
-            w = w * (1.0 - torch.eye(M, device=device))
-
-        # logistic 近似: phi(s) = log(1 + exp(-(s/tau)))
-        #   s = t_j - t_i が大きいほど（unpaired が高いほど） loss は小さい
-        # phi = F.softplus(-diff / self.tau)   # [M,M]
-        phi = F.softplus(-(diff - self.margin) / self.tau)   # [M,M]
-
-        weighted = w * phi
-        denom = w.sum()
-
-        # 有効なペアが 1 つもない場合：loss=0（ただし勾配経路は残す）
-        if denom <= 0:
+        # shape_gap[i,j] > 0 なら i の方が低SHAPEなので、
+        # pairedness[i] - pairedness[j] が正になることを教師信号にする。
+        # 比較集合は予測構造に依存しないため、全unpaired/全pairedでもlossと
+        # 勾配が定義される。SHAPE差がrank_delta以下の曖昧な組は除外する。
+        shape_gap = t_valid[None, :] - t_valid[:, None]
+        ordered = shape_gap > self.rank_delta
+        if not ordered.any():
             return p_mask.sum() * 0.0
 
-        return weighted.sum() / (denom + 1e-8)
+        paired_gap = p_mask[:, None] - p_mask[None, :]
+        pairwise_loss = F.softplus((self.margin - paired_gap) / self.tau)
+        return pairwise_loss[ordered].mean()
 
     def forward(
         self,
@@ -125,161 +130,60 @@ class ShapeRankLoss(nn.Module):
         # dataset_id は ShapeNLLLoss との互換性のために受け取るが，ここでは使わない
         del dataset_id
 
-        # --- 1st fold: 現在のパラメータで通常の予測 ---
-        pred: torch.Tensor
-        pred_s: List[str]
-        pred_bps: List[List[int]]
-        pred, pred_s, pred_bps, param, _ = self.model(
-            seq, return_param=True, return_count=True, perturb=self.perturb
-        )
-
-        pred_params, pred_counts = [], []
-        for k in sorted(param[0].keys()):
-            if k.startswith("score_"):
-                pred_params.append(
-                    torch.vstack([param[i][k] for i in range(len(seq))])
-                )
-            elif k.startswith("count_"):
-                pred_counts.append(
-                    torch.vstack([param[i][k] for i in range(len(seq))])
-                )
-            elif isinstance(param[0][k], dict):
-                for kk in sorted(param[0][k].keys()):
-                    if kk.startswith("score_"):
-                        pred_params.append(
-                            torch.vstack([param[i][k][kk] for i in range(len(seq))])
-                        )
-                    elif kk.startswith("count_"):
-                        pred_counts.append(
-                            torch.vstack([param[i][k][kk] for i in range(len(seq))])
-                        )
-
-        # pred_bps -> paired (0/1, requires_grad=True)
-        paired: List[torch.Tensor] = []
-        for pred_bp in pred_bps:
-            # pred_bp は [L+1] or [L] のペア情報 (0: unpaired, >0: paired相手index)
-            p = [1.0 if v > 0 else 0.0 for v in pred_bp]
-            p = torch.tensor(
-                p,
-                dtype=torch.float32,
-                requires_grad=True,
-                device=pred.device,
+        def objective(paired: list[torch.Tensor]) -> torch.Tensor:
+            return torch.stack(
+                [
+                    self._per_sequence_rank_loss(target.to(paired[0].device), pair)
+                    for target, pair in zip(targets, paired)
+                ]
             )
-            paired.append(p)
 
-        # --- rank-based SHAPE loss (per sequence) ---
-        per_seq_losses = []
-        for p_vec, t_vec in zip(paired, targets):
-            t_vec_dev = t_vec.to(pred.device)
-            per_seq_losses.append(self._per_sequence_rank_loss(t_vec_dev, p_vec))
-
-        # [B] テンソルにまとめる
-        rank_losses = torch.stack(per_seq_losses)
-
-        # rank loss の勾配を paired に対して計算し，その勾配だけを残す
-        rank_loss_sum = rank_losses.sum()
-        rank_loss_sum.backward()
-        grads = [
-            (p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p))
-            for p in paired
-        ]
-        for p in paired:
-            p.grad = None
-
-        # grads を絶対値で正規化: max_abs = max_i max(|grads[i]|)
-        valid_grads = [
-            g for g in grads if isinstance(g, torch.Tensor) and g.numel() > 0
-        ]
-        if len(valid_grads) > 0:
-            max_vals = [g.abs().max() for g in valid_grads]
-            max_abs = torch.stack(max_vals).max()
-            if max_abs.item() == 0.0:
-                max_abs = torch.tensor(1.0, device=max_abs.device, dtype=max_abs.dtype)
-        else:
-            max_abs = torch.tensor(1.0, device=pred.device, dtype=torch.float32)
-
-        # pseudoenergy = nu * g / max_abs
-        # pseudo_list = [(self.nu * g / max_abs) for g in grads]
-
-        pseudo_list = [(self.nu * g) for g in grads]
-
-        # --- 2nd fold: pseudoenergy を加えた参照構造 ---
-        ref: torch.Tensor
-        ref_s: List[str]
-        ref, ref_s, _, param, _ = self.model(
+        estimate = estimate_implicit_mle(
+            self.model,
             seq,
-            param=param,
-            return_param=True,
-            return_count=True,
-            pseudoenergy=pseudo_list,
+            objective,
+            perturb=self.perturb,
+            nu=self.nu,
+            alignment=self.alignment,
+            normalization=self.normalization,
+            estimator_scale=self.estimator_scale,
+            difference_mode=self.difference_mode,
+            num_samples=self.num_samples,
+            adaptive=self.adaptive,
         )
+        loss = estimate.loss
+        self.last_imle_stats = {
+            "selected_nu": estimate.selected_nu,
+            "flip_fraction": estimate.flip_fraction,
+        }
 
-        ref_counts = []
-        for k in sorted(param[0].keys()):
-            if k.startswith("count_"):
-                ref_counts.append(
-                    torch.vstack([param[i][k] for i in range(len(seq))])
-                )
-            elif isinstance(param[0][k], dict):
-                for kk in sorted(param[0][k].keys()):
-                    if kk.startswith("count_"):
-                        ref_counts.append(
-                            torch.vstack([param[i][k][kk] for i in range(len(seq))])
-                        )
-
-        # pred_counts / ref_counts の差分を勾配として利用する
-        diffs = [(pc - rc).detach().clone() for pc, rc in zip(pred_counts, ref_counts)]
-        detached_rank = rank_losses.detach().clone()
-
-        class ADwrapper(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, detached_rank_tensor, *inputs):
-                # inputs = pred_params + diffs
-                n_inputs = len(inputs)
-                n_pred = n_inputs // 2
-                ctx.n_pred = n_pred
-                diffs_to_save = inputs[n_pred:]
-                ctx.save_for_backward(*diffs_to_save)
-                return detached_rank_tensor
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                saved = ctx.saved_tensors  # diffs
-                n_pred = ctx.n_pred
-
-                grads_for_pred = []
-                for d in saved:
-                    if grad_output.dim() == 0:
-                        g = d * grad_output
-                    else:
-                        shape = [grad_output.shape[0]] + [1] * (d.dim() - 1)
-                        g = d * grad_output.view(*shape)
-                    grads_for_pred.append(g)
-
-                # (grad_for_detached_rank, *grads_for_pred, *None_for_diffs)
-                return (None,) + tuple(grads_for_pred) + tuple([None] * n_pred)
-
-        loss = ADwrapper.apply(detached_rank, *pred_params, *diffs)
-        diffs = None
-        detached_rank = None
-
-        l = torch.tensor([len(s) for s in seq], device=pred.device)
+        l = torch.tensor([len(s) for s in seq], device=estimate.loss.device)
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2: torch.Tensor
                 ref2_s: List[str]
                 ref2, ref2_s, _ = self.turner(seq)
-            loss = loss + self.sl_weight * ((ref - ref2) ** 2).sum() / l
+            loss = loss + self.sl_weight * ((estimate.target_score - ref2) ** 2).sum() / l
 
         # logging は scalar 前提なので，バッチサイズ >1 のときは mean を取っておく
         scalar_loss = loss.mean()
-        logging.debug(f"ShapeRankLoss = {scalar_loss.item()} = ({pred.item()} - {ref.item()})")
+        logging.debug(
+            "ShapeRankLoss = %s = (%s - %s)",
+            scalar_loss.item(),
+            estimate.prediction_score.mean().item(),
+            estimate.target_score.mean().item(),
+        )
         logging.debug(seq)
-        logging.debug(pred_s)
-        logging.debug(ref_s)
+        logging.debug(estimate.prediction_structures)
+        logging.debug(estimate.target_structures)
         if float(scalar_loss.item()) > 1e10 or torch.isnan(scalar_loss):
             logging.error(fname)
-            logging.error(f"{scalar_loss.item()}, {pred.item()}, {ref.item()}")
+            logging.error(
+                "%s, %s, %s",
+                scalar_loss.item(),
+                estimate.prediction_score.mean().item(),
+                estimate.target_score.mean().item(),
+            )
             logging.error(seq)
 
         # l1/l2 正則化が欲しければここで追加（デフォルトは 0）

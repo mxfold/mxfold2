@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import csv
 import os
 import random
 import sys
@@ -45,6 +46,7 @@ class Train(Common):
     def __init__(self):
         super(Train, self).__init__()
         self.log_file = None   # ここでは設定しない
+        self.imle_log_file = None
 
 
     def train(self, epoch: int, model: AbstractFold, optimizer: optim.Optimizer, 
@@ -57,9 +59,16 @@ class Train(Common):
         model.train()
         if not isinstance(loss_fn, dict):
             loss_fn = {'BPSEQ': loss_fn}
+        # The per-step gradient/update snapshots are useful while debugging,
+        # but copying every parameter tensor to CPU for every example is very
+        # expensive for the 64k-example assisted-folding set.  Keep them
+        # available at INFO/DEBUG verbosity and make normal WARNING runs
+        # numerically identical without the diagnostics overhead.
+        debug_diagnostics = logging.getLogger().isEnabledFor(logging.INFO)
         n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
+        imle_rows = []
         start = time.time()
         with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, vals in data_loader:
@@ -75,6 +84,23 @@ class Train(Common):
                             loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
                         elif vals['type'][i]=='SHAPE': 
                             loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                            stats = getattr(loss_fn['SHAPE'], 'last_imle_stats', {})
+                            nus = stats.get('selected_nu', [])
+                            flips = stats.get('flip_fraction', [])
+                            if nus and flips:
+                                imle_rows.append([
+                                    epoch,
+                                    self.step,
+                                    fnames[i],
+                                    getattr(loss_fn['SHAPE'], 'difference_mode', 'forward'),
+                                    len(nus),
+                                    sum(nus) / len(nus),
+                                    min(nus),
+                                    max(nus),
+                                    sum(flips) / len(flips),
+                                    min(flips),
+                                    max(flips),
+                                ])
                         elif vals['type'][i]=='MULTI':
                             seq = seqs[i:i+1]
                             # 構造ロス
@@ -105,57 +131,58 @@ class Train(Common):
                     else:
                         loss.backward()
 
-                    # --- DEBUG: which params have no grad, top-k grad norms, snapshot params (before step) ---
-                    try:
-                        no_grad_names = [name for name, p in model.named_parameters() if p.requires_grad and p.grad is None]
-                        logging.info(f"[DBG] params without grad ({len(no_grad_names)}): {no_grad_names[:20]}")
-                        # top-k grads
-                        grads = [(name, float(p.grad.detach().norm().item())) for name, p in model.named_parameters() if p.requires_grad and p.grad is not None]
-                        grads.sort(key=lambda x: x[1], reverse=True)
-                        logging.info(f"[DBG] top grads: {grads[:10]}")
-                        # snapshot params for update check
-                        params_before = {name: p.detach().cpu().clone() for name, p in model.named_parameters() if p.requires_grad}
-                    except Exception:
-                        logging.exception("DBG: failed per-param grad snapshot")
+                    if debug_diagnostics:
+                        # --- DEBUG: which params have no grad, top-k grad norms, snapshot params (before step) ---
+                        try:
+                            no_grad_names = [name for name, p in model.named_parameters() if p.requires_grad and p.grad is None]
+                            logging.info(f"[DBG] params without grad ({len(no_grad_names)}): {no_grad_names[:20]}")
+                            # top-k grads
+                            grads = [(name, float(p.grad.detach().norm().item())) for name, p in model.named_parameters() if p.requires_grad and p.grad is not None]
+                            grads.sort(key=lambda x: x[1], reverse=True)
+                            logging.info(f"[DBG] top grads: {grads[:10]}")
+                            # snapshot params for update check
+                            params_before = {name: p.detach().cpu().clone() for name, p in model.named_parameters() if p.requires_grad}
+                        except Exception:
+                            logging.exception("DBG: failed per-param grad snapshot")
 
-                    # DEBUG: backward 直後の勾配ノルム、未設定勾配数、学習率表示
-                    try:
-                        max_grad = 0.0
-                        zero_grad_count = 0
-                        total_params = 0
-                        for p in model.parameters():
-                            if p.requires_grad:
-                                total_params += 1
-                                if p.grad is None:
-                                    zero_grad_count += 1
-                                else:
-                                    ng = float(p.grad.detach().norm().item())
-                                    if ng > max_grad:
-                                        max_grad = ng
-                        lrs = [g.get('lr') for g in optimizer.param_groups]
-                        logging.info(f"after backward: max_grad={max_grad:.6g} zero_grad_params={zero_grad_count}/{total_params} lrs={lrs}")
-                    except Exception:
-                        logging.exception("Failed to compute grad diagnostics")
+                        # DEBUG: backward 直後の勾配ノルム、未設定勾配数、学習率表示
+                        try:
+                            max_grad = 0.0
+                            zero_grad_count = 0
+                            total_params = 0
+                            for p in model.parameters():
+                                if p.requires_grad:
+                                    total_params += 1
+                                    if p.grad is None:
+                                        zero_grad_count += 1
+                                    else:
+                                        ng = float(p.grad.detach().norm().item())
+                                        if ng > max_grad:
+                                            max_grad = ng
+                            lrs = [g.get('lr') for g in optimizer.param_groups]
+                            logging.info(f"after backward: max_grad={max_grad:.6g} zero_grad_params={zero_grad_count}/{total_params} lrs={lrs}")
+                        except Exception:
+                            logging.exception("Failed to compute grad diagnostics")
 
-                    # DEBUG: per-parameter grad norms と params の snapshot (before step)
-                    try:
-                        params_before = {}
-                        for name, p in model.named_parameters():
-                            if p.requires_grad:
-                                gnorm = 0.0 if p.grad is None else float(p.grad.detach().norm().item())
-                                logging.debug(f"[DBG_PARAM_GRAD] {name} grad_norm={gnorm:.6g}")
-                                params_before[name] = p.detach().cpu().clone()
-                    except Exception:
-                        logging.exception("Failed per-param grad logging / snapshot")
+                        # DEBUG: per-parameter grad norms と params の snapshot (before step)
+                        try:
+                            params_before = {}
+                            for name, p in model.named_parameters():
+                                if p.requires_grad:
+                                    gnorm = 0.0 if p.grad is None else float(p.grad.detach().norm().item())
+                                    logging.debug(f"[DBG_PARAM_GRAD] {name} grad_norm={gnorm:.6g}")
+                                    params_before[name] = p.detach().cpu().clone()
+                        except Exception:
+                            logging.exception("Failed per-param grad logging / snapshot")
 
-                    # --- grad check for shape_model (only Implicit_MLE task) ---
-                    if isinstance(loss_fn, dict) and 'SHAPE' in loss_fn:
-                        sm_list = getattr(loss_fn['SHAPE'], "shape_model", None)
-                        if sm_list is not None:
-                            for si, sm in enumerate(sm_list):
-                                for n, p in sm.named_parameters():
-                                    gnorm = None if p.grad is None else float(p.grad.detach().norm().item())
-                                    logging.info(f"[grad-check] shape_model[{si}].{n} grad_norm={gnorm}")
+                        # --- grad check for shape_model (only Implicit_MLE task) ---
+                        if isinstance(loss_fn, dict) and 'SHAPE' in loss_fn:
+                            sm_list = getattr(loss_fn['SHAPE'], "shape_model", None)
+                            if sm_list is not None:
+                                for si, sm in enumerate(sm_list):
+                                    for n, p in sm.named_parameters():
+                                        gnorm = None if p.grad is None else float(p.grad.detach().norm().item())
+                                        logging.info(f"[grad-check] shape_model[{si}].{n} grad_norm={gnorm}")
 
 
                     # Gradient clipping with unscaling if using mixed precision
@@ -174,17 +201,18 @@ class Train(Common):
                     else:
                         optimizer.step()
 
-                    # --- DEBUG: per-param update norms (after step) ---
-                    try:
-                        small_updates = []
-                        for name, p in model.named_parameters():
-                            if p.requires_grad and name in params_before:
-                                updn = float((p.detach().cpu() - params_before[name]).norm().item())
-                                if updn < 1e-12:
-                                    small_updates.append((name, updn))
-                        logging.info(f"[DBG] small updates count={len(small_updates)} examples={small_updates[:10]}")
-                    except Exception:
-                        logging.exception("DBG: failed per-param update logging")
+                    if debug_diagnostics:
+                        # --- DEBUG: per-param update norms (after step) ---
+                        try:
+                            small_updates = []
+                            for name, p in model.named_parameters():
+                                if p.requires_grad and name in params_before:
+                                    updn = float((p.detach().cpu() - params_before[name]).norm().item())
+                                    if updn < 1e-12:
+                                        small_updates.append((name, updn))
+                            logging.info(f"[DBG] small updates count={len(small_updates)} examples={small_updates[:10]}")
+                        except Exception:
+                            logging.exception("DBG: failed per-param update logging")
 
                     
                     # # バッチ単位の情報は標準出力へ出す（ジョブの .o に流れる）。
@@ -224,6 +252,9 @@ class Train(Common):
                 f.write(f"{epoch},train,{avg_loss:.6f},{elapsed_time:.3f},{self.step},{alloc:.1f}\n")
         except Exception:
             pass
+        if self.imle_log_file is not None and imle_rows:
+            with open(self.imle_log_file, 'a', newline='') as f:
+                csv.writer(f).writerows(imle_rows)
 
 
     def test(self, epoch: int, model: AbstractFold | AveragedModel, 
@@ -407,13 +438,33 @@ class Train(Common):
 
     def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
                                   shape_model: Optional[nn.Module] = None) -> nn.Module:
+        from .loss.implicit_mle import AdaptiveStepConfig
+
+        adaptive = AdaptiveStepConfig(
+            enabled=args.shape_imle_adaptive_nu,
+            minimum=args.shape_imle_nu_min,
+            maximum=args.shape_imle_nu_max,
+            flip_fraction_low=args.shape_imle_flip_low,
+            flip_fraction_high=args.shape_imle_flip_high,
+            factor=args.shape_imle_adaptive_factor,
+            max_steps=args.shape_imle_adaptive_steps,
+        )
+        imle_options = dict(
+            alignment=args.shape_imle_alignment,
+            normalization=args.shape_imle_normalization,
+            estimator_scale=args.shape_imle_estimator_scale,
+            difference_mode=args.shape_imle_difference,
+            num_samples=args.shape_imle_samples,
+            adaptive=adaptive,
+        )
         if loss_func == 'shape_nll':
             from .loss.shape_nll_loss import ShapeNLLLoss
             return ShapeNLLLoss(model=model,
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=args.score_loss_weight)
+                            sl_weight=args.score_loss_weight,
+                            **imle_options)
 
         elif loss_func == 'shape_fy':
             from .loss.shape_fy_loss import ShapeFenchelYoungLoss
@@ -433,7 +484,11 @@ class Train(Common):
                 l1_weight=args.l1_weight,
                 l2_weight=args.l2_weight,
                 sl_weight=args.score_loss_weight,
-                margin=args.shape_margin
+                margin=args.shape_margin,
+                tau=args.shape_rank_tau,
+                rank_delta=args.shape_rank_delta,
+                clip_targets=args.shape_rank_targets == 'clipped',
+                **imle_options,
             )
 
         if loss_func == 'shape_cls':
@@ -442,7 +497,8 @@ class Train(Common):
                             shape_model=shape_model,
                             perturb=args.shape_perturb, nu=args.shape_nu, 
                             l1_weight=args.l1_weight, l2_weight=args.l2_weight,
-                            sl_weight=args.score_loss_weight)
+                            sl_weight=args.score_loss_weight,
+                            **imle_options)
 
         else:
             raise(ValueError(f'not implemented: {loss_func}'))
@@ -489,6 +545,13 @@ class Train(Common):
         self.disable_progress_bar = args.disable_progress_bar
         loglevel = 'INFO' if args.verbose else args.loglevel
         logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=getattr(logging, loglevel, None))
+        if args.shape_imle_samples < 1:
+            raise ValueError('--shape-imle-samples must be at least 1')
+        if args.shape_imle_samples > 1 and args.shape_perturb <= 0:
+            logging.warning(
+                'shape_imle_samples=%d with shape_perturb<=0 repeats an identical MAP estimate',
+                args.shape_imle_samples,
+            )
         self.writer = None
         if args.log_dir is not None and 'SummaryWriter' in globals():
             self.writer = SummaryWriter(log_dir=args.log_dir)
@@ -511,6 +574,18 @@ class Train(Common):
             if write_header:
                 # 追加列: step, alloc_mb
                 f.write("epoch,phase,loss,time,step,alloc_mb\n")
+        if args.task == 'Implicit_MLE':
+            self.imle_log_file = os.path.join(
+                args.log_dir if args.log_dir is not None else 'logs',
+                'imle_stats.csv',
+            )
+            if not os.path.exists(self.imle_log_file) or os.path.getsize(self.imle_log_file) == 0:
+                with open(self.imle_log_file, 'w', newline='') as f:
+                    csv.writer(f).writerow([
+                        'epoch', 'step', 'file', 'difference', 'samples',
+                        'nu_mean', 'nu_min', 'nu_max', 'flip_mean',
+                        'flip_min', 'flip_max',
+                    ])
 
         # train_dataset = BPseqDataset(args.input)
         # if args.shape is not None:
@@ -584,13 +659,29 @@ class Train(Common):
             init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:
                 init_param = Path(conf) / init_param
-            p = torch.load(init_param)
+            p = torch.load(init_param, map_location='cpu')
             if shape_model is not None and isinstance(p, dict) and 'shape_model_state_dict' in p:
                 for i, sm in enumerate(shape_model):
                     sm.load_state_dict(p['shape_model_state_dict'][i])
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
-            model.load_state_dict(p)
+            missing, unexpected = model.load_state_dict(p, strict=False)
+            optional_missing = [key for key in missing if '.shape_head_' in key]
+            required_missing = [key for key in missing if key not in optional_missing]
+            if required_missing or unexpected:
+                details = []
+                if required_missing:
+                    details.append(f'missing keys: {required_missing}')
+                if unexpected:
+                    details.append(f'unexpected keys: {list(unexpected)}')
+                raise RuntimeError(
+                    'Incompatible initial checkpoint (' + '; '.join(details) + ')'
+                )
+            if optional_missing:
+                logging.warning(
+                    "Initial checkpoint lacks optional SHAPE regression heads: %s",
+                    optional_missing,
+                )
 
         if args.gpu >= 0:
             model.to(torch.device("cuda", args.gpu))
@@ -683,7 +774,7 @@ class Train(Common):
             'SHAPE_regress': self.build_shape_regress_loss_function(model) 
         }
         
-        loss_weight = { 'BPSEQ': 1.0, 'BPSEQ2': args.second_loss_weight, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0, 'MULTI_intra': (args.mt_alpha, args.mt_beta) }
+        loss_weight = { 'BPSEQ': args.bpseq_loss_weight, 'BPSEQ2': args.second_loss_weight, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0, 'MULTI_intra': (args.mt_alpha, args.mt_beta) }
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         # Initialize GradScaler for mixed precision training
@@ -823,6 +914,8 @@ class Train(Common):
                             help='the weight for L2 regularization (default: 0)')
         gparser.add_argument('--score-loss-weight', type=float, default=0.,
                             help='the weight for score loss for {hinge,fy} loss (default: 0)')
+        gparser.add_argument('--bpseq-loss-weight', type=float, default=1.,
+                            help='weight for BPSEQ examples mixed into Implicit_MLE training (default: 1)')
         gparser.add_argument('--perturb', type=float, default=0.1,
                             help='standard deviation of perturbation for fy loss (default: 0.1) パラメータに探索ノイズを付加する')
         gparser.add_argument('--nu', type=float, default=0.1,
@@ -851,6 +944,36 @@ class Train(Common):
                             help='weight for SHAPE loss function (default=1) shape/shapeなしの交互学習における重み RNA間の重み')
         gparser.add_argument('--shape-margin', type=float, default=0.0,
                             help='margin for SHAPE Rank Loss (default=0)')
+        gparser.add_argument('--shape-rank-tau', type=float, default=0.2,
+                            help='temperature for SHAPE Rank Loss (default=0.2)')
+        gparser.add_argument('--shape-rank-delta', type=float, default=0.0,
+                            help='ignore SHAPE order pairs separated by at most this value (default=0)')
+        gparser.add_argument('--shape-rank-targets', choices=('raw', 'clipped'), default='raw',
+                            help='use raw or [0.01,1] clipped reactivities for rank loss (default=raw)')
+        gparser.add_argument('--shape-imle-alignment', choices=('aligned',), default='aligned',
+                            help='map the 1-based L+1 pairedness gradient to L bases (default=aligned)')
+        gparser.add_argument('--shape-imle-normalization', choices=('none', 'rms', 'max'), default='none',
+                            help='normalize pairedness gradients before the second fold (default=none)')
+        gparser.add_argument('--shape-imle-estimator-scale', choices=('divide_nu', 'none'), default='divide_nu',
+                            help='divide count differences by nu for finite-difference estimation (default=divide_nu)')
+        gparser.add_argument('--shape-imle-difference', choices=('forward', 'central'), default='forward',
+                            help='one-sided or central finite difference using coupled perturbations (default=forward)')
+        gparser.add_argument('--shape-imle-samples', type=int, default=1,
+                            help='number of coupled perturb-and-MAP samples to average (default=1)')
+        gparser.add_argument('--shape-imle-adaptive-nu', action='store_true',
+                            help='adapt nu per sequence to a target paired-state flip fraction')
+        gparser.add_argument('--shape-imle-nu-min', type=float, default=1e-3,
+                            help='minimum nu for per-sequence adaptation (default=1e-3)')
+        gparser.add_argument('--shape-imle-nu-max', type=float, default=1e3,
+                            help='maximum nu for per-sequence adaptation (default=1e3)')
+        gparser.add_argument('--shape-imle-flip-low', type=float, default=0.01,
+                            help='minimum target paired-state flip fraction (default=0.01)')
+        gparser.add_argument('--shape-imle-flip-high', type=float, default=0.10,
+                            help='maximum target paired-state flip fraction (default=0.10)')
+        gparser.add_argument('--shape-imle-adaptive-factor', type=float, default=2.,
+                            help='multiplicative nu adjustment factor (default=2)')
+        gparser.add_argument('--shape-imle-adaptive-steps', type=int, default=4,
+                            help='maximum fold attempts for adaptive nu (default=4)')
 
         gparser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
         gparser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')

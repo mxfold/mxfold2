@@ -237,7 +237,21 @@ class Predict(Common):
                 p = p['model_state_dict']
             if 'n_averaged' in p:
                 model = AveragedModel(model)
-            model.load_state_dict(p)
+            missing, unexpected = model.load_state_dict(p, strict=False)
+            # Older bundled checkpoints predate the optional SHAPE regression
+            # heads. They are not needed for ordinary Folding prediction, but
+            # all other incompatibilities should still fail loudly.
+            optional_missing = [key for key in missing
+                                if args.task in ('Folding', 'Assisted_Folding')
+                                and '.shape_head_' in key]
+            required_missing = [key for key in missing if key not in optional_missing]
+            if required_missing or unexpected:
+                details = []
+                if required_missing:
+                    details.append(f'missing keys: {required_missing}')
+                if unexpected:
+                    details.append(f'unexpected keys: {list(unexpected)}')
+                raise RuntimeError('Incompatible model checkpoint (' + '; '.join(details) + ')')
         
             # --- shape model をロード ---
             if args.task == "Implicit_MLE":
