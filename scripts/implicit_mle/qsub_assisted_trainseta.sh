@@ -39,13 +39,20 @@ TRAIN_A_LIST=${TRAIN_A_LIST:-$DATA_ROOT/TrainSetA.lst}
 TEST_BPSEQ_LIST=${TEST_BPSEQ_LIST:-$DATA_ROOT/TestSetB.lst}
 RIBO_TEST_FASTA=${RIBO_TEST_FASTA:-$DATA_ROOT/Ribonanza/FASTA/CD80-redundant-u175nt.fasta}
 SHAPE_ROOT=${SHAPE_ROOT:-$DATA_ROOT/Ribonanza/SHAPE-rnet}
+EVAL_SHAPE_ROOT=${EVAL_SHAPE_ROOT:-$SHAPE_ROOT}
 
 MATCHED_PSEUDO_SAMPLES=${MATCHED_PSEUDO_SAMPLES:-512}
 REPLAY_SAMPLES=${REPLAY_SAMPLES:-128}
 ALL_PSEUDO_SAMPLES=${ALL_PSEUDO_SAMPLES:-64086}
 EPOCHS=${EPOCHS:-5}
 TASK_ID=${SGE_TASK_ID:-1}
+# A high-parallel wrapper can reuse the no-replay (case 4) recipe for several
+# pseudo-label sources and independent seeds while retaining the real array
+# task ID in the output directory.
+CASE_TASK_ID=${ASSISTED_CASE_OVERRIDE:-$TASK_ID}
 JOB_NUMBER=${JOB_ID:-manual-$(date +%Y%m%d-%H%M%S)}
+SEED=${SEED:-0}
+if [ "${SEED_BY_TASK:-0}" -eq 1 ]; then SEED=$((TASK_ID - 1)); fi
 
 if [ ! -r "$CONFIG" ] || [ ! -r "$CHECKPOINT" ]; then
   echo "TrainSetA config/checkpoint is not readable: $CONFIG / $CHECKPOINT" >&2
@@ -60,7 +67,7 @@ LABEL=assisted_eterna_512_replay128
 PSEUDO_LIMIT=$MATCHED_PSEUDO_SAMPLES
 TRAIN_A_LIMIT=$REPLAY_SAMPLES
 
-case "$TASK_ID" in
+case "$CASE_TASK_ID" in
   1)
     LABEL=assisted_eterna_512_replay128
     PSEUDO_LIMIT=$MATCHED_PSEUDO_SAMPLES
@@ -82,10 +89,16 @@ case "$TASK_ID" in
     TRAIN_A_LIMIT=0
     ;;
   *)
-    echo "Unsupported SGE_TASK_ID: $TASK_ID" >&2
+    echo "Unsupported assisted-folding condition task ID: $CASE_TASK_ID" >&2
     exit 2
     ;;
 esac
+
+if [ -n "${PSEUDO_LABEL_PREFIX:-}" ]; then
+  # Keep the source explicit in the result tree/metadata when this script is
+  # used for both RNAfold-only and SHAPE-assisted pseudo labels.
+  LABEL="${PSEUDO_LABEL_PREFIX}_${LABEL}"
+fi
 
 RUN_DIR=$RESULT_ROOT/$JOB_NUMBER/$TASK_ID-$LABEL
 WORK_ROOT=${TMPDIR:-/tmp}/mxfold2-assisted-trainseta-${JOB_NUMBER}-${TASK_ID}
@@ -99,6 +112,7 @@ git -C "$PROJECT_ROOT" status --short > "$RUN_DIR/git_status.txt"
 git -C "$PROJECT_ROOT" diff > "$RUN_DIR/uncommitted.patch"
 printf '%s\n' \
   "label=$LABEL" "config=$CONFIG" "checkpoint=$CHECKPOINT" \
+  "task_id=$TASK_ID" "case_task_id=$CASE_TASK_ID" "seed=$SEED" \
   "pseudo_root=$PSEUDO_ROOT" "pseudo_limit=$PSEUDO_LIMIT" \
   "train_a_limit=$TRAIN_A_LIMIT" "optimizer=AdamW" "lr=0.0001" \
   "l2_weight=0.0001" "loss_func=fy" "perturb=0.1" \
@@ -167,11 +181,14 @@ if [ "$RIBO_TEST_SAMPLES" -ne 1842 ]; then
 fi
 
 cd "$PROJECT_ROOT"
+if [ "${DRY_RUN:-0}" -eq 1 ]; then
+  exit 0
+fi
 
 TRAIN_COMMAND=(
   "$PYTHON_BIN" -m mxfold2 train
   "@$CONFIG"
-  --gpu 0 --threads 4 --epochs "$EPOCHS" --seed 0 --disable-progress-bar
+  --gpu 0 --threads 4 --epochs "$EPOCHS" --seed "$SEED" --disable-progress-bar
   --log-dir "$TRAIN_DIR" --save-config "$WORK_ROOT/model.conf" --param "$WORK_ROOT/model.pth"
   --init-param "$CHECKPOINT"
   --optimizer AdamW --lr 0.0001 --l2-weight 0.0001
@@ -187,7 +204,13 @@ printf '\n' >> "$RUN_DIR/train_command.txt"
 "${TRAIN_COMMAND[@]}"
 PREDICT_CONFIG="$WORK_ROOT/model.conf"
 
-for epoch in 1 5; do
+# Evaluate epoch 1 and the final epoch, without requiring a nonexistent
+# epoch-5 checkpoint during a one-epoch timing/pilot run.
+EVAL_EPOCHS=(1)
+if [ "$EPOCHS" -ne 1 ]; then
+  EVAL_EPOCHS+=("$EPOCHS")
+fi
+for epoch in "${EVAL_EPOCHS[@]}"; do
   PARAMETER_FILE="$TRAIN_DIR/epoch-$epoch"
   TEST_DIR=$WORK_ROOT/eval/TestSetB/epoch-$epoch
   RANK_DIR=$WORK_ROOT/eval/CD80-rank/epoch-$epoch
@@ -204,7 +227,7 @@ for epoch in 1 5; do
     --gpu 0 --threads 4 "@$PREDICT_CONFIG" --param "$PARAMETER_FILE" \
     --bpseq "$RANK_DIR/output" --task Folding "$RIBO_TEST_FASTA"
   "$PYTHON_BIN" "$PROJECT_ROOT/mxfold2/Rank_Corr_batch.py" \
-    "$RANK_DIR/output" "$SHAPE_ROOT" "$RANK_DIR/result_rank.csv" \
+    "$RANK_DIR/output" "$EVAL_SHAPE_ROOT" "$RANK_DIR/result_rank.csv" \
     "$RANK_DIR/summary_rank.txt" --jobs 4
 
   # Persist each evaluation as soon as it finishes.  This makes epoch 1

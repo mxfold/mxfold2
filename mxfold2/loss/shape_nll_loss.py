@@ -22,7 +22,8 @@ class ShapeNLLLoss(nn.Module):
             pseudo_fy_weight: float = 0.,
             weight_schedule: str = "none",
             weight_schedule_start: int = 1,
-            weight_schedule_end: Optional[int] = None) -> None:
+            weight_schedule_end: Optional[int] = None,
+            train_turner: bool = False) -> None:
         super(ShapeNLLLoss, self).__init__()
         self.model = model
         self.shape_model = shape_model
@@ -38,6 +39,7 @@ class ShapeNLLLoss(nn.Module):
         self.num_samples = num_samples
         self.adaptive = adaptive or AdaptiveStepConfig()
         self.pseudo_fy_weight = pseudo_fy_weight
+        self.train_turner = train_turner
         self.weight_schedule = weight_schedule
         self.weight_schedule_start = weight_schedule_start
         self.weight_schedule_end = weight_schedule_end
@@ -110,6 +112,7 @@ class ShapeNLLLoss(nn.Module):
             adaptive=self.adaptive,
             propagate_value_gradient=True,
             reference_model_weights=self._get_reference_model_weights(),
+            train_turner=self.train_turner,
         )
         loss = estimate.loss
         self.last_imle_stats = {

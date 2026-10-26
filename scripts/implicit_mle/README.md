@@ -1,5 +1,49 @@
 # rank loss / implicit MLE 診断
 
+## Turnerパラメータはデフォルトで固定
+
+MixモデルのIMLE-NLL（`shape_nll`）とIMLE-Rank（`shape_rank`）は、通常FY／
+SHAPE-fyと同じく、Turnerを構造探索に使い、NN側だけに学習勾配を流す。
+`--freeze turner`の追加指定は不要。熱力学正則化やpseudo-FYを加えた場合も、
+それらのMixスコアからの勾配は従来どおりNN側へ流れる。
+NLLの化学プロービング分布モデルは引き続き学習できる。
+
+従来のTurner更新を含む条件を再現する場合だけ、`--shape-imle-train-turner`を指定する。
+Python APIでは`ShapeNLLLoss`／`ShapeRankLoss`の`train_turner=True`を指定する。
+明示的な`--freeze turner`は、このオプションを使った場合も有効。
+固定は読み込んだTurnerの値を維持し、既存チェックポイントの値を初期値へ戻さない。
+
+## 分布モデルを使わない Mann-Whitney AUROC loss
+
+`--shape-loss-func shape_rank --shape-rank-objective mann_whitney` で選択する。
+従来の `pairwise_logistic` は既定値のまま残している。
+paired 群の反応性が unpaired 群より低い確率を順位から計算し、有効な二群が
+ある binary 構造では損失が正確に `1 - AUROC` になる。同値には平均順位を使い、
+反応性の分布、絶対値の閾値、teacher/student 温度は使わない。
+
+全 paired / 全 unpaired は学習用に損失 0.5 と有限の順位方向勾配を与える。
+評価用の `mxfold2.loss.nonparametric_rank.paired_reactivity_auc` は、これらを
+AUROC 未定義（NaN）として返すので、評価時は未定義率も別に報告する。
+欠測・非有限値を除外し、2 点未満では学習損失・勾配を 0 にする。
+`mean_paired` にも対応し、少ない比較量では中立値に近づける。
+
+REPORT の logistic 設定を流用するときは次の引数を置き換える必要がある。
+無関係な logistic 設定を混ぜるとエラーにする。
+
+```text
+--shape-loss-func shape_rank --shape-rank-objective mann_whitney
+--shape-rank-targets raw --shape-rank-weighting uniform
+--shape-margin 0 --shape-rank-delta 0
+--shape-rank-teacher-temperature 0 --shape-rank-teacher-normalization none
+```
+
+IMLE の nu、摂動、サンプル数、central 差分は引き続き別途設定する。
+損失の 0.5 は重みを掛ける前の値で、`--shape-loss-weight 0.5` ならログには
+0.25 として現れる。旧 logistic の損失値と直接比較せず、同じ AUROC 評価と
+TrainSetB などの検証構造精度で比較する。AUROC は paired 数も対合相手も
+一意には決めないので、paired 率・未定義率も確認する。実データでの構造精度
+改善は、再訓練・評価が済むまで未検証。
+
 ## 既存ログから分かったこと
 
 `/gs/bs/tga-satolab-gtex/yamauchi/dev_Implicit_MLE/logs` を確認した。代表的な
@@ -240,7 +284,82 @@ Fを重視するなら `perturb0.2` である。最終採用前には両条件�
 `K=1`、adaptive無効のままである。ただしRMS/maxのfinite-difference係数は常に
 修正版になるため、qsub 8631816の旧RMS結果とは直接比較せず再実行する必要がある。
 
-単体テスト14件に加え、実モデル・実SHAPE（115 nt）のforward/backwardを確認した。
+## qsub 8652719 / 8652872: TrainSetA起点のIMLE-rank網羅的条件検討
+
+`TrainSetA.pth`を初期checkpointに固定し、SHAPE-rnet、RNAfold単体、SHAPE-assisted
+Viennaの3種類すべてに存在するIDからソート順で同じ512配列を抽出した。TestSetBは
+430構造、CD80の相関評価は同じ1,842配列をfoldし、SHAPEに対応する228配列の
+Spearman相関を計算した。rank学習にはTrainSetAのBPSEQを128件replayし、seed 0、
+AdamW、lr=`1e-4`、5 epochを固定した。共通IDリストのSHA256は
+`500475b535c7cfbddb4e49e8a4aa32217d655dec4ba8a1692e4d969dafcd1049`である。
+
+広い探索（tau、margin、rank delta、nu、正規化、差分方式、標本数、摂動幅、adaptive、
+replay、SHAPE重み、optimizer/lr、pseudo-FY補助）では、TestSetB Fの上位は次の通り
+だった（すべてepoch 5、rhoはpairedとのSpearman）。
+
+| 条件 | F | rho_paired |
+|---|---:|---:|
+| rank delta=`0.01` | 0.586355 | -0.470829 |
+| rank nu=`0.03` | 0.585634 | -0.450219 |
+| rank tau=`0.005` | 0.580490 | -0.478719 |
+| rank perturb=`0.2` | 0.578669 | -0.475187 |
+| rank normalization=`max` | 0.577757 | -0.463778 |
+| rank default (tau .2, delta 0) | 0.562971 | -0.482927 |
+
+最良付近を再探索した25条件では、delta=`0.002`がF=`0.587265`、rho=`-0.477167`で
+最良だった。さらにdeltaとnuの相互作用を追加確認したところ、
+`rank_delta=0.002, shape_nu=0.03`でF=`0.588292`、rho=`-0.459831`となった。
+これは同じID・同じreplayでのassisted pseudo label（F=`0.587794`, rho=`-0.457041`）を
+seed 0ではFで`0.000498`上回り、相関も僅かに改善した。seed 1/2を含む再現性も
+qsub `8653457`で完了し、平均ではassistedを下回った。
+
+追加のrank-only相互作用は以下の通りで、nu=.03＋delta=.002だけがassistedのseed 0値を
+超えた（epoch 5）。
+
+| 追加条件（delta=.002） | F | rho_paired |
+|---|---:|---:|
+| BPSEQ replay重み=.5 | 0.553139 | -0.475629 |
+| BPSEQ replay重み=2 | 0.574950 | -0.468593 |
+| replayなし | 0.566482 | -0.480012 |
+| SHAPE重み=2 | 0.543598 | -0.470032 |
+| tau=.005 | 0.577475 | -0.483019 |
+| **nu=.03** | **0.588292** | **-0.459831** |
+| K=2, nu=.1 | 0.566941 | -0.484259 |
+
+### seed再現性
+
+最良rank delta=`0.002`をseed 0,1,2で再実行すると、epoch 5のFは
+`0.587265, 0.539412, 0.573298`（平均`0.566658 ± 0.024608`）、rhoは
+`-0.477167, -0.471225, -0.482997`（平均`-0.477130 ± 0.005886`）だった。一方、
+同じseedでSHAPE-assisted Vienna pseudo labelを学習したFは
+`0.587794, 0.586455, 0.590113`（平均`0.588121 ± 0.001851`）、rhoは
+`-0.457041, -0.461131, -0.463806`（平均`-0.460659 ± 0.003407`）で、rank-onlyは
+seed間分散が大きく安定して上回るとは言えない。
+
+nuを`.03`へ下げたdelta=`.002`条件ではF=`0.588292, 0.573579, 0.561230`
+（平均`0.574367 ± 0.013548`）、rho=`-0.459831, -0.469684, -0.459236`
+（平均`-0.462917 ± 0.004792`）となった。seed 0のassisted超えは再現したが、seed 1/2
+では下回るため、採用時は単一seedのベスト値ではなく複数seed平均を基準にする。
+
+この条件でK=2標本平均を使うとF=`0.581848, 0.547845, 0.553554`
+（平均`0.561082 ± 0.014867`）、rho平均`-0.472585 ± 0.011753`となり、計算量を
+ほぼ倍にしても改善しなかった。gradient clip (norm=1)もF平均`0.545610`まで悪化した。
+従って、現時点のrank-only最有力はK=1・clipなしのnu=.03＋delta=.002である。
+
+rankはpaired/unpairedの順序しか直接制約しないため、pseudo labelのように塩基対の相手
+（edge）を直接与えられない。この制約下でも`nu=0.03, delta=0.002`はseed 0でassistedを
+超えたが、seedを変えた検証とepoch 1--5のearly stoppingを必須とする。次段階では
+rankペアの信頼度校正（deltaとtauの同時探索）、配列長・有効SHAPE数による損失の再重み付けを
+検討する。勾配クリッピングは今回のnorm=1試験で悪化したため採用しない。各ジョブの完全な
+評価は `qsub_logs/implicit_mle_rank_sweep/8652719/`,
+`qsub_logs/implicit_mle_rank_refine/8652872/`,
+`qsub_logs/implicit_mle_rank_seedrep/8652956/`,
+`qsub_logs/rank_interact_nu003_delta002/8653355/`、およびseed再現結果の
+`qsub_logs/rank_best_nu003_delta002_seedrep/8653457/`、
+`qsub_logs/rank_best_nu003_delta002_k2_seedrep/8653550/`、
+`qsub_logs/rank_best_nu003_delta002_clip1_seedrep/8653554/` に保存した。
+
+単体テスト24件に加え、実モデル・実SHAPE（115 nt）のforward/backwardを確認した。
 rankはcentral・`K=2`・adaptive、NLLはcentral・`K=2`・adaptive、CLSはcentral・
 `K=1`・adaptiveで、それぞれ1 epochをCPUで完走した。
 
@@ -520,3 +639,158 @@ assistedの512件のみ条件が現時点の最高Fで、5 epochでも性能が�
 わけではない。さらにTrainSetA全3166件を追加してもFは回復しなかった。過去の
 Assisted-EternaFold最高F=`0.59333`等はTrainSetA checkpointを起点にしていないため、
 この比較の結論には使わない。
+
+## IMLE-rankの網羅的な同一ID条件探索（qsub 8652719）
+
+assisted pseudo labelとの比較をデータ選択の差で歪めないよう、SHAPE-rnet、RNAfold単体、
+SHAPE-assisted Viennaの3種類すべてに存在するIDをソートし、先頭512件を全条件で共有した。
+各条件は同じ`Train_A_only/TrainSetA.pth`から開始し、TrainSetA replay 128件、seed 0、
+AdamW/lr `1e-4`、5 epoch、TestSetB 430構造/CD80対応228配列で評価した。共通IDリストの
+SHA-256は`500475b535c7cfbddb4e49e8a4aa32217d655dec4ba8a1692e4d969dafcd1049`である。
+投入スクリプトは`qsub_rank_sweep_common.sh`、全36条件のログは
+`qsub_logs/implicit_mle_rank_sweep/8652719/`に保存した。
+
+主なepoch 5結果（Fは高いほど良く、`rho_paired`は負方向ほど良い）は以下の通り。
+
+| rank条件 | F | MCC | rho_paired |
+|---|---:|---:|---:|
+| 一様、RMS+central、tau=.2、delta=.01 | **0.586355** | **0.590932** | -0.470829 |
+| 一様、RMS+central、nu=.03、delta=.002 | **0.588292** | **0.592311** | -0.459831 |
+| 一様、RMS+central、nu=.03 | 0.585634 | 0.589502 | -0.450219 |
+| 一様、tau=.005 | 0.580490 | 0.584456 | -0.478719 |
+| 一様、摂動=.2 | 0.578669 | 0.582262 | -0.475187 |
+| 一様、gradient max正規化 | 0.577757 | 0.581459 | -0.463778 |
+| 一様、tau=.2（従来設定） | 0.562971 | 0.568512 | -0.482927 |
+| gap重み付け | 0.561693 | 0.565232 | -0.483178 |
+| adaptive nu (K=2) | 0.553083 | 0.557510 | -0.465457 |
+| rank + pseudo-FY（weight=.1） | 0.570942 | 0.575908 | -0.475879 |
+
+同じ512 ID＋replay128でのSHAPE-assisted pseudo labelはF=`0.582663 → 0.587794`、
+MCC=`0.586793 → 0.591647`である。delta閾値の導入で従来rankから大きく改善し、
+nuとの相互作用（nu=.03, delta=.002）ではseed 0のF=`0.588292`まで到達した。ただし
+seed間の再現性を確認するまでは、assistedを安定して上回ったとは判定しない。
+
+### 実装した改善
+
+`ShapeRankLoss`に`--shape-rank-weighting {uniform,gap,log_gap}`を追加した。`gap`系は
+SHAPE差の大きい（信頼度の高い）ペアを重くし、平均重みを1に正規化する。ただし今回の
+36条件では一様重みを上回らなかった。`rank_delta`（曖昧な小差ペアを除外）は有効で、
+delta=`.01`が最良だった。大きすぎるnu、adaptive、pseudo-FY補助、Kの増加、lr変更は
+Fを悪化させた。これはrank labelが塩基のpaired/unpaired順序のみを与え、assisted labelが
+塩基対の相手まで与えるという情報量の差も示唆する。
+
+## 追加したrank-only改善（soft teacher / mean pairedness）
+
+hardなSHAPE順序をそのまま正解とする代わりに、SHAPE差 `d` から
+`sigmoid(d / teacher_temperature)` を教師確率として作るsoft rank teacherを実装した。
+`--shape-rank-teacher-temperature 0` は従来のhard rankと完全に同じで、正値にすると
+差が小さい測定値ペアほど0.5に近い曖昧な教師になる。温度の単位はraw SHAPE
+reactivityと同じであり、測定誤差がデータに含まれない現状での不確実性尺度として使う。
+
+また、従来のK標本平均は各MAP構造で別々にrank lossを微分してから勾配を平均していたが、
+`--shape-rank-sample-aggregation mean_paired` では、K個のperturbed MAP構造から各塩基の
+pairedness平均を作り、その連続値にrank lossを一度だけ適用する。各標本に対するcoupled
+reference foldとcount差分は維持される。例えばK=4で両方を有効化する指定は次の通り。
+
+```console
+--shape-imle-samples 4 \
+--shape-rank-sample-aggregation mean_paired \
+--shape-rank-teacher-temperature 0.05
+```
+
+どちらもrank loss単体の変更で、RNAfold/assisted構造やpseudo-FYは教師に使わない。
+TSUBAMEスクリプトでは環境変数`RANK_TEACHER_TEMPERATURE`と
+`RANK_SAMPLE_AGGREGATION`で指定し、`condition.txt`にも記録する。
+
+## replayなし大規模比較（qsub 8657131）
+
+実装後の条件変更を反映するため、`qsub_rank_noreplay_large.sh`を追加した。
+99タスクをすべて同じ`Train_A_only/TrainSetA.pth`から開始し、TrainSetAのBPSEQは
+入力しない。SHAPE/rank条件では、RNAfold単体とassisted foldingの両方に存在するIDと
+SHAPE-rnetの共通集合をソートし、先頭512件を使う。pseudo-label条件も同じID列を使う。
+
+配列の内訳は、TrainSetA checkpointのbaseline 1、RNAfold pseudo 1、assisted pseudo 1、
+過去のIMLE-NLL 12、修正版hard rank 30、新しいsoft teacher/mean-paired rank 54である。
+rank条件ではpseudo-FYを常に0に固定し、soft teacher温度、rank delta、rank温度、nu、
+正規化、差分方式、K、aggregation、重み付け、margin、clipping、adaptive、摂動幅を
+組み合わせた。各学習条件は5 epoch、epoch 1/5をTestSetB FとCD80 SHAPE相関で評価する。
+結果は`qsub_logs/implicit_mle_rank_noreplay_large/<JOB_ID>/`に保存し、完了後は
+`summarize_noreplay_large.py`で条件ファイルと指標を結合する。
+
+## 改善案1/2のreplay-free網羅探索（qsub 8657891）
+
+改善案1（独立配列の勾配蓄積）と改善案2（配列内SHAPE教師のrobust/percentile正規化＋soft
+teacher）を、mean-paired（改善案3）なしで比較した。全96条件は同じ512配列、
+`Train_A_only/TrainSetA.pth`起点、seed 0、AdamW/lr=`1e-4`、5 epoch、`BPSEQ=0`、
+`replay=0`、`sample_aggregation=independent`である。結果は
+`qsub_logs/implicit_mle_rank_noreplay_improvements/8657891/results_summary.csv`に保存した。
+
+epoch 5の最良値（TestSetB Fは高いほど良く、CD80 `rho_paired`は負方向ほど良い）は次の通り。
+
+| 条件 | F | rho_paired |
+|---|---:|---:|
+| raw rank、G=1、SHAPE weight=.5 | 0.587112 | -0.449946 |
+| robust soft、K=2、G=1、temperature=.1 | **0.590915** | -0.450950 |
+| robust soft、nu=.1、G=1 | 0.577210 | -0.473741 |
+| percentile soft、nu=.1、G=1 | 0.575534 | **-0.476080** |
+
+比較対象はTrainSetA baseline=`0.561323/-0.414157`、Vienna-assisted pseudo=`0.585867/-0.459262`、
+Eterna-assisted pseudo=`0.592256/-0.474014`である。したがってrobust＋K=2はFでViennaを
+上回ったがEternaにはわずかに届かず、percentile＋nu=.1は相関でEternaを上回る一方Fが低い。
+単一seedのため、これらを安定した優越とは判定しない。
+
+G>1では同じ5 epochだとoptimizer更新回数が減るため、改善案1を公平に切り分ける追加実験
+（qsub 8658218）も行った。G=1/4/8をそれぞれ5/20/40 epoch（更新回数を概ね一致）にし、
+raw、robust soft、percentile soft、robust K=2を比較した。G=1からFは改善せず、rhoは一部で
+改善したため、現設定では勾配蓄積を採用しない。追加結果は
+`qsub_logs/implicit_mle_rank_noreplay_improvements_update_matched/8658218/results_summary.csv`に保存した。
+
+## 再利用用CLIメモ（replayなし・TrainSetA起点）
+
+後続スレッドで条件を再現するための設定。両方とも同じ512配列（SHAPE-rnet、RNAfold、
+assisted foldingの共通集合）を使い、`TrainSetA.pth`から5 epoch学習する。`$SHAPE_LIST`
+はSHAPE `.shape.tsv` のパス一覧、`$EMPTY_BPSEQ_LIST`は空ファイルに置き換える。
+
+### IMLE-rank: percentile soft, T=.015, nu=.03, delta=.002
+
+```console
+python -m mxfold2 train @/gs/bs/tga-satolab-gtex/yamauchi/Train_A_only/TrainSetA.conf \
+  --gpu 0 --threads 4 --epochs 5 --seed 0 --disable-progress-bar \
+  --grad-accum-steps 1 \
+  --init-param /gs/bs/tga-satolab-gtex/yamauchi/Train_A_only/TrainSetA.pth \
+  --optimizer AdamW --lr 0.0001 --l2-weight 0.0001 --clip-grad-norm 0 \
+  --score-loss-weight 0 --bpseq-loss-weight 0 --shape-loss-weight 0.5 \
+  --shape-loss-func shape_rank --shape-perturb 0.1 --shape-nu 0.03 \
+  --shape-model Wu --shape-margin 0 --shape-rank-tau 0.2 \
+  --shape-rank-weighting uniform --shape-rank-delta 0.002 \
+  --shape-rank-targets raw --shape-rank-teacher-temperature 0.015 \
+  --shape-rank-teacher-normalization percentile \
+  --shape-rank-sample-aggregation independent \
+  --shape-pseudo-fy-weight 0 --shape-imle-alignment aligned \
+  --shape-imle-normalization rms --shape-imle-estimator-scale divide_nu \
+  --shape-imle-difference central --shape-imle-samples 1 \
+  --weight-schedule none --weight-schedule-start 1 \
+  --loss-func fy --task Implicit_MLE --shape "$SHAPE_LIST" "$EMPTY_BPSEQ_LIST"
+```
+
+`seed`、`--log-dir`、`--save-config`、`--param`は実行ごとに変更する。TrainSetAのBPSEQは
+入力せず、`--bpseq-loss-weight 0`と`--shape-pseudo-fy-weight 0`でrank loss単体にする。
+
+### shape-FY: perturb=.4
+
+```console
+python -m mxfold2 train @/gs/bs/tga-satolab-gtex/yamauchi/Train_A_only/TrainSetA.conf \
+  --gpu 0 --threads 4 --epochs 5 --seed 0 --disable-progress-bar \
+  --grad-accum-steps 1 \
+  --init-param /gs/bs/tga-satolab-gtex/yamauchi/Train_A_only/TrainSetA.pth \
+  --optimizer AdamW --lr 0.0001 --l2-weight 0.0001 \
+  --score-loss-weight 0 --bpseq-loss-weight 0 --second-loss-weight 0 \
+  --shape-loss-weight 0.5 --shape-loss-func shape_fy \
+  --shape-perturb 0.4 --shape-slope 2.6 --shape-intercept -0.8 \
+  --weight-schedule none --weight-schedule-start 1 \
+  --loss-func fy --task Implicit_MLE --shape "$SHAPE_LIST" "$EMPTY_BPSEQ_LIST"
+```
+
+このshape-FY条件の追加設定は、`shape_slope=2.6`、`shape_intercept=-0.8`、
+`shape_loss_weight=0.5`、`score_loss_weight=0`、`l2_weight=0.0001`、
+`grad_accum_steps=1`。実測条件は`TrainSetA.pth`起点・replayなしである。

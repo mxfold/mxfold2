@@ -11,6 +11,7 @@ Alignment = Literal["aligned"]
 Normalization = Literal["none", "rms", "max"]
 EstimatorScale = Literal["divide_nu", "none"]
 DifferenceMode = Literal["forward", "central"]
+SampleAggregation = Literal["independent", "mean_paired"]
 
 
 @dataclass(frozen=True)
@@ -205,15 +206,23 @@ def estimate_implicit_mle(
     estimator_scale: EstimatorScale,
     difference_mode: DifferenceMode = "forward",
     num_samples: int = 1,
+    sample_aggregation: SampleAggregation = "independent",
     adaptive: AdaptiveStepConfig | None = None,
     propagate_value_gradient: bool = False,
     reference_model_weights: dict[str, float] | None = None,
+    train_turner: bool = False,
 ) -> ImplicitMLEResult:
-    """Estimate an I-MLE gradient using coupled perturb-and-MAP folds."""
+    """Estimate an I-MLE gradient using coupled perturb-and-MAP folds.
+
+    Mixed-model Turner scores remain part of MAP inference, but are excluded
+    from the artificial gradient by default, matching FY/SHAPE-fy training.
+    """
     if num_samples < 1:
         raise ValueError("num_samples must be at least 1")
     if difference_mode not in ("forward", "central"):
         raise ValueError(f"unknown difference mode: {difference_mode}")
+    if sample_aggregation not in ("independent", "mean_paired"):
+        raise ValueError(f"unknown sample aggregation: {sample_aggregation}")
     adaptive = adaptive or AdaptiveStepConfig()
     adaptive.validate()
     if adaptive.enabled and len(sequences) != 1:
@@ -227,31 +236,105 @@ def estimate_implicit_mle(
     first_prediction_structures: list[str] = []
     first_target_structures: list[str] = []
 
-    for sample_index in range(num_samples):
-        pred_score, pred_structures, pred_pairs, parameters, _ = model(
-            sequences,
-            return_param=True,
-            return_count=True,
-            perturb=perturb,
-        )
-        pred_parameters, pred_counts = collect_parameters_and_counts(parameters)
-        paired = [
-            torch.tensor(
-                [1.0 if partner > 0 else 0.0 for partner in pairs],
-                dtype=torch.float32,
-                device=pred_score.device,
-                requires_grad=True,
+    # In mean-paired mode, estimate the expected pairedness under the
+    # perturb-and-MAP samples first and differentiate the rank objective only
+    # once at that smoother point.  Each sampled MAP solution still gets its
+    # own coupled reference fold, so the resulting count differences remain a
+    # Monte Carlo average over structured predictions.
+    prediction_samples = []
+    shared_values: torch.Tensor | None = None
+    shared_gradients: tuple[torch.Tensor, ...] | None = None
+    if sample_aggregation == "mean_paired":
+        sampled_paired: list[list[torch.Tensor]] = []
+        for _ in range(num_samples):
+            pred_score, pred_structures, pred_pairs, parameters, _ = model(
+                sequences,
+                return_param=True,
+                return_count=True,
+                perturb=perturb,
             )
-            for pairs in pred_pairs
+            pred_parameters, pred_counts = collect_parameters_and_counts(
+                parameters, include_turner=train_turner
+            )
+            paired = [
+                torch.tensor(
+                    [1.0 if partner > 0 else 0.0 for partner in pairs],
+                    dtype=torch.float32,
+                    device=pred_score.device,
+                )
+                for pairs in pred_pairs
+            ]
+            sampled_paired.append(paired)
+            prediction_samples.append(
+                (
+                    pred_score,
+                    pred_structures,
+                    pred_pairs,
+                    parameters,
+                    pred_parameters,
+                    pred_counts,
+                )
+            )
+
+        mean_paired = [
+            torch.stack([sample[index] for sample in sampled_paired]).mean(dim=0)
+            .detach()
+            .requires_grad_(True)
+            for index in range(len(sequences))
         ]
-        values = objective(paired)
+        shared_values = objective(mean_paired)
         gradients = torch.autograd.grad(
-            values.sum(),
-            paired,
+            shared_values.sum(),
+            mean_paired,
             retain_graph=propagate_value_gradient,
             create_graph=False,
         )
-        gradients = tuple(gradient.detach().clone() for gradient in gradients)
+        shared_gradients = tuple(
+            gradient.detach().clone() for gradient in gradients
+        )
+
+    for sample_index in range(num_samples):
+        if sample_aggregation == "mean_paired":
+            (
+                pred_score,
+                pred_structures,
+                pred_pairs,
+                parameters,
+                pred_parameters,
+                pred_counts,
+            ) = prediction_samples[sample_index]
+            assert shared_values is not None and shared_gradients is not None
+            values = shared_values
+            gradients = shared_gradients
+        else:
+            pred_score, pred_structures, pred_pairs, parameters, _ = model(
+                sequences,
+                return_param=True,
+                return_count=True,
+                perturb=perturb,
+            )
+            pred_parameters, pred_counts = collect_parameters_and_counts(
+                parameters, include_turner=train_turner
+            )
+            paired = [
+                torch.tensor(
+                    [1.0 if partner > 0 else 0.0 for partner in pairs],
+                    dtype=torch.float32,
+                    device=pred_score.device,
+                    requires_grad=True,
+                )
+                for pairs in pred_pairs
+            ]
+            values = objective(paired)
+            gradients = torch.autograd.grad(
+                values.sum(),
+                paired,
+                retain_graph=propagate_value_gradient,
+                create_graph=False,
+            )
+            gradients = tuple(
+                gradient.detach().clone() for gradient in gradients
+            )
 
         candidate_nu = float(nu)
         best = None
@@ -280,7 +363,9 @@ def estimate_implicit_mle(
                     [-0.5 * energy for energy in pseudoenergy],
                     reference_model_weights,
                 )
-                _, positive_counts = collect_parameters_and_counts(parameters)
+                _, positive_counts = collect_parameters_and_counts(
+                    parameters, include_turner=train_turner
+                )
                 target_score, target_structures, negative_pairs, parameters, _ = _reference_fold(
                     model,
                     sequences,
@@ -288,7 +373,9 @@ def estimate_implicit_mle(
                     [0.5 * energy for energy in pseudoenergy],
                     reference_model_weights,
                 )
-                _, negative_counts = collect_parameters_and_counts(parameters)
+                _, negative_counts = collect_parameters_and_counts(
+                    parameters, include_turner=train_turner
+                )
                 fractions = paired_flip_fraction(
                     positive_pairs, negative_pairs, [len(s) for s in sequences]
                 )
@@ -304,7 +391,9 @@ def estimate_implicit_mle(
                     pseudoenergy,
                     reference_model_weights,
                 )
-                _, negative_counts = collect_parameters_and_counts(parameters)
+                _, negative_counts = collect_parameters_and_counts(
+                    parameters, include_turner=train_turner
+                )
                 fractions = paired_flip_fraction(
                     pred_pairs, negative_pairs, [len(s) for s in sequences]
                 )
@@ -369,9 +458,10 @@ def estimate_implicit_mle(
             first_target_structures = target_structures
 
     logging.debug(
-        "I-MLE mode=%s samples=%d nu=%s paired_flip_fraction=%s",
+        "I-MLE mode=%s samples=%d aggregation=%s nu=%s paired_flip_fraction=%s",
         difference_mode,
         num_samples,
+        sample_aggregation,
         selected_nus,
         flip_fractions,
     )
@@ -430,10 +520,21 @@ def _reference_fold(
 
 def collect_parameters_and_counts(
     parameters: list[dict[str, Any]],
+    *,
+    include_turner: bool = False,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    """Collect matching score/count tensors for the trainable score component.
+
+    Exclude both scores and counts under the mixed model's ``turner`` branch
+    unless explicitly requested. Leave that branch in ``parameters`` so its
+    energies still participate in prediction and reference structure search.
+    Flat positional models retain their existing gradient behavior.
+    """
     score_parameters: list[torch.Tensor] = []
     counts: list[torch.Tensor] = []
     for key in sorted(parameters[0]):
+        if key == "turner" and not include_turner:
+            continue
         value = parameters[0][key]
         if key.startswith("score_"):
             score_parameters.append(torch.vstack([item[key] for item in parameters]))

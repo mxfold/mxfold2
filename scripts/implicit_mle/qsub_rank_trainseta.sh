@@ -168,7 +168,13 @@ printf '\n' >> "$RUN_DIR/train_command.txt"
 cd "$PROJECT_ROOT"
 "${TRAIN_COMMAND[@]}"
 
-for epoch in 1 "$EPOCHS"; do
+# Evaluate epoch 1 and the final epoch, without running epoch 1 twice for a
+# one-epoch timing/pilot run.
+EVAL_EPOCHS=(1)
+if [ "$EPOCHS" -ne 1 ]; then
+  EVAL_EPOCHS+=("$EPOCHS")
+fi
+for epoch in "${EVAL_EPOCHS[@]}"; do
   PARAMETER_FILE=$TRAIN_DIR/epoch-$epoch
   TEST_DIR=$WORK_ROOT/eval/TestSetB/epoch-$epoch
   RANK_DIR=$WORK_ROOT/eval/CD80-rank/epoch-$epoch
@@ -187,7 +193,7 @@ mkdir -p "$RUN_DIR/eval" "$RUN_DIR/train"
 cp "$WORK_ROOT/model.conf" "$RUN_DIR/model.conf"
 cp "$TRAIN_DIR/loss.log" "$RUN_DIR/train/loss.log"
 [ -f "$TRAIN_DIR/imle_stats.csv" ] && cp "$TRAIN_DIR/imle_stats.csv" "$RUN_DIR/train/imle_stats.csv"
-for epoch in 1 "$EPOCHS"; do
+for epoch in "${EVAL_EPOCHS[@]}"; do
   mkdir -p "$RUN_DIR/eval/TestSetB/epoch-$epoch" "$RUN_DIR/eval/CD80-rank/epoch-$epoch"
   cp "$WORK_ROOT/eval/TestSetB/epoch-$epoch/result.csv" "$RUN_DIR/eval/TestSetB/epoch-$epoch/result.csv"
   cp "$WORK_ROOT/eval/TestSetB/epoch-$epoch/summary.txt" "$RUN_DIR/eval/TestSetB/epoch-$epoch/summary.txt"

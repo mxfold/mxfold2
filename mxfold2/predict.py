@@ -39,6 +39,12 @@ class Predict(Common):
                 use_amp: bool = False) -> None:
 
         res_fn = open(result, 'w') if result is not None else None
+        if res_fn is not None:
+            # Keep the CSV contract consumed by utils/avg-res.py and the
+            # historical qsub reports.  Upstream's writer emitted data rows
+            # without a header, which made pandas interpret the first
+            # sequence as column names and silently drop it from aggregates.
+            res_fn.write('name,length,elapsed_time,score,TP,TN,FP,FN,SEN,PPV,F,MCC\n')
         shape_list = [None] * len(data_loader) if shape_list is None else shape_list
         while len(shape_list) < len(data_loader):
             shape_list.append(None)

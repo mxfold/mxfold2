@@ -16,6 +16,7 @@ RESULT_ROOT=${RESULT_ROOT:-$PROJECT_ROOT/qsub_logs/implicit_mle_nll_ablation}
 PYTHON_BIN=${PYTHON_BIN:-$PROJECT_ROOT/.venv/bin/python}
 SHAPE_ID_LIST=${SHAPE_ID_LIST:-$DATA_ROOT/Ribonanza/LST/CD-80.lst}
 SHAPE_ROOT=${SHAPE_ROOT:-$DATA_ROOT/Ribonanza/SHAPE-rnet}
+EVAL_SHAPE_ROOT=${EVAL_SHAPE_ROOT:-$SHAPE_ROOT}
 RIBO_TEST_FASTA=${RIBO_TEST_FASTA:-$DATA_ROOT/Ribonanza/FASTA/CD80-redundant-u175nt.fasta}
 BPSEQ_TRAIN_LIST=${BPSEQ_TRAIN_LIST:-$DATA_ROOT/TrainSetA.lst}
 TEST_BPSEQ_LIST=${TEST_BPSEQ_LIST:-$DATA_ROOT/TestSetB.lst}
@@ -24,6 +25,10 @@ CHECKPOINT=${CHECKPOINT:-$PROJECT_ROOT/mxfold2/models/TrainSetAB.pth}
 TRAIN_SAMPLES=${TRAIN_SAMPLES:-512}
 EPOCHS=${EPOCHS:-5}
 TASK_ID=${SGE_TASK_ID:-1}
+# A wrapper can expand the 17-condition ablation over independent seeds while
+# preserving the real array task ID in the output path.
+CASE_TASK_ID=${NLL_TASK_ID_OVERRIDE:-$TASK_ID}
+SEED=${NLL_SEED_OVERRIDE:-${SEED:-0}}
 JOB_NUMBER=${JOB_ID:-manual-$(date +%Y%m%d-%H%M%S)}
 
 # All tasks use NLL (Wu objective), aligned targets and the corrected divide_nu
@@ -39,7 +44,7 @@ NU=100
 ADAPTIVE=0
 LR=0.0001
 
-case "$TASK_ID" in
+case "$CASE_TASK_ID" in
   1)
     LABEL=nll_none_forward_k1_nu100
     ;;
@@ -170,8 +175,125 @@ case "$TASK_ID" in
     NU=0.1
     REPLAY_SAMPLES=128
     ;;
+  # Expanded no-replay grid used for the epoch-100 measured-SHAPE rerun.
+  # These conditions probe the remaining NLL estimator factors without
+  # introducing pseudo-label or replay supervision.
+  18)
+    LABEL=nll_rms_forward_k1_nu01_p005
+    NORMALIZATION=rms
+    DIFFERENCE=forward
+    PERTURB=0.05
+    NU=0.1
+    ;;
+  19)
+    LABEL=nll_rms_forward_k1_nu01_p02
+    NORMALIZATION=rms
+    DIFFERENCE=forward
+    PERTURB=0.2
+    NU=0.1
+    ;;
+  20)
+    LABEL=nll_rms_central_k1_nu003
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    PERTURB=0.1
+    NU=0.03
+    ;;
+  21)
+    LABEL=nll_rms_central_k1_nu005
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    PERTURB=0.1
+    NU=0.05
+    ;;
+  22)
+    LABEL=nll_rms_central_k1_nu03
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    PERTURB=0.1
+    NU=0.3
+    ;;
+  23)
+    LABEL=nll_rms_central_k1_nu1
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    PERTURB=0.1
+    NU=1.0
+    ;;
+  24)
+    LABEL=nll_rms_central_k2_nu003
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    SAMPLES=2
+    PERTURB=0.1
+    NU=0.03
+    ;;
+  25)
+    LABEL=nll_rms_central_k2_nu03
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    SAMPLES=2
+    PERTURB=0.1
+    NU=0.3
+    ;;
+  26)
+    LABEL=nll_max_central_k1_nu01
+    NORMALIZATION=max
+    DIFFERENCE=central
+    PERTURB=0.1
+    NU=0.1
+    ;;
+  27)
+    LABEL=nll_none_central_k1_nu01
+    NORMALIZATION=none
+    DIFFERENCE=central
+    PERTURB=0.1
+    NU=0.1
+    ;;
+  28)
+    LABEL=nll_rms_forward_k4_nu01
+    NORMALIZATION=rms
+    DIFFERENCE=forward
+    SAMPLES=4
+    PERTURB=0.1
+    NU=0.1
+    ;;
+  29)
+    LABEL=nll_rms_central_k4_nu01
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    SAMPLES=4
+    PERTURB=0.1
+    NU=0.1
+    ;;
+  30)
+    LABEL=nll_rms_central_k1_nu01_estimator_none
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    ESTIMATOR_SCALE=none
+    PERTURB=0.1
+    NU=0.1
+    ;;
+  31)
+    LABEL=nll_rms_central_k2_adaptive_p005_noreplay
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    SAMPLES=2
+    PERTURB=0.05
+    NU=0.1
+    ADAPTIVE=1
+    ;;
+  32)
+    LABEL=nll_rms_central_k2_adaptive_p02_noreplay
+    NORMALIZATION=rms
+    DIFFERENCE=central
+    SAMPLES=2
+    PERTURB=0.2
+    NU=0.1
+    ADAPTIVE=1
+    ;;
   *)
-    echo "Unsupported SGE_TASK_ID: $TASK_ID" >&2
+    echo "Unsupported NLL condition task ID: $CASE_TASK_ID" >&2
     exit 2
     ;;
 esac
@@ -247,7 +369,10 @@ fi
 
 printf '%s\n' \
   "label=$LABEL" "task_id=$TASK_ID" "shape_loss=shape_nll" \
+  "eval_shape_root=$EVAL_SHAPE_ROOT" \
+  "case_task_id=$CASE_TASK_ID" "seed=$SEED" \
   "normalization=$NORMALIZATION" "difference=$DIFFERENCE" \
+  "estimator_scale=$ESTIMATOR_SCALE" \
   "samples=$SAMPLES" "perturb=$PERTURB" "nu=$NU" \
   "adaptive=$ADAPTIVE" "replay_samples=$REPLAY_SAMPLES" "lr=$LR" \
   > "$RUN_DIR/condition.txt"
@@ -258,7 +383,7 @@ TRAIN_COMMAND=(
   --gpu 0
   --threads 4
   --epochs "$EPOCHS"
-  --seed 0
+  --seed "$SEED"
   --disable-progress-bar
   --log-dir "$TRAIN_DIR"
   --save-config "$WORK_ROOT/model.conf"
@@ -291,9 +416,18 @@ printf '%q ' "${TRAIN_COMMAND[@]}" > "$RUN_DIR/train_command.txt"
 printf '\n' >> "$RUN_DIR/train_command.txt"
 
 cd "$PROJECT_ROOT"
+if [ "${DRY_RUN:-0}" -eq 1 ]; then
+  exit 0
+fi
 "${TRAIN_COMMAND[@]}"
 
-for epoch in 1 "$EPOCHS"; do
+# Evaluate epoch 1 and the final epoch, without running epoch 1 twice for a
+# one-epoch timing/pilot run.
+EVAL_EPOCHS=(1)
+if [ "$EPOCHS" -ne 1 ]; then
+  EVAL_EPOCHS+=("$EPOCHS")
+fi
+for epoch in "${EVAL_EPOCHS[@]}"; do
   PARAMETER_FILE=$TRAIN_DIR/epoch-$epoch
   TEST_DIR=$WORK_ROOT/eval/TestSetB/epoch-$epoch
   RANK_DIR=$WORK_ROOT/eval/CD80-rank/epoch-$epoch
@@ -318,7 +452,7 @@ for epoch in 1 "$EPOCHS"; do
     --task Folding \
     "$RIBO_TEST_FASTA"
   "$PYTHON_BIN" "$PROJECT_ROOT/mxfold2/Rank_Corr_batch.py" \
-    "$RANK_DIR/output" "$SHAPE_ROOT" \
+    "$RANK_DIR/output" "$EVAL_SHAPE_ROOT" \
     "$RANK_DIR/result_rank.csv" "$RANK_DIR/summary_rank.txt" \
     --jobs 4
 done
@@ -330,7 +464,7 @@ cp "$WORK_ROOT/model.conf" "$RUN_DIR/model.conf"
 cp "$WORK_ROOT/model.pth" "$RUN_DIR/model.pth"
 cp "$TRAIN_DIR/loss.log" "$RUN_DIR/train/loss.log"
 cp "$TRAIN_DIR/imle_stats.csv" "$RUN_DIR/train/imle_stats.csv"
-for epoch in 1 "$EPOCHS"; do
+for epoch in "${EVAL_EPOCHS[@]}"; do
   SHARED_TEST_DIR=$RUN_DIR/eval/TestSetB/epoch-$epoch
   SHARED_RANK_DIR=$RUN_DIR/eval/CD80-rank/epoch-$epoch
   mkdir -p "$SHARED_TEST_DIR" "$SHARED_RANK_DIR"

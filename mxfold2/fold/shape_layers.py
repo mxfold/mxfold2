@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 import logging
@@ -37,9 +38,26 @@ class GeneralizedExtremeValue(torch.autograd.Function):
         self.sigma = sigma
     
     def log_prob(self, x: torch.tensor) -> torch.tensor:
-        x = self.xi / self.sigma * (x - self.mu)
-        v = 1 / self.sigma * (1+x) ** (-(1+1/self.xi)) * torch.exp(- (1 + x) ** (-1/self.xi))
-        return torch.log(v.clip(min=1e-5))
+        z = 1 + self.xi / self.sigma * (x - self.mu)
+        # Evaluate the clipped log density directly. Outside the GEV support,
+        # or close enough to its boundary that the density is below 1e-5, the
+        # native Wu implementation clips to that same density floor.
+        log_y = -self.xi.reciprocal() * torch.log(
+            z.clamp_min(torch.finfo(z.dtype).tiny)
+        )
+        safe_log_y = log_y.clamp(max=10.0)
+        log_density = (
+            -torch.log(self.sigma)
+            + (1 + self.xi) * safe_log_y
+            - torch.exp(safe_log_y)
+        )
+        floor = math.log(1e-5)
+        in_support = (z > 0) & (log_y <= 10.0)
+        return torch.where(
+            in_support,
+            log_density.clamp_min(floor),
+            torch.full_like(log_density, floor),
+        )
 
 
 class Wu(nn.Module):

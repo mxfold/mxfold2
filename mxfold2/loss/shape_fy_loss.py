@@ -77,27 +77,59 @@ class ShapeFenchelYoungLoss(nn.Module):
         ref: torch.Tensor
         ref_s: list[str]
         #ref_model = self.model.duplicate()
-        pseudoenergy = [ self.calc_pseudoenergy(r) for r in targets ]
+        if len(seq) != len(targets):
+            raise ValueError(
+                f"sequence/SHAPE batch size mismatch: {len(seq)} != {len(targets)}"
+            )
+
+        pseudoenergy = []
+        for s, target in zip(seq, targets):
+            # ShapeDataset stores a dummy value at index 0, while the folding
+            # backend expects one pseudoenergy value per nucleotide.
+            if target.numel() == len(s) + 1:
+                target = target[1:]
+            elif target.numel() != len(s):
+                raise ValueError(
+                    "SHAPE target length must equal the sequence length "
+                    f"(or include one leading dummy value): {target.numel()} "
+                    f"not in ({len(s)}, {len(s) + 1})"
+                )
+            pseudoenergy.append(self.calc_pseudoenergy(target))
 
         # Apply weight scheduling for ref prediction (only for Mixed models)
         scheduled_turner, scheduled_positional = self._get_scheduled_weights()
         if scheduled_turner is None:
-            ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
+            _, ref_s, ref_stru = self.model(
+                seq, param=param_without_perturb, pseudoenergy=pseudoenergy
+            )
 
         else:
             # Save original weights (only score weights, not count weights)
             orig_score_turner = self.model.score_weight_turner
             orig_score_positional = self.model.score_weight_positional
-            # Apply scheduled weights
-            self.model.score_weight_turner = scheduled_turner
-            self.model.score_weight_positional = scheduled_positional
-            logging.debug(f'Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}')
-            ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
+            try:
+                # Apply scheduled weights while selecting the SHAPE-guided
+                # reference structure.
+                self.model.score_weight_turner = scheduled_turner
+                self.model.score_weight_positional = scheduled_positional
+                logging.debug(
+                    "Shape ref weights: turner=%.4f, positional=%.4f",
+                    scheduled_turner,
+                    scheduled_positional,
+                )
+                _, ref_s, ref_stru = self.model(
+                    seq, param=param_without_perturb, pseudoenergy=pseudoenergy
+                )
+            finally:
+                self.model.score_weight_turner = orig_score_turner
+                self.model.score_weight_positional = orig_score_positional
 
-            # Restore original weights
-            self.model.score_weight_turner = orig_score_turner
-            self.model.score_weight_positional = orig_score_positional
-            ref, ref_s, ref_stru = self.model(seq, param=param_without_perturb, constraint=ref_stru)
+        # The pseudoenergy is used only to select the reference structure.
+        # Score that structure under the original objective so that the FY
+        # value and optional score regularizer compare like with like.
+        ref, ref_s, ref_stru = self.model(
+            seq, param=param_without_perturb, constraint=ref_stru
+        )
 
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
@@ -129,7 +161,11 @@ class ShapeFenchelYoungLoss(nn.Module):
         return loss
 
     def calc_pseudoenergy(self, r: torch.tensor) -> torch.Tensor:
-        not_na = r > -1
-        r[torch.logical_not(not_na)] = 0
-        r[not_na] = self.shape_slope * torch.log(r[not_na]+1) + self.shape_intercept
-        return r
+        pseudoenergy = r.clone()
+        not_na = pseudoenergy > -1
+        pseudoenergy[torch.logical_not(not_na)] = 0
+        pseudoenergy[not_na] = (
+            self.shape_slope * torch.log(pseudoenergy[not_na] + 1)
+            + self.shape_intercept
+        )
+        return pseudoenergy

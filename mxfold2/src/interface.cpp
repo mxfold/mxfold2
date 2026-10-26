@@ -2,6 +2,8 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <string>
+#include <cmath>
+#include <stdexcept>
 #ifdef USE_OPENMP
 #include <omp.h>
 #endif
@@ -18,6 +20,8 @@
 #include "compbpseq.h"
 
 namespace py = pybind11;
+// Process-local evaluation setting; legacy training/prediction defaults stay 1%.
+static float output_bpp_cutoff = 0.01f;
 
 template < class FoldClass >
 class FoldWrapper
@@ -149,6 +153,7 @@ public:
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
+        options.bpp_cutoff = output_bpp_cutoff;
         this->set_allowed_pairs(options, allowed_pairs);
         this->set_constraints(options, constraint);
         this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
@@ -280,6 +285,7 @@ public:
         options.min_hairpin_loop_length(min_hairpin)
             .max_internal_loop_length(max_internal)
             .max_helix_length(max_helix);
+        options.bpp_cutoff = output_bpp_cutoff;
         this->set_allowed_pairs(options, allowed_pairs);
         this->set_constraints(options, constraint);
         this->set_margin_terms(options, reference, pos_paired, neg_paired, pos_unpaired, neg_unpaired);
@@ -349,6 +355,11 @@ PYBIND11_MODULE(interface, m)
     m.doc() = "module for RNA secondary predicton with DNN";
 
     m.def("set_num_threads", &set_num_threads, "set number of threads for OpenMP");
+    m.def("set_bpp_cutoff", [](float value) {
+        if (!std::isfinite(value) || value < 0 || value > 1)
+            throw std::invalid_argument("BPP cutoff must be in [0,1]");
+        output_bpp_cutoff = value;
+    }, "Set process-local probability export cutoff (legacy default: 0.01)");
 
     py::class_<ZukerWrapper<TurnerNearestNeighbor>>(m, "ZukerTurnerWrapper")
         .def(py::init<>())
