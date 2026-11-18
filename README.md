@@ -65,6 +65,12 @@ MXfold2 can train its parameters from BPSEQ-formatted RNA sequences. You can als
 
 You can specify a lot of model's hyper-parameters. See ``mxfold2 train --help``. In this example, the model's hyper-parameters and the trained parameters are saved in ``model.conf`` and ``model.pth``, respectively.
 
+## Experiment reproduction
+
+Study workflows, default model training, experiment scripts, and their regression
+tests are maintained in [mxfold2-data](https://github.com/mxfold/mxfold2-data).
+Access to that repository is required.
+
 ## Web server
 
 A web server is working at https://ws.sato-lab.org/mxfold2/.

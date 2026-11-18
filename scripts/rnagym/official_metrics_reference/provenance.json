@@ -1,9 +1,0 @@
-{
-  "repository": "https://github.com/MarksLab-DasLab/RNAGym",
-  "commit": "2828cf99316d75daaa8d832a2573cbb25bbd35fe",
-  "path": "2d/utils.py",
-  "sha256": "a8afae9229c088c159c1f39f312cc3c8337d882b413a2bd3fc5ba71766333cd4",
-  "license": "MIT",
-  "retrieved_date_jst": "2026-10-23",
-  "usage": "Numerical validation reference; production metrics use our streaming-compatible equivalent"
-}

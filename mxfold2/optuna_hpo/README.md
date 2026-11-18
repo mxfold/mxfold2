@@ -125,15 +125,6 @@ uv run python -m mxfold2.optuna_hpo.cli \
     --n-trials 100 --epochs 30 --gpu 0
 ```
 
-### 4. Run with script
-```bash
-# Customizable with environment variables
-N_TRIALS=200 EPOCHS=50 ./scripts/run_hpo.sh
-
-# Or submit to job scheduler
-qsub scripts/run_hpo.sh
-```
-
 ## Output Files
 
 ```
