@@ -37,7 +37,11 @@ if(OPENMP_FOUND)
     target_link_libraries(interface PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-install(TARGETS interface DESTINATION ${CMAKE_SOURCE_DIR}/..)
+if(SKBUILD)
+    install(TARGETS interface DESTINATION mxfold2)
+else()
+    install(TARGETS interface DESTINATION ${CMAKE_SOURCE_DIR}/..)
+endif()
 
 # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 # SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")

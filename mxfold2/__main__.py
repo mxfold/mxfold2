@@ -1,14 +1,12 @@
-from zmq.backend import has
-import os
 import sys
 from argparse import ArgumentParser
+from pathlib import Path
 
 from mxfold2.predict import Predict
 from mxfold2.train import Train
-#from .show_param import ShowParam
 
-#default_conf = os.path.join(os.path.dirname(__file__), 'models', 'TrainSetAB.conf')
-default_conf = os.path.join(os.path.dirname(__file__), 'models', 'all_cdhit.conf')
+DEFAULT_CONFIG = Path(__file__).resolve().parent / 'models' / 'nr80_imle_rank.conf'
+
 
 def main():
     parser = ArgumentParser(
@@ -16,23 +14,23 @@ def main():
         fromfile_prefix_chars='@',
         add_help=True)
     subparser = parser.add_subparsers(title='Sub-commands')
-    parser.set_defaults(func = lambda args, conf: parser.print_help())
+    parser.set_defaults(func=lambda args, conf: parser.print_help())
     Train.add_args(subparser)
     Predict.add_args(subparser)
-    # ShowParam.add_args(subparser)
-    args = parser.parse_args()
 
-    if hasattr(args, 'param') and (args.param == '' or args.param == 'default'):
-        if hasattr(args, 'model') and (args.model == 'Turner' or args.model == 'CONTRAfold'):
+    argv = sys.argv[1:]
+    args = parser.parse_args(argv)
+    conf = next((arg[1:] for arg in reversed(argv) if arg.startswith('@')), None)
+    if argv[:1] == ['predict'] and args.param in ('', 'default'):
+        if args.model in ('Turner', 'CONTRAfold'):
             args.param = 'default'
         else:
-            sys.argv.insert(2, '@'+default_conf)
-            args = parser.parse_args()
-
-    conf = list(filter(lambda x: x[0]=='@', sys.argv))
-    conf = None if len(conf)==0 else conf[-1][1:]
+            conf = str(DEFAULT_CONFIG)
+            args = parser.parse_args(['predict', f'@{conf}', *argv[1:]])
+            args.param = str(DEFAULT_CONFIG.with_suffix('.pth'))
 
     args.func(args, conf)
+
 
 if __name__ == '__main__':
     main()

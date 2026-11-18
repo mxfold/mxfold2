@@ -165,6 +165,12 @@ experiments
 .DS_Store
 poetry.lock
 models
+!/mxfold2/models/
+/mxfold2/models/*
+!/mxfold2/models/all_cdhit.conf
+!/mxfold2/models/all_cdhit.pth
+!/mxfold2/models/nr80_imle_rank.conf
+!/mxfold2/models/nr80_imle_rank.pth
 .tool-versions
 wandb
 
