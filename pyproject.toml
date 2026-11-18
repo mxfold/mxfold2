@@ -1,34 +1,50 @@
-[tool.poetry]
+[project]
 name = "mxfold2"
-version = "0.1.2"
+version = "1.0.0"
 description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
-authors = ["Kengo Sato <satoken@mail.dendai.ac.jp>"]
-repository = "https://github.com/mxfold/mxfold2"
+authors = [
+    { name="Kengo Sato", email="satoken@life.isct.ac.jp" }
+]
 readme = "README.md"
-license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.1.2",
+    "pybind11>=2.13.6",
+    "pytorch-optimizer>=3.1.2",
+    "torch>=2.4.1",
+    "tqdm>=4.66.5",
+]
 
-[tool.poetry.dependencies]
-python = "^3.7"
-numpy = "^1.18"
-torch = "^1.4"
-torchvision = "^0"
-tqdm = "^4.40"
-wheel = "^0.38.0"
-pybind11 = "^2.6.2"
-
-[tool.poetry.dev-dependencies]
-pylint = "^2.5.3"
-jupyter = "^1.0.0"
-pandas = "^1.1.0"
-tensorboard = "^2.3.0"
-
-[tool.poetry.scripts]
+[project.scripts]
 mxfold2 = "mxfold2.__main__:main"
 
-[tool.poetry.build]
-script = "build.py"
-generate-setup-file = true
-
 [build-system]
-requires = ["poetry-core", "setuptools", "pybind11"]
-build-backend = "poetry.core.masonry.api"
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[tool.uv]
+cache-dir = ".uv-cache"
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "pandas>=2.2.3",
+    "scipy>=1.14.1",
+    "wandb>=0.18.0",
+]
+
+[tool.scikit-build]
+cmake.source-dir = "./mxfold2/src"
+sdist.include = ["mxfold2/models/*"]
+sdist.exclude = [
+    ".devcontainer",
+    ".gitignore",
+    ".gitmodules",
+    ".pylintrc",
+    "/.worktrees/",
+    "/mxfold2-data/",
+    "/reports/",
+    "/scripts/",
+    "/tests/",
+]
+wheel.exclude = ["mxfold2/src"]

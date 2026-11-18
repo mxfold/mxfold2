@@ -1,68 +1,147 @@
+from __future__ import annotations
+import logging
+
+from typing import Any, Optional
+
+import numpy as np
 import torch
+
 from .. import interface
 from .fold import AbstractFold
 from .rnafold import RNAFold
 from .zuker import ZukerFold
 
+
 class MixedFold(AbstractFold):
-    def __init__(self, init_param=None, model_type='M', max_helix_length=30, **kwargs):
-        super(MixedFold, self).__init__(interface.predict_mxfold, interface.partfunc_mxfold)
+    def __init__(self, init_param=None,
+        max_helix_length: int = 30,
+        mix_type: str = 'average',
+        weight_turner: float = None,
+        weight_positional: float = None,
+        score_weight_turner: float = None,
+        score_weight_positional: float = None,
+        count_weight_turner: float = None,
+        count_weight_positional: float = None,
+        **kwargs) -> None:
+        super(MixedFold, self).__init__(interface.ZukerMixedWrapper())
+
+        # Determine weights based on mix_type or explicit weights
+        if weight_turner is not None and weight_positional is not None:
+            # Backward compatibility: set both score and count weights
+            self._score_weight_turner = weight_turner
+            self._score_weight_positional = weight_positional
+            self._count_weight_turner = weight_turner
+            self._count_weight_positional = weight_positional
+        elif mix_type == 'add':
+            self._score_weight_turner = 1.0
+            self._score_weight_positional = 1.0
+            self._count_weight_turner = 1.0
+            self._count_weight_positional = 1.0
+        else:  # 'average' mode (default)
+            self._score_weight_turner = 0.5
+            self._score_weight_positional = 0.5
+            self._count_weight_turner = 0.5
+            self._count_weight_positional = 0.5
+
+        # Override with new parameters if specified
+        if score_weight_turner is not None:
+            self._score_weight_turner = score_weight_turner
+        if score_weight_positional is not None:
+            self._score_weight_positional = score_weight_positional
+        if count_weight_turner is not None:
+            self._count_weight_turner = count_weight_turner
+        if count_weight_positional is not None:
+            self._count_weight_positional = count_weight_positional
+
         self.turner = RNAFold(init_param=init_param)
-        self.zuker = ZukerFold(model_type=model_type, max_helix_length=max_helix_length, **kwargs)
+        self.zuker = ZukerFold(max_helix_length=max_helix_length, **kwargs)
         self.max_helix_length = max_helix_length
 
+    # Score weight properties
+    @property
+    def score_weight_turner(self):
+        return self._score_weight_turner
 
-    def forward(self, seq, return_param=False, param=None, return_partfunc=False,
-            max_internal_length=30, constraint=None, reference=None,
-            loss_pos_paired=0.0, loss_neg_paired=0.0, loss_pos_unpaired=0.0, loss_neg_unpaired=0.0):
-        param = self.make_param(seq) if param is None else param # reuse param or not
-        ss = []
-        preds = []
-        pairs = []
-        pfs = []
-        bpps = []
-        for i in range(len(seq)):
-            param_on_cpu = { 
-                'turner': {k: v.to("cpu") for k, v in param[i]['turner'].items() },
-                'positional': {k: v.to("cpu") for k, v in param[i]['positional'].items() }
-            }
-            param_on_cpu = {k: self.clear_count(v) for k, v in param_on_cpu.items()}
+    @score_weight_turner.setter
+    def score_weight_turner(self, v):
+        self._score_weight_turner = v
 
-            with torch.no_grad():
-                v, pred, pair = interface.predict_mxfold(seq[i], param_on_cpu,
-                            max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                            max_helix_length=self.max_helix_length,
-                            constraint=constraint[i].tolist() if constraint is not None else None, 
-                            reference=reference[i].tolist() if reference is not None else None, 
-                            loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                            loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                if return_partfunc:
-                    pf, bpp = interface.partfunc_mxfold(seq[i], param_on_cpu,
-                                max_internal_length=max_internal_length if max_internal_length is not None else len(seq[i]),
-                                max_helix_length=self.max_helix_length,
-                                constraint=constraint[i].tolist() if constraint is not None else None, 
-                                reference=reference[i].tolist() if reference is not None else None, 
-                                loss_pos_paired=loss_pos_paired, loss_neg_paired=loss_neg_paired,
-                                loss_pos_unpaired=loss_pos_unpaired, loss_neg_unpaired=loss_neg_unpaired)
-                    pfs.append(pf)
-                    bpps.append(bpp)
-            if torch.is_grad_enabled():
-                v = self.calculate_differentiable_score(v, param[i]['positional'], param_on_cpu['positional'])
-            ss.append(v)
-            preds.append(pred)
-            pairs.append(pair)
+    @property
+    def score_weight_positional(self):
+        return self._score_weight_positional
 
-        device = next(iter(param[0]['positional'].values())).device
-        ss = torch.stack(ss) if torch.is_grad_enabled() else torch.tensor(ss, device=device)
-        if return_param:
-            return ss, preds, pairs, param
-        elif return_partfunc:
-            return ss, preds, pairs, pfs, bpps
-        else:
-            return ss, preds, pairs
+    @score_weight_positional.setter
+    def score_weight_positional(self, v):
+        self._score_weight_positional = v
+
+    # Count weight properties
+    @property
+    def count_weight_turner(self):
+        return self._count_weight_turner
+
+    @count_weight_turner.setter
+    def count_weight_turner(self, v):
+        self._count_weight_turner = v
+
+    @property
+    def count_weight_positional(self):
+        return self._count_weight_positional
+
+    @count_weight_positional.setter
+    def count_weight_positional(self, v):
+        self._count_weight_positional = v
+
+    # Backward compatibility properties (sets both score and count)
+    @property
+    def weight_turner(self):
+        return self._score_weight_turner
+
+    @weight_turner.setter
+    def weight_turner(self, v):
+        self._score_weight_turner = v
+        self._count_weight_turner = v
+
+    @property
+    def weight_positional(self):
+        return self._score_weight_positional
+
+    @weight_positional.setter
+    def weight_positional(self, v):
+        self._score_weight_positional = v
+        self._count_weight_positional = v
 
 
-    def make_param(self, seq):
+    def forward(self, seq: list[str], **kwargs):
+        return super().forward(seq, max_helix_length=self.max_helix_length, **kwargs)
+
+
+    def make_param(self, seq: list[str], perturb: float = 0.) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         ts = self.turner.make_param(seq)
-        ps = self.zuker.make_param(seq)
-        return [{'turner': t, 'positional': p} for t, p in zip(ts, ps)]
+        ps = self.zuker.make_param(seq, perturb)
+        if perturb > 0.:
+            return ( [{'turner': t, 'positional': p} for t, p in zip(ts, ps[0])],
+                     [{'turner': t, 'positional': p} for t, p in zip(ts, ps[1])] )
+        else:
+            return [{'turner': t, 'positional': p} for t, p in zip(ts, ps)]
+
+
+    def make_param_on_cpu(self, param: dict[str, Any]) -> dict[str, Any]:
+        param_on_cpu = {
+            'turner': {k: v.to("cpu").to(torch.float32) for k, v in param['turner'].items() },
+            'positional': {k: v.to("cpu").to(torch.float32) for k, v in param['positional'].items() },
+            'weight_score_turner': self._score_weight_turner,
+            'weight_score_positional': self._score_weight_positional,
+            'weight_count_turner': self._count_weight_turner,
+            'weight_count_positional': self._count_weight_positional,
+        }
+        param_on_cpu['turner'] = self.clear_count(param_on_cpu['turner'])
+        param_on_cpu['positional'] = self.clear_count(param_on_cpu['positional'])
+        return param_on_cpu
+
+
+    def calculate_differentiable_score(self, v: float, param: dict[str, Any], count: dict[str, Any]) -> torch.Tensor | float:
+        return super().calculate_differentiable_score(v, param['positional'], count['positional'])
+
+
+    def detect_device(self, param):
+        return super().detect_device(param['positional'])

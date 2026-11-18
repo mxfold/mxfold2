@@ -524,7 +524,7 @@ void
 TurnerNearestNeighbor::
 count_multi_unpaired(size_t i, size_t j, ScoreType v)
 {
-    count_ml_base_[0] += (j-i+1);
+    count_ml_base_[0] += (j-i+1) * v;
 }
 
 auto

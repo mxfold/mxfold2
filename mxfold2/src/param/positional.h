@@ -76,6 +76,13 @@ class PositionalNearestNeighbor
         ParamType<1> score_helix_length_;
         CountType<1> count_helix_length_;
 
+        ParamType<1> score_multi_base_;
+        CountType<1> count_multi_base_;
+        ParamType<1> score_multi_paired_;
+        CountType<1> count_multi_paired_;
+        ParamType<1> score_external_paired_;
+        CountType<1> count_external_paired_;
+
     public:
         const u_int32_t MAX_HAIRPIN_LENGTH;
         const u_int32_t MAX_BULGE_LENGTH;

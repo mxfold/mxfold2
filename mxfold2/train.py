@@ -1,222 +1,833 @@
+from __future__ import annotations
+
+import logging
+import csv
 import os
 import random
 import time
+from argparse import Namespace
+from collections import defaultdict
 from pathlib import Path
+from typing import Any, Optional, cast
 
-import numpy as np
+import pytorch_optimizer as po
+#import numpy as np
 import torch
+import torch.backends.cudnn
 import torch.nn as nn
-import torch.nn.functional as F
+#import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.optim.adam import Adam
+from torch.optim.adamw import AdamW
+from torch.optim.rmsprop import RMSprop
+from torch.optim.sgd import SGD
+from torch.optim.asgd import ASGD
+from torch.optim.optimizer import Optimizer
+from torch.amp.grad_scaler import GradScaler
+from torch.amp.autocast_mode import autocast
+from torch.optim.swa_utils import SWALR, AveragedModel
+from torch.utils.data import DataLoader, ConcatDataset, WeightedRandomSampler
 from tqdm import tqdm
 
-from .dataset import BPseqDataset
-from .fold.mix import MixedFold
-from .fold.rnafold import RNAFold
-from .fold.zuker import ZukerFold
-from .loss import StructuredLoss, StructuredLossWithTurner
+from mxfold2.ema import EMA
+from mxfold2.sam import SAM, ASAM, GSAM
+
+from mxfold2 import interface
+from mxfold2.dataset import BPseqDataset, FastaDataset, MultiTaskDataset, ShapeDataset
+from mxfold2.fold.fold import AbstractFold
+from mxfold2.common import Common
 
 try:
-    from torch.utils.tensorboard import SummaryWriter
+    import wandb
 except ImportError:
-    pass
+    wandb = None
 
-
-class Train:
-    step = 0
+class Train(Common):
+    step: int = 0
+    disable_progress_bar: bool = False
+    use_wandb: bool = False
+    gpu: int = -1
 
     def __init__(self):
-        self.train_loader = None
-        self.test_loader = None
+        super(Train, self).__init__()
+        self.device_type = 'cpu'  # Will be set in run()
+        self.imle_log_file: Optional[str] = None
+        self.log_file: Optional[str] = None
+        self._frozen_eval_modules: list[nn.Module] = []
+        self._l2_sp_anchor: dict[str, torch.Tensor] = {}
+        self._l2_sp_weight = 0.0
 
 
-    def train(self, epoch):
-        self.model.train()
-        n_dataset = len(self.train_loader.dataset)
-        loss_total, num = 0, 0
+    def train(self, epoch: int, model: AbstractFold, optimizer: Optimizer,
+                loss_fn: nn.Module | dict[str, nn.Module],
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                loss_weight = defaultdict(lambda: 1.),
+                clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0,
+                scaler: Optional[GradScaler] = None,
+                use_amp: bool = False,
+                grad_accum_steps: int = 1) -> None:
+        if grad_accum_steps < 1:
+            raise ValueError("grad_accum_steps must be at least 1")
+        model.train()
+        # model.train() recursively re-enables dropout in frozen feature
+        # extractors.  Keep explicitly frozen modules in eval mode while the
+        # trainable heads remain in training mode.
+        for module in self._frozen_eval_modules:
+            module.eval()
+        if not isinstance(loss_fn, dict):
+            loss_fn = {'BPSEQ': loss_fn}
+        # Replay/budget samplers can draw fewer items than the backing dataset.
+        # Accumulation windows and the final partial update use actual draws.
+        n_dataset = len(data_loader.sampler)
+        loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
+        imle_rows = []
         start = time.time()
-        with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in self.train_loader:
-                if self.verbose:
-                    print()
-                    print("Step: {}, {}".format(self.step, fnames))
-                    self.step += 1
-                n_batch = len(seqs)
-                self.optimizer.zero_grad()
-                loss = torch.sum(self.loss_fn(seqs, pairs, fname=fnames))
-                loss_total += loss.item()
-                num += n_batch
-                if loss.item() > 0.:
-                    loss.backward()
-                    if self.verbose:
-                        for n, p in self.model.named_parameters():
-                            print(n, torch.min(p).item(), torch.max(p).item(), torch.min(p.grad).item(), torch.max(p.grad).item())
-                    self.optimizer.step()
 
+        # Check if using SAM optimizer
+        is_sam = isinstance(optimizer, SAM)
+
+        # Gradient accumulation counter
+        accumulated_samples = 0
+        optimizer.zero_grad()  # Zero gradients once at the start
+
+        with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
+            for fnames, seqs, vals in data_loader:
+                logging.info(f"Step: {self.step}, {fnames}")
+                self.step += 1
+                n_batch = len(seqs)
+                for i in range(n_batch):
+                    accumulated_samples += 1
+                    is_full_update = accumulated_samples % grad_accum_steps == 0
+                    is_final_partial = (
+                        accumulated_samples == n_dataset
+                        and not is_full_update
+                    )
+                    is_update_step = is_full_update or is_final_partial
+                    # Scale a short final accumulation window by its actual
+                    # size.  Without this, a dataset length not divisible by
+                    # grad_accum_steps silently weakens its last update.
+                    accumulation_divisor = (
+                        n_dataset % grad_accum_steps
+                        if is_final_partial
+                        else grad_accum_steps
+                    )
+
+                    # Define loss computation function for SAM
+                    def compute_loss():
+                        with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
+                            if vals['type'][i] in ('BPSEQ', 'BPSEQ2'):
+                                loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                            elif vals['type'][i] == 'SHAPE':
+                                loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                            elif vals['type'][i] == 'MULTI':
+                                struct_loss = loss_fn['BPSEQ'](
+                                    seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]
+                                )
+                                shape_loss = loss_fn['SHAPE_regress'](
+                                    seqs[i:i+1],
+                                    vals['shape_target'][i:i+1],
+                                    vals['shape_mask'][i:i+1],
+                                )
+                                alpha, beta = loss_weight['MULTI_intra']
+                                loss = torch.sum(alpha * struct_loss + beta * shape_loss)
+                            else:
+                                raise RuntimeError('not implemented')
+                            if self._l2_sp_weight > 0.0:
+                                penalty = None
+                                for name, parameter in model.named_parameters():
+                                    anchor = self._l2_sp_anchor.get(name)
+                                    if anchor is None or not parameter.requires_grad:
+                                        continue
+                                    term = torch.sum((parameter - anchor) ** 2)
+                                    penalty = term if penalty is None else penalty + term
+                                if penalty is None:
+                                    raise RuntimeError('L2-SP has no trainable anchored parameters')
+                                loss = loss + 0.5 * self._l2_sp_weight * penalty
+                            return loss * loss_weight[vals['type'][i]]
+
+                    if is_sam:
+                        # SAM two-step optimization with gradient accumulation
+                        loss = self._sam_step(
+                            model, optimizer, compute_loss,
+                            clip_grad_value, clip_grad_norm,
+                            scaler, use_amp,
+                            grad_accum_steps=accumulation_divisor,
+                            is_update_step=is_update_step
+                        )
+                        if is_update_step:
+                            optimizer.zero_grad()
+                    else:
+                        # Standard optimization with gradient accumulation
+                        loss = compute_loss()
+
+                        # Scale loss for gradient accumulation and backward pass
+                        scaled_loss = loss / accumulation_divisor
+                        if scaler is not None:
+                            scaler.scale(scaled_loss).backward()
+                        else:
+                            scaled_loss.backward()
+
+                        # Only update on accumulation boundary
+                        if is_update_step:
+                            # Gradient clipping with unscaling if using mixed precision
+                            if scaler is not None:
+                                scaler.unscale_(optimizer)
+
+                            if clip_grad_norm > 0.0:
+                                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+                            elif clip_grad_value > 0.0:
+                                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+                            # Workaround for pytorch_optimizer AdaBelief/Lion: ensure state is initialized
+                            # for parameters that didn't have gradients in the first step
+                            if isinstance(optimizer, (po.AdaBelief, po.Lion)):
+                                for group in optimizer.param_groups:
+                                    for p in group['params']:
+                                        if p.grad is not None and len(optimizer.state[p]) == 0:
+                                            optimizer.state[p]['exp_avg'] = torch.zeros_like(p)
+                                            if isinstance(optimizer, po.AdaBelief):
+                                                optimizer.state[p]['exp_avg_var'] = torch.zeros_like(p)
+
+                            # Step the optimizer
+                            if scaler is not None:
+                                scaler.step(optimizer)
+                                scaler.update()
+                            else:
+                                optimizer.step()
+
+                            optimizer.zero_grad()
+
+                    loss_total += loss.item()
+                    running_loss += loss.item()
+                    if vals['type'][i] == 'SHAPE':
+                        stats = getattr(loss_fn['SHAPE'], 'last_imle_stats', {})
+                        nus = stats.get('selected_nu', [])
+                        flips = stats.get('flip_fraction', [])
+                        if nus and flips:
+                            imle_rows.append([
+                                epoch,
+                                self.step,
+                                fnames[i],
+                                getattr(loss_fn['SHAPE'], 'difference_mode', 'forward'),
+                                len(nus),
+                                sum(nus) / len(nus),
+                                min(nus),
+                                max(nus),
+                                sum(flips) / len(flips),
+                                min(flips),
+                                max(flips),
+                            ])
+
+                num += n_batch
                 pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
 
-                running_loss += loss.item()
                 n_running_loss += n_batch
                 if n_running_loss >= 100 or num >= n_dataset:
                     running_loss /= n_running_loss
-                    if self.writer is not None:
-                        self.writer.add_scalar("train/loss", running_loss, (epoch-1) * n_dataset + num)
+                    if self.use_wandb:
+                        log_data = {
+                            "train/loss": running_loss,
+                            "train/step": (epoch-1) * n_dataset + num,
+                        }
+                        if self.device_type == 'cuda':
+                            log_data["train/gpu_memory_allocated"] = torch.cuda.memory_allocated(self.gpu) / 1024**3
+                            log_data["train/gpu_memory_reserved"] = torch.cuda.memory_reserved(self.gpu) / 1024**3
+                        # MPS does not provide memory stats via PyTorch API
+                        wandb.log(log_data)
                     running_loss, n_running_loss = 0, 0
+
         elapsed_time = time.time() - start
-        if self.verbose:
-            print()
-        print('Train Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+        avg_loss = loss_total / num
+        log_line = f"Train Epoch: {epoch}\tLoss: {avg_loss:.6f}\tTime: {elapsed_time:.3f}s"
+        print(log_line)
+        # エポック単位のログは loss.log に一行だけ書く（alloc のみ記録、resv/peak は 0.0 で埋める）
+        try:
+            if torch.cuda.is_available():
+                alloc = torch.cuda.memory_allocated() / 1e6
+            else:
+                alloc = 0.0
+            if self.log_file is not None:
+                with open(self.log_file, "a") as f:
+                    f.write(f"{epoch},train,{avg_loss:.6f},{elapsed_time:.3f},{self.step},{alloc:.1f}\n")
+        except Exception:
+            pass
+        if self.imle_log_file is not None and imle_rows:
+            with open(self.imle_log_file, 'a', newline='') as f:
+                csv.writer(f).writerows(imle_rows)
 
 
-    def test(self, epoch):
-        self.model.eval()
-        n_dataset = len(self.test_loader.dataset)
+    def _sam_step(self, model: AbstractFold, optimizer: SAM,
+                  compute_loss: callable,
+                  clip_grad_value: float, clip_grad_norm: float,
+                  scaler: Optional[GradScaler], use_amp: bool,
+                  grad_accum_steps: int = 1,
+                  is_update_step: bool = True) -> torch.Tensor:
+        """Perform SAM two-step optimization with AMP and gradient accumulation support.
+
+        Args:
+            model: The model being trained
+            optimizer: SAM optimizer instance
+            compute_loss: Callable that computes and returns the loss
+            clip_grad_value: Gradient clipping by value
+            clip_grad_norm: Gradient clipping by norm
+            scaler: GradScaler for AMP (optional)
+            use_amp: Whether AMP is enabled
+            grad_accum_steps: Number of gradient accumulation steps
+            is_update_step: Whether this is an update step (vs accumulation step)
+
+        Returns:
+            The loss value from the first forward pass
+        """
+        is_gsam = isinstance(optimizer, GSAM)
+
+        # === First forward-backward pass ===
+        loss = compute_loss()
+        scaled_loss = loss / grad_accum_steps
+
+        if scaler is not None:
+            scaler.scale(scaled_loss).backward()
+        else:
+            scaled_loss.backward()
+
+        # Only perform SAM two-step update on update steps
+        if is_update_step:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+
+            # Apply gradient clipping before perturbation
+            if clip_grad_norm > 0.0:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+            elif clip_grad_value > 0.0:
+                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+            # Apply perturbation (first step)
+            if is_gsam:
+                optimizer.first_step(zero_grad=True, loss=loss)
+            else:
+                optimizer.first_step(zero_grad=True)
+
+            # === Second forward-backward pass (at perturbed weights) ===
+            loss_perturbed = compute_loss()
+            scaled_loss_perturbed = loss_perturbed / grad_accum_steps
+
+            if scaler is not None:
+                scaler.scale(scaled_loss_perturbed).backward()
+                scaler.unscale_(optimizer)
+            else:
+                scaled_loss_perturbed.backward()
+
+            # Apply gradient clipping before update
+            if clip_grad_norm > 0.0:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
+            elif clip_grad_value > 0.0:
+                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
+
+            # Restore weights and apply update (second step)
+            if is_gsam:
+                optimizer.second_step(zero_grad=False, loss=loss_perturbed)
+            else:
+                optimizer.second_step(zero_grad=False)
+
+            # Update scaler if using AMP
+            if scaler is not None:
+                scaler.update()
+
+        return loss
+
+
+    def test(self, epoch: int, model: AbstractFold | AveragedModel, 
+                loss_fn: nn.Module | dict[str, nn.Module],
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                use_amp: bool = False) -> None:
+        model.eval()
+        if not isinstance(loss_fn, dict):
+            loss_fn = {'BPSEQ': loss_fn}
+        n_dataset = len(cast(FastaDataset, data_loader.dataset))
         loss_total, num = 0, 0
         start = time.time()
         with torch.no_grad(), tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
-            for fnames, seqs, pairs in self.test_loader:
+            for fnames, seqs, vals in data_loader:
                 n_batch = len(seqs)
-                loss = self.loss_fn(seqs, pairs, fname=fnames)
-                loss_total += loss.item()
+                for i in range(n_batch):
+                    with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
+                        if vals['type'][i]=='BPSEQ':
+                            loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                        elif vals['type'][i]=='SHAPE': 
+                            loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                        elif vals['type'][i]=='MULTI':
+                            seq = seqs[i:i+1]
+                            # 構造ロス
+                            struct_loss = loss_fn['BPSEQ'](seq, vals['target'][i:i+1], fname=fnames[i:i+1])
+                            # shape回帰ロス
+                            tgt = vals['shape_target'][i:i+1]
+                            msk = vals['shape_mask'][i:i+1]
+                            shape_loss = loss_fn['SHAPE_regress'](seq, tgt, msk)
+
+                            # loss = self.mt_alpha * struct_loss + self.mt_beta * shape_loss                        
+                            
+                            alpha, beta = loss_weight['MULTI_intra']
+                            loss = torch.sum(alpha * struct_loss + beta * shape_loss)                        
+                       
+                        else:
+                            raise(RuntimeError('not implemented'))
+                    loss_total += loss.item()
                 num += n_batch
                 pbar.set_postfix(test_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
 
+        # elapsed_time = time.time() - start
+        # if self.writer is not None:
+        #     self.writer.add_scalar("test/loss", loss_total / num, epoch * n_dataset)
+        # print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
+
         elapsed_time = time.time() - start
-        if self.writer is not None:
-            self.writer.add_scalar("test/loss", epoch * n_dataset, loss_total / num)
+        if self.use_wandb:
+            wandb.log({
+                "test/loss": loss_total / num,
+                "test/epoch": epoch,
+            })
         print('Test Epoch: {}\tLoss: {:.6f}\tTime: {:.3f}s'.format(epoch, loss_total / num, elapsed_time))
 
 
-    def save_checkpoint(self, outdir, epoch):
+    def save_checkpoint(self, outdir: str, epoch: int,
+                        model: AbstractFold | AveragedModel,
+                        optimizer: Optimizer,
+                        scheduler,
+                        shape_model: Optional[list[nn.Module]] = None,
+                        ema: Optional[EMA] = None,
+                        step: Optional[int] = None,
+                        scaler: Optional[GradScaler] = None) -> None:
         filename = os.path.join(outdir, 'epoch-{}'.format(epoch))
-        torch.save({
+        checkpoint = {
             'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
-        }, filename)
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'step': step if step is not None else self.step,
+            'rng_state': {
+                'torch': torch.get_rng_state(),
+                'python': random.getstate(),
+            }}
+        if torch.cuda.is_available():
+            checkpoint['rng_state']['cuda'] = torch.cuda.get_rng_state_all()
+        if scheduler is not None:
+            checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+        if shape_model is not None:
+            checkpoint['shape_model_state_dict'] = [sm.state_dict() for sm in shape_model]
+        if ema is not None:
+            checkpoint['ema_state_dict'] = ema.state_dict()
+        if scaler is not None:
+            checkpoint['scaler_state_dict'] = scaler.state_dict()
+        torch.save(checkpoint, filename)
 
 
-    def resume_checkpoint(self, filename):
+    def resume_checkpoint(self, filename: str,
+                        model: AbstractFold,
+                        optimizer: Optimizer,
+                        scheduler,
+                        shape_model: Optional[list[nn.Module]],
+                        ema: Optional[EMA] = None,
+                        scaler: Optional[GradScaler] = None,
+                        gpu: int = -1) -> tuple[int, Optional[GradScaler]]:
         checkpoint = torch.load(filename)
         epoch = checkpoint['epoch']
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        return epoch
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Restore step counter
+        if 'step' in checkpoint:
+            self.step = checkpoint['step']
+
+        # Restore random states
+        if 'rng_state' in checkpoint:
+            torch.set_rng_state(checkpoint['rng_state']['torch'])
+            random.setstate(checkpoint['rng_state']['python'])
+            if 'cuda' in checkpoint['rng_state'] and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(checkpoint['rng_state']['cuda'])
+
+        if scheduler is not None and 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if shape_model is not None and 'shape_model_state_dict' in checkpoint:
+            for i, sm in enumerate(shape_model):
+                sm.load_state_dict(checkpoint['shape_model_state_dict'][i])
+        if ema is not None and 'ema_state_dict' in checkpoint:
+            ema.load_state_dict(checkpoint['ema_state_dict'])
+
+        # Load GradScaler state if available
+        if 'scaler_state_dict' in checkpoint and scaler is None:
+            _, device_type = self.get_device(gpu)
+            if device_type == 'cuda':
+                device_str = f'cuda:{gpu}'
+            else:
+                device_str = device_type
+            scaler = GradScaler(device_str)
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        elif scaler is not None and 'scaler_state_dict' in checkpoint:
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+
+        return epoch, scaler
 
 
-    def build_model(self, args):
-        if args.model == 'Turner':
-            return RNAFold(), {}
+    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
+                        shape_model: Optional[list[nn.Module]] = None,
+                        sam_type: Optional[str] = None,
+                        sam_rho: float = 0.05,
+                        sam_alpha: float = 0.1,
+                        lr_overrides: Optional[dict[str, Optional[float]]] = None) -> Optimizer:
+        lr_overrides = lr_overrides or {}
+        if any(value is not None for value in lr_overrides.values()):
+            grouped: dict[str, list[nn.Parameter]] = {
+                'embedding': [], 'encoder': [], 'fc_paired': [], 'other': []
+            }
+            for name, parameter in model.named_parameters():
+                if not parameter.requires_grad:
+                    continue
+                if '.embedding.' in name:
+                    key = 'embedding'
+                elif '.encoder.' in name:
+                    key = 'encoder'
+                elif '.fc_paired.' in name:
+                    key = 'fc_paired'
+                else:
+                    key = 'other'
+                grouped[key].append(parameter)
+            optim_params = []
+            for key in ('embedding', 'encoder', 'fc_paired', 'other'):
+                if not grouped[key]:
+                    continue
+                group_lr = lr_overrides.get(key)
+                optim_params.append({
+                    'params': grouped[key],
+                    'lr': lr if group_lr is None else group_lr,
+                    'weight_decay': l2_weight,
+                })
+        else:
+            optim_params = [
+                {'params': (p for p in model.parameters() if p.requires_grad),
+                 'lr': lr, 'weight_decay': l2_weight},
+            ]
+        if shape_model is not None:
+            for sm in shape_model:
+                optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
 
-        config = {
-            'max_helix_length': args.max_helix_length,
-            'embed_size' : args.embed_size,
-            'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'filter_size': args.filter_size if args.filter_size is not None else (5,),
-            'pool_size': args.pool_size if args.pool_size is not None else (1,),
-            'dilation': args.dilation, 
-            'num_lstm_layers': args.num_lstm_layers, 
-            'num_lstm_units': args.num_lstm_units,
-            'num_transformer_layers': args.num_transformer_layers,
-            'num_transformer_hidden_units': args.num_transformer_hidden_units,
-            'num_transformer_att': args.num_transformer_att,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
-            'num_paired_filters': args.num_paired_filters,
-            'paired_filter_size': args.paired_filter_size,
-            'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,
-            'num_att': args.num_att,
-            'pair_join': args.pair_join,
-            'no_split_lr': args.no_split_lr,
+        # Define base optimizer classes and their kwargs
+        base_optimizer_config = {
+            'Adam': (Adam, {'amsgrad': False}),
+            'AdamW': (AdamW, {'amsgrad': False}),
+            'RMSprop': (RMSprop, {}),
+            'SGD': (SGD, {'nesterov': True, 'momentum': 0.9}),
+            'ASGD': (ASGD, {}),
+            'AdaBelief': (po.AdaBelief, {}),
+            'Lion': (po.Lion, {}),
         }
 
-        if args.model == 'Zuker':
-            model = ZukerFold(model_type='M', **config)
+        if optimizer not in base_optimizer_config:
+            raise RuntimeError(f'not implemented: {optimizer}')
 
-        elif args.model == 'ZukerC':
-            model = ZukerFold(model_type='C', **config)
+        base_optimizer_class, base_kwargs = base_optimizer_config[optimizer]
 
-        elif args.model == 'ZukerL':
-            model = ZukerFold(model_type="L", **config)
-
-        elif args.model == 'ZukerS':
-            model = ZukerFold(model_type="S", **config)
-
-        elif args.model == 'Mix':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixC':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
-
+        # Apply SAM wrapper if requested
+        if sam_type is None or sam_type == 'None':
+            # Create regular optimizer
+            return base_optimizer_class(optim_params, **base_kwargs)
+        elif sam_type == 'SAM':
+            return SAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
+        elif sam_type == 'ASAM':
+            return ASAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
+        elif sam_type == 'GSAM':
+            return GSAM(optim_params, base_optimizer_class, rho=sam_rho, alpha=sam_alpha, **base_kwargs)
         else:
-            raise('not implemented')
-
-        return model, config
+            raise RuntimeError(f'not implemented SAM type: {sam_type}')
 
 
-    def build_optimizer(self, optimizer, model, lr, l2_weight):
-        if optimizer == 'Adam':
-            return optim.Adam(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
-        elif optimizer =='AdamW':
-            return optim.AdamW(model.parameters(), lr=lr, amsgrad=False, weight_decay=l2_weight)
-        elif optimizer == 'RMSprop':
-            return optim.RMSprop(model.parameters(), lr=lr, weight_decay=l2_weight)
-        elif optimizer == 'SGD':
-            return optim.SGD(model.parameters(), nesterov=True, lr=lr, momentum=0.9, weight_decay=l2_weight)
-            #return optim.SGD(model.parameters(), lr=lr, weight_decay=l2_weight)
-        elif optimizer == 'ASGD':
-            return optim.ASGD(model.parameters(), lr=lr, weight_decay=l2_weight)
-        else:
-            raise('not implemented')
-
-
-    def build_loss_function(self, loss_func, model, args):
-        if loss_func == 'hinge':
-            return StructuredLoss(model, verbose=self.verbose,
+    def build_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace) -> nn.Module:
+        if loss_func == 'hinge' or loss_func == 'hinge_mix':
+            from mxfold2.loss.structured_loss import StructuredLoss
+            return StructuredLoss(model,
                             loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
-                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight)
-        if loss_func == 'hinge_mix':
-            return StructuredLossWithTurner(model, verbose=self.verbose,
-                            loss_pos_paired=args.loss_pos_paired, loss_neg_paired=args.loss_neg_paired, 
-                            loss_pos_unpaired=args.loss_pos_unpaired, loss_neg_unpaired=args.loss_neg_unpaired, 
-                            l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
+                            perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight, sl_weight=args.score_loss_weight)
+
+        if loss_func == 'fy' or loss_func == 'fy_mix':
+            from mxfold2.loss.fy_loss import FenchelYoungLoss
+            return FenchelYoungLoss(model, perturb=args.perturb, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                                                sl_weight=args.score_loss_weight)
+
+        if loss_func == 'f1':
+            from mxfold2.loss.f1_loss import F1Loss
+            return F1Loss(model, perturb=args.perturb, nu=args.nu, l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight)
+
         else:
-            raise('not implemented')
+            raise(ValueError(f'not implemented: {loss_func}'))
 
 
-    def save_config(self, file, config):
+    def build_shape_model(self, args: Namespace) -> nn.Module:
+        if args.shape_model == 'Wu':
+            from mxfold2.fold.shape_layers import Wu
+            return Wu(xi=0.774, mu=0.078, sigma=0.083, alpha=1.006, beta=1.404)
+        elif args.shape_model == 'Foo':
+            from mxfold2.fold.shape_layers import Foo
+            return Foo(p_alpha=0.540, p_beta=1.390, u_alpha=1.006, u_beta=1.404)
+        else:
+            raise(ValueError(f'not implemented: {args.shape_model}'))
+
+
+    def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
+                                  shape_model: Optional[nn.Module] = None) -> nn.Module:
+        from .loss.implicit_mle import AdaptiveStepConfig
+
+        adaptive = AdaptiveStepConfig(
+            enabled=args.shape_imle_adaptive_nu,
+            minimum=args.shape_imle_nu_min,
+            maximum=args.shape_imle_nu_max,
+            flip_fraction_low=args.shape_imle_flip_low,
+            flip_fraction_high=args.shape_imle_flip_high,
+            factor=args.shape_imle_adaptive_factor,
+            max_steps=args.shape_imle_adaptive_steps,
+        )
+        imle_options = dict(
+            alignment=args.shape_imle_alignment,
+            normalization=args.shape_imle_normalization,
+            estimator_scale=args.shape_imle_estimator_scale,
+            difference_mode=args.shape_imle_difference,
+            num_samples=args.shape_imle_samples,
+            adaptive=adaptive,
+            train_turner=getattr(args, 'shape_imle_train_turner', False),
+        )
+        if loss_func == 'shape_nll':
+            from mxfold2.loss.shape_nll_loss import ShapeNLLLoss
+            return ShapeNLLLoss(model=model,
+                            shape_model=shape_model,
+                            perturb=args.shape_perturb, nu=args.shape_nu,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight,
+                            pseudo_fy_weight=args.shape_pseudo_fy_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end,
+                            **imle_options)
+
+        elif loss_func == 'shape_fy':
+            from mxfold2.loss.shape_fy_loss import ShapeFenchelYoungLoss
+            return ShapeFenchelYoungLoss(model,
+                            perturb=args.shape_perturb,
+                            shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end)
+
+        elif loss_func == 'shape_partial_fy':
+            from mxfold2.loss.shape_partial_fy_loss import ShapePartialFenchelYoungLoss
+            return ShapePartialFenchelYoungLoss(model,
+                            perturb=args.shape_perturb,
+                            unpaired_threshold=args.shape_unpaired_threshold,
+                            l1_weight=args.l1_weight,
+                            sl_weight=args.score_loss_weight)
+
+        elif loss_func == 'shape_rank':
+            from mxfold2.loss.shape_rank_loss import ShapeRankLoss
+            return ShapeRankLoss(model,
+                            objective=getattr(args, 'shape_rank_objective', 'pairwise_logistic'),
+                            margin=args.shape_margin,
+                            tau=args.shape_rank_tau,
+                            weighting=getattr(args, 'shape_rank_weighting', 'uniform'),
+                            rank_delta=args.shape_rank_delta,
+                            teacher_temperature=args.shape_rank_teacher_temperature,
+                            teacher_normalization=getattr(args, 'shape_rank_teacher_normalization', 'none'),
+                            clip_targets=args.shape_rank_targets == 'clipped',
+                            perturb=args.shape_perturb, nu=args.shape_nu,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight,
+                            pseudo_fy_weight=args.shape_pseudo_fy_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end,
+                            sample_aggregation=args.shape_rank_sample_aggregation,
+                            **imle_options)
+
+        else:
+            raise(ValueError(f'not implemented: {loss_func}'))
+
+    def build_shape_regress_loss_function(self, model: AbstractFold):
+        """E0: SHAPE回帰(MSE)の損失関数を返すファクトリ"""
+        def shape_e0_loss_fn(seq, target, mask):
+            pred = model.zuker.net.predict_shape(seq)      
+            # マスク付きMSE
+            device = pred.device
+            target = target.to(device)
+            mask = mask.to(device)
+            
+            diff = (pred - target) * mask
+            denom = mask.sum().clamp_min(1)
+            return diff.pow(2).sum() / denom
+        return shape_e0_loss_fn
+
+    def build_scheduler(self, scheduler: str, optimizer: Optimizer, args: Namespace):
+        if scheduler == 'CyclicLR':
+            return optim.lr_scheduler.CyclicLR(optimizer=optimizer, base_lr=0.001, max_lr=args.lr,
+                                                step_size_up=args.scheduler_step_size, gamma=args.scheduler_gamma, mode="exp_range")
+        if scheduler == 'CosineAnnealingLR':
+            return optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=args.scheduler_step_size, eta_min=args.lr*1e-3)
+        
+        return None
+
+
+    def save_config(self, file: str, config: dict[str, Any]) -> None:
         with open(file, 'w') as f:
             for k, v in config.items():
                 k = '--' + k.replace('_', '-')
-                if type(v) is bool: # pylint: disable=unidiomatic-typecheck
+                if isinstance(v, bool):
                     if v:
                         f.write('{}\n'.format(k))
                 elif isinstance(v, list) or isinstance(v, tuple):
                     for vv in v:
                         f.write('{}\n{}\n'.format(k, vv))
-                else:
+                elif v is not None:
                     f.write('{}\n{}\n'.format(k, v))
 
 
-    def run(self, args, conf=None):
+    def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         self.disable_progress_bar = args.disable_progress_bar
-        self.verbose = args.verbose
-        self.writer = None
-        if args.log_dir is not None and 'SummaryWriter' in globals():
-            self.writer = SummaryWriter(log_dir=args.log_dir)
+        self.gpu = args.gpu
+        if args.shape_imle_samples < 1:
+            raise ValueError('--shape-imle-samples must be at least 1')
+        if args.shape_imle_samples > 1 and args.shape_perturb <= 0:
+            logging.warning(
+                'shape_imle_samples=%d with shape_perturb<=0 repeats an identical MAP estimate',
+                args.shape_imle_samples,
+            )
+        loglevel = 'INFO' if args.verbose else args.loglevel
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=getattr(logging, loglevel, None))
 
-        train_dataset = BPseqDataset(args.input)
-        self.train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+        # Initialize wandb if project is specified
+        self.use_wandb = args.wandb_project is not None
+        if self.use_wandb:
+            if wandb is None:
+                raise RuntimeError('wandb is required when --wandb-project is used')
+            wandb_config = vars(args).copy()
+            wandb.init(
+                project=args.wandb_project,
+                name=args.wandb_run_name,
+                tags=args.wandb_tags,
+                config=wandb_config,
+            )
+
+        # Keep the historical --log-dir interface used by the TSUBAME
+        # scripts, while also accepting upstream's --output-dir.  The latter
+        # is the checkpoint directory; when only one is supplied it is also a
+        # sensible place for loss/IMLE logs.
+        log_dir = getattr(args, 'log_dir', None)
+        if log_dir is None:
+            log_dir = args.output_dir
+        if log_dir is not None:
+            os.makedirs(log_dir, exist_ok=True)
+            self.log_file = os.path.join(log_dir, "loss.log")
+        else:
+            os.makedirs("logs", exist_ok=True)
+            self.log_file = os.path.join("logs", "loss.log")
+        # 追記モードで開き、ファイルが空ならヘッダーを書き込む（既存ログがあれば追記のみ）
+        write_header = True
+        if os.path.exists(self.log_file) and os.path.getsize(self.log_file) > 0:
+            write_header = False
+        with open(self.log_file, "a") as f:
+            if write_header:
+                # 追加列: step, alloc_mb
+                f.write("epoch,phase,loss,time,step,alloc_mb\n")
+        if args.shape is not None and args.shape_loss_func in ('shape_nll', 'shape_rank'):
+            self.imle_log_file = os.path.join(log_dir if log_dir is not None else 'logs', 'imle_stats.csv')
+            if not os.path.exists(self.imle_log_file) or os.path.getsize(self.imle_log_file) == 0:
+                with open(self.imle_log_file, 'w', newline='') as f:
+                    csv.writer(f).writerow([
+                        'epoch', 'step', 'file', 'difference', 'samples',
+                        'nu_mean', 'nu_min', 'nu_max', 'flip_mean',
+                        'flip_min', 'flip_max',
+                    ])
+
+        task = args.task
+        replay_offset: Optional[int] = None
+        replay_length = 0
+        if task == 'Multitask':
+            if getattr(args, 'replay_fraction', 0.0) > 0:
+                raise ValueError('--replay-fraction is supported for Folding and Implicit_MLE only')
+            if not args.shape:
+                raise ValueError("Multitask requires --shape")
+            bpseq_lists = args.input if isinstance(args.input, (list, tuple)) else [args.input]
+            shape_lists = args.shape if isinstance(args.shape, (list, tuple)) else [args.shape]
+            if len(bpseq_lists) != len(shape_lists):
+                raise ValueError("Multitask requires equal numbers of BPSEQ and SHAPE lists")
+            train_dataset = ConcatDataset([
+                MultiTaskDataset(bpseq_list=bpseq, shape_list=shape, dataset_id=index)
+                for index, (bpseq, shape) in enumerate(zip(bpseq_lists, shape_lists))
+            ])
+        elif task in ('Folding', 'Implicit_MLE'):
+            datasets = [BPseqDataset(args.input)]
+            if args.input_2 is not None:
+                replay_offset = sum(len(dataset) for dataset in datasets)
+                datasets.append(BPseqDataset(args.input_2, type_name='BPSEQ2'))
+                replay_length = len(datasets[-1])
+            if args.shape is not None:
+                datasets.extend(ShapeDataset(path, index) for index, path in enumerate(args.shape))
+            elif task == 'Implicit_MLE':
+                raise ValueError("Implicit_MLE requires --shape")
+            train_dataset = datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+        else:
+            raise ValueError(f"unknown task: {task}")
+
+        replay_fraction = float(getattr(args, 'replay_fraction', 0.0))
+        samples_per_epoch = int(getattr(args, 'samples_per_epoch', 0))
+        if samples_per_epoch < 0:
+            raise ValueError('--samples-per-epoch must be nonnegative')
+        if not 0.0 <= replay_fraction < 1.0:
+            raise ValueError('--replay-fraction must be in [0, 1)')
+
+        # Create generator for reproducible shuffling
+        generator = torch.Generator()
+        if args.seed >= 0:
+            generator.manual_seed(args.seed)
+
+        if replay_fraction > 0.0:
+            if replay_offset is None or replay_length == 0:
+                raise ValueError('--replay-fraction requires a non-empty --input-2 dataset')
+            primary_length = len(train_dataset) - replay_length
+            if primary_length <= 0:
+                raise ValueError('--replay-fraction requires non-empty primary training data')
+            sample_weights = torch.full(
+                (len(train_dataset),),
+                (1.0 - replay_fraction) / primary_length,
+                dtype=torch.double,
+            )
+            sample_weights[replay_offset:replay_offset + replay_length] = replay_fraction / replay_length
+            sampler = WeightedRandomSampler(
+                sample_weights,
+                num_samples=samples_per_epoch or len(train_dataset),
+                replacement=True,
+                generator=generator,
+            )
+            train_loader = DataLoader(train_dataset, batch_size=1, sampler=sampler) # works well only for batch_size=1!!
+            logging.info(
+                'TrainSetA replay sampling enabled: fraction=%.4f primary=%d replay=%d samples/epoch=%d',
+                replay_fraction, primary_length, replay_length, len(sampler),
+            )
+        elif samples_per_epoch:
+            if not len(train_dataset):
+                raise ValueError('--samples-per-epoch requires non-empty training data')
+            sampler = torch.utils.data.RandomSampler(
+                train_dataset, replacement=True, num_samples=samples_per_epoch,
+                generator=generator,
+            )
+            train_loader = DataLoader(train_dataset, batch_size=1, sampler=sampler)
+            logging.info('Budgeted sampling: samples/epoch=%d dataset=%d',
+                         samples_per_epoch, len(train_dataset))
+        else:
+            train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, generator=generator) # works well only for batch_size=1!!
         if args.test_input is not None:
             test_dataset = BPseqDataset(args.test_input)
-            self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+            test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False) # works well only for batch_size=1!!
+        else:
+            test_loader = None
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
@@ -224,41 +835,289 @@ class Train:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-        self.model, config = self.build_model(args)
-        config.update({ 'model': args.model, 'param': args.param })
-        
+        model, config = self.build_model(args)
+        config.update({ 'model': args.model, 'param': args.param, 'fold': args.fold })
+
+        shape_model = None
+        if args.shape is not None and args.shape_loss_func == 'shape_nll':
+            shape_model = [ self.build_shape_model(args) for _ in args.shape ]
+
         if args.init_param != '':
             init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:
                 init_param = Path(conf) / init_param
-            p = torch.load(init_param)
+            p = torch.load(init_param, map_location='cpu')
+            if shape_model is not None and isinstance(p, dict) and 'shape_model_state_dict' in p:
+                for i, sm in enumerate(shape_model):
+                    sm.load_state_dict(p['shape_model_state_dict'][i])
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
-            self.model.load_state_dict(p)
+            missing, unexpected = model.load_state_dict(p, strict=False)
+            optional_missing = [key for key in missing if '.shape_head_' in key]
+            required_missing = [key for key in missing if key not in optional_missing]
+            if required_missing or unexpected:
+                details = []
+                if required_missing:
+                    details.append(f'missing keys: {required_missing}')
+                if unexpected:
+                    details.append(f'unexpected keys: {list(unexpected)}')
+                raise RuntimeError(
+                    'Incompatible initial checkpoint (' + '; '.join(details) + ')'
+                )
+            if optional_missing:
+                logging.warning(
+                    "Initial checkpoint lacks optional SHAPE regression heads: %s",
+                    optional_missing,
+                )
 
-        if args.gpu >= 0:
-            self.model.to(torch.device("cuda", args.gpu))
-        self.optimizer = self.build_optimizer(args.optimizer, self.model, args.lr, args.l2_weight)
-        self.loss_fn = self.build_loss_function(args.loss_func, self.model, args)
+        device, self.device_type = self.get_device(args.gpu)
+        model.to(device)
+        if shape_model is not None:
+            for sm in shape_model:
+                sm.to(device)
+
+        # --- Freeze specified high-level components (encoder, fc_paired) ---
+        self._frozen_eval_modules = []
+        if hasattr(args, 'freeze') and args.freeze:
+            keys = []
+            for item in args.freeze:
+                for k in item.split(','):
+                    k = k.strip()
+                    if k:
+                        keys.append(k)
+
+            # try to find the network module (handles model.zuker.net or model.net)
+            net = None
+            if hasattr(model, 'zuker') and hasattr(model.zuker, 'net'):
+                net = model.zuker.net
+            elif hasattr(model, 'net'):
+                net = model.net
+            else:
+                net = model
+
+            def _register_frozen_eval_module(m: Optional[nn.Module]) -> None:
+                if m is not None and all(existing is not m for existing in self._frozen_eval_modules):
+                    self._frozen_eval_modules.append(m)
+
+            def _freeze_module(m: Optional[nn.Module]) -> bool:
+                if m is None:
+                    return False
+                for p in m.parameters():
+                    p.requires_grad = False
+                _register_frozen_eval_module(m)
+                return True
+
+            applied = []
+            if 'encoder' in keys:
+                if hasattr(net, 'encoder'):
+                    _freeze_module(getattr(net, 'encoder'))
+                    applied.append('encoder')
+                else:
+                    logging.warning("freeze requested: 'encoder' not found on model")
+            if 'fc_paired' in keys:
+                if hasattr(net, 'fc_paired'):
+                    _freeze_module(getattr(net, 'fc_paired'))
+                    applied.append('fc_paired')
+                else:
+                    logging.warning("freeze requested: 'fc_paired' not found on model")
+
+            # fallback: if a key appears in parameter names, freeze those params
+            for k in keys:
+                if k in ('encoder','fc_paired'):
+                    continue
+                matched = False
+                for name, p in model.named_parameters():
+                    if k in name:
+                        p.requires_grad = False
+                        matched = True
+                if matched:
+                    applied.append(k)
+                    # Register the corresponding module(s) for eval mode as
+                    # well.  This also handles generic keys such as
+                    # "embedding", which freeze by parameter-name matching.
+                    for module_name, module in model.named_modules():
+                        if module_name.rsplit('.', 1)[-1] != k:
+                            continue
+                        module_params = list(module.parameters())
+                        if module_params and all(not p.requires_grad for p in module_params):
+                            _register_frozen_eval_module(module)
+
+            total = sum(p.numel() for p in model.parameters())
+            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            logging.info(f"Freeze keys={keys} applied={applied}. trainable params={trainable}/{total}")
+
+        torch.set_num_threads(args.threads)
+        interface.set_num_threads(args.threads)
+
+        self._l2_sp_weight = getattr(args, 'l2_sp_weight', 0.0)
+        self._l2_sp_anchor = {}
+        if self._l2_sp_weight > 0.0:
+            anchor_path = getattr(args, 'l2_sp_anchor', '')
+            if not anchor_path:
+                raise ValueError('--l2-sp-anchor is required when --l2-sp-weight is positive')
+            anchor_checkpoint = torch.load(anchor_path, map_location='cpu')
+            if isinstance(anchor_checkpoint, dict) and 'model_state_dict' in anchor_checkpoint:
+                anchor_state = anchor_checkpoint['model_state_dict']
+            else:
+                anchor_state = anchor_checkpoint
+            for name, parameter in model.named_parameters():
+                if '.embedding.' not in name and '.encoder.' not in name:
+                    continue
+                value = anchor_state.get(name)
+                if value is None:
+                    raise ValueError(f'L2-SP anchor is missing parameter: {name}')
+                if value.shape != parameter.shape:
+                    raise ValueError(
+                        f'L2-SP anchor shape mismatch for {name}: {value.shape} != {parameter.shape}'
+                    )
+                self._l2_sp_anchor[name] = value.detach().to(device=device, dtype=parameter.dtype)
+            if not self._l2_sp_anchor:
+                raise ValueError('No embedding or encoder parameters found for L2-SP')
+            logging.info(
+                'L2-SP weight=%g anchored_parameters=%d anchored_numel=%d',
+                self._l2_sp_weight,
+                len(self._l2_sp_anchor),
+                sum(value.numel() for value in self._l2_sp_anchor.values()),
+            )
+
+        optimizer = self.build_optimizer(
+            args.optimizer, model, args.lr, args.l2_weight,
+            shape_model=shape_model,
+            sam_type=getattr(args, 'sam_type', None),
+            sam_rho=getattr(args, 'sam_rho', 0.05),
+            sam_alpha=getattr(args, 'sam_alpha', 0.1),
+            lr_overrides={
+                'embedding': getattr(args, 'lr_embedding', None),
+                'encoder': getattr(args, 'lr_encoder', None),
+                'fc_paired': getattr(args, 'lr_fc_paired', None),
+            }
+        )
+
+        loss_fn = {
+            'BPSEQ': self.build_loss_function(args.loss_func, model, args), 
+            'SHAPE': self.build_shape_loss_function(args.shape_loss_func, model, args, shape_model=shape_model), 
+            'SHAPE_regress': self.build_shape_regress_loss_function(model) 
+        }
+        
+        loss_weight = { 'BPSEQ': args.bpseq_loss_weight, 'BPSEQ2': args.second_loss_weight, 'SHAPE': args.shape_loss_weight, 'MULTI': 1.0, 'MULTI_intra': (args.mt_alpha, args.mt_beta) }
+        scheduler = self.build_scheduler(args.scheduler, optimizer, args)
+
+        # Initialize GradScaler for mixed precision training
+        scaler = None
+        use_amp = False
+        if hasattr(args, 'use_amp') and args.use_amp and self.device_type in ('cuda', 'mps'):
+            use_amp = True
+            if self.device_type == 'cuda':
+                scaler = GradScaler(f'cuda:{args.gpu}')
+            else:  # MPS
+                scaler = GradScaler('mps')
+            logging.info(f"Using Automatic Mixed Precision (AMP) training on {self.device_type.upper()}")
+
+        # Initialize EMA before resume (so state can be restored)
+        if args.ema:
+            ema = EMA(model, decay=args.ema_decay)
+            ema_start = args.ema_start if args.ema_start >= 1.0 else args.epochs * args.ema_start
+        else:
+            ema = None
+            ema_start = args.epochs
 
         checkpoint_epoch = 0
         if args.resume is not None:
-            checkpoint_epoch = self.resume_checkpoint(args.resume)
+            checkpoint_epoch, resumed_scaler = self.resume_checkpoint(
+                args.resume, model, optimizer, scheduler, shape_model, ema, scaler, args.gpu)
+            if resumed_scaler is not None:
+                scaler = resumed_scaler
+                use_amp = True
+                logging.info("Resumed with Automatic Mixed Precision (AMP) training")
+
+        if args.swa:
+            swa_model = AveragedModel(model)
+            swa_start = args.swa_start if args.swa_start > 1.0 else args.epochs * args.swa_start
+            swa_scheduler = SWALR(optimizer, swa_lr=args.swa_lr,
+                                    anneal_epochs=args.swa_anneal_epochs,
+                                    anneal_strategy=args.swa_anneal_strategy)
+        else:
+            swa_start = args.epochs
+            swa_model = None
+            swa_scheduler = None
 
         for epoch in range(checkpoint_epoch+1, args.epochs+1):
-            self.train(epoch)
-            if self.test_loader is not None:
-                self.test(epoch)
-            if args.log_dir is not None:
-                self.save_checkpoint(args.log_dir, epoch)
+            # Set random seed for this epoch to ensure reproducible shuffling
+            if args.seed >= 0:
+                epoch_seed = args.seed + epoch
+                generator.manual_seed(epoch_seed)
+
+            # Update epoch info for Shape loss functions (for weight scheduling inside loss)
+            if 'SHAPE' in loss_fn and hasattr(loss_fn['SHAPE'], 'set_epoch_info'):
+                loss_fn['SHAPE'].set_epoch_info(epoch, args.epochs)
+
+            epoch_start = time.time()
+            self.train(epoch, model=model, optimizer=optimizer, loss_fn=loss_fn, data_loader=train_loader,
+                        loss_weight=loss_weight, clip_grad_value=args.clip_grad_value, clip_grad_norm=args.clip_grad_norm,
+                        scaler=scaler, use_amp=use_amp,
+                        grad_accum_steps=getattr(args, 'grad_accum_steps', 1))
+
+            # Get current learning rate
+            current_lr = args.lr
+            if swa_model is not None and swa_scheduler is not None and epoch > swa_start:
+                swa_model.update_parameters(model)
+                swa_scheduler.step()
+                current_lr = swa_scheduler.get_last_lr()[0]
+                logging.info(f'LR = {current_lr}')
+            elif scheduler is not None:
+                scheduler.step()
+                current_lr = scheduler.get_last_lr()[0]
+                logging.info(f'LR = {current_lr}')
+
+            # Update EMA after each epoch (after warmup)
+            if ema is not None and epoch > ema_start:
+                ema.update(model)
+
+            if test_loader is not None:
+                # Save RNG states before test() to ensure test data doesn't affect training reproducibility
+                rng_state_torch = torch.get_rng_state()
+                rng_state_python = random.getstate()
+                rng_state_cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+
+                # Use SWA model if available, otherwise EMA model (if started), otherwise regular model
+                eval_model = swa_model or (ema.shadow if ema and epoch > ema_start else None) or model
+                self.test(epoch, model=eval_model, loss_fn=loss_fn, data_loader=test_loader, use_amp=use_amp)
+
+                # Restore RNG states after test()
+                torch.set_rng_state(rng_state_torch)
+                random.setstate(rng_state_python)
+                if rng_state_cuda is not None:
+                    torch.cuda.set_rng_state_all(rng_state_cuda)
+
+            epoch_time = time.time() - epoch_start
+            if self.use_wandb:
+                log_dict = {
+                    "epoch": epoch,
+                    "epoch_time": epoch_time,
+                    "learning_rate": current_lr,
+                }
+                wandb.log(log_dict)
+
+            checkpoint_dir = args.output_dir
+            if checkpoint_dir is None:
+                # --log-dir was the checkpoint/log directory in the local
+                # training scripts before the upstream CLI rename.
+                checkpoint_dir = getattr(args, 'log_dir', None)
+            checkpoint_interval = max(1, getattr(args, 'checkpoint_every_n_epochs', 1))
+            if checkpoint_dir is not None and (
+                epoch % checkpoint_interval == 0 or epoch == args.epochs
+            ):
+                self.save_checkpoint(checkpoint_dir, epoch, model, optimizer, scheduler, shape_model, ema=ema, step=self.step, scaler=scaler)
 
         if args.param is not None:
-            torch.save(self.model.state_dict(), args.param)
+            # Priority: SWA model > EMA model (if started) > regular model
+            final_model = swa_model or (ema.shadow if ema and args.epochs > ema_start else None) or model
+            torch.save(final_model.state_dict(), args.param)
         if args.save_config is not None:
             self.save_config(args.save_config, config)
 
-        return self.model
-
+        if self.use_wandb:
+            wandb.finish()
 
     @classmethod
     def add_args(cls, parser):
@@ -270,18 +1129,43 @@ class Train:
                             help='Test data of the list of BPSEQ-formatted files')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
+        subparser.add_argument('--threads', type=int, default=1, metavar='N',
+                            help='the number of threads (default: 1)')
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--param', type=str, default='param.pth',
                             help='output file name of trained parameters')
         subparser.add_argument('--init-param', type=str, default='',
                             help='the file name of the initial parameters')
+        subparser.add_argument('--l2-sp-anchor', type=str, default='',
+                            help='Checkpoint anchoring embedding and encoder parameters for L2-SP')
+        subparser.add_argument('--l2-sp-weight', type=float, default=0.0,
+                            help='L2-SP coefficient for squared distance from --l2-sp-anchor')
+        subparser.add_argument('--shape', type=str, action='append', help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--input-2', type=str, default=None,
+                            help='Second training data of the list of BPSEQ-formatted files')
+        subparser.add_argument('--replay-fraction', type=float, default=0.0,
+                            help='Sampling fraction for --input-2 replay data (default: 0; replacement sampling)')
+        subparser.add_argument('--samples-per-epoch', type=int, default=0,
+                            help='Bound draws per epoch (0: original full-dataset behavior)')
+        subparser.add_argument('--second-loss-weight', type=float, default=1.0,
+                            help='loss weight for the second BPSEQ dataset (default: 1.0)')
+        subparser.add_argument('--freeze', type=str, action='append',
+                               help='freeze components for fine-tuning(Not --resume, but --init-param). repeatable or comma-separated. supported keys: encoder,fc_paired')
+        # subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+        #                     help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        # subparser.add_argument('--shape-slope', type=float, default=2.6, 
+        #                     help='Specify a slope used with SHAPE restraints. Default is 2.6 kcal/mol.')
 
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument('--epochs', type=int, default=10, metavar='N',
                             help='number of epochs to train (default: 10)')
+        subparser.add_argument('--output-dir', type=str, default=None,
+                            help='Directory for storing checkpoints')
+        subparser.add_argument('--checkpoint-every-n-epochs', type=int, default=1,
+                            help='Save checkpoints every N epochs (always save the final epoch)')
         subparser.add_argument('--log-dir', type=str, default=None,
-                            help='Directory for storing logs')
+                            help='Directory for loss/IMLE logs and, when --output-dir is omitted, checkpoints')
         subparser.add_argument('--resume', type=str, default=None,
                             help='Checkpoint file for resume')
         subparser.add_argument('--save-config', type=str, default=None,
@@ -290,67 +1174,152 @@ class Train:
                             help='disable the progress bar in training')
         subparser.add_argument('--verbose', action='store_true',
                             help='enable verbose outputs for debugging')
+        subparser.add_argument('--loglevel', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
+                            default='WARNING', help="set the log level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')")
+        subparser.add_argument('--use-amp', action='store_true',
+                            help='use automatic mixed precision (AMP) for faster training on GPUs')
 
-        gparser = subparser.add_argument_group("Optimizer setting")
-        gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD'), default='AdamW')
+        gparser = subparser.add_argument_group("Weights & Biases (wandb)")
+        gparser.add_argument('--wandb-project', type=str, default=None,
+                            help='wandb project name (enables wandb logging when specified)')
+        gparser.add_argument('--wandb-run-name', type=str, default=None,
+                            help='wandb run name (optional)')
+        gparser.add_argument('--wandb-tags', type=str, nargs='*', default=None,
+                            help='wandb tags (optional)')
+
+        cls.add_fold_args(subparser)
+
+        gparser = subparser.add_argument_group("Setting for optimizer")
+        gparser.add_argument('--optimizer', choices=('Adam', 'AdamW', 'RMSprop', 'SGD', 'ASGD', 'AdaBelief', 'Lion'), default='AdamW')
+        gparser.add_argument('--lr', type=float, default=0.001,
+                            help='the learning rate for optimizer (default: 0.001)')
+        gparser.add_argument('--lr-embedding', type=float, default=None,
+                            help='Optional learning rate override for embedding parameters')
+        gparser.add_argument('--lr-encoder', type=float, default=None,
+                            help='Optional learning rate override for encoder parameters')
+        gparser.add_argument('--lr-fc-paired', type=float, default=None,
+                            help='Optional learning rate override for 2D paired-head parameters')
+        gparser.add_argument('--clip-grad-value', type=float, default=0.,
+                            help='gradient clipping by values (default=0, no clipping)')
+        gparser.add_argument('--clip-grad-norm', type=float, default=0.,
+                            help='gradient clipping by norm (default=0, no clipping)')
+        gparser.add_argument('--scheduler', choices=('None', 'CyclicLR', 'CosineAnnealingLR'), default='None',
+                            help="learning rate scheduler ('None', 'CyclicLR', 'CosineAnnealingLR')")
+        gparser.add_argument('--scheduler-step-size', type=int, default=5, help='scheduler step size (default=5)')
+        gparser.add_argument('--scheduler-gamma', type=float, default=0.95, help='scheduler decoy rate (default: 0.95)')
+        gparser.add_argument('--swa', default=False, action='store_true',
+                            help='use stochastic weight averaging (SWA)')
+        gparser.add_argument('--swa-start', type=float, default=0.75, 
+                            help='start epoch of SWA: epochs * swa_start for swa_start<1.0, or swa_start otherwise')
+        gparser.add_argument('--swa-anneal-epochs', type=int, default=10, help='SWA anneal-epochs (default: 10)')
+        gparser.add_argument('--swa-anneal-strategy', choices=('linear', 'cos'), default='linear',
+                            help="SWA anneal strategy ('linear', 'cos')")
+        gparser.add_argument('--swa-lr', type=float, default=0.01, help='SWA learning rate (default: 0.01)')
+        gparser.add_argument('--ema', default=False, action='store_true',
+                            help='use exponential moving average (EMA) for model weights')
+        gparser.add_argument('--ema-decay', type=float, default=0.999,
+                            help='EMA decay factor (default: 0.999)')
+        gparser.add_argument('--ema-start', type=float, default=0,
+                            help='epoch to start EMA (default: 0). If < 1.0, fraction of total epochs.')
+        gparser.add_argument('--sam-type', choices=('None', 'SAM', 'ASAM', 'GSAM'), default='None',
+                            help="SAM optimizer type ('None', 'SAM', 'ASAM', 'GSAM')")
+        gparser.add_argument('--sam-rho', type=float, default=0.05,
+                            help='SAM perturbation radius (default: 0.05, use 0.5 for ASAM)')
+        gparser.add_argument('--sam-alpha', type=float, default=0.1,
+                            help='GSAM gap weighting parameter (default: 0.1)')
+        gparser.add_argument('--grad-accum-steps', type=int, default=1,
+                            help='Gradient accumulation steps (default: 1, no accumulation)')
+
+        gparser = subparser.add_argument_group("Setting for loss function")
+        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix', 'fy', 'fy_mix', 'f1'), default='hinge',
+                            help="loss fuction (default: hinge)")
         gparser.add_argument('--l1-weight', type=float, default=0.,
                             help='the weight for L1 regularization (default: 0)')
         gparser.add_argument('--l2-weight', type=float, default=0.,
                             help='the weight for L2 regularization (default: 0)')
-        gparser.add_argument('--score-loss-weight', type=float, default=1.,
-                            help='the weight for score loss for hinge_mix loss (default: 1)')
-        gparser.add_argument('--lr', type=float, default=0.001,
-                            help='the learning rate for optimizer (default: 0.001)')
-        gparser.add_argument('--loss-func', choices=('hinge', 'hinge_mix'), default='hinge',
-                            help="loss fuction ('hinge', 'hinge_mix') ")
+        gparser.add_argument('--score-loss-weight', type=float, default=0.,
+                            help='the weight for score loss for {hinge,fy} loss (default: 0)')
+        gparser.add_argument('--bpseq-loss-weight', type=float, default=1.,
+                            help='weight for BPSEQ examples mixed into Implicit_MLE training (default: 1)')
+        gparser.add_argument('--perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for fy loss (default: 0.1) パラメータに探索ノイズを付加する')
+        gparser.add_argument('--nu', type=float, default=0.1,
+                            help='weight for distribution (default: 0.1) loss=f1 でImplicitMLEの勾配係数')
         gparser.add_argument('--loss-pos-paired', type=float, default=0.5,
                             help='the penalty for positive base-pairs for loss augmentation (default: 0.5)')
         gparser.add_argument('--loss-neg-paired', type=float, default=0.005,
                             help='the penalty for negative base-pairs for loss augmentation (default: 0.005)')
-        gparser.add_argument('--loss-pos-unpaired', type=float, default=0,
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0.,
                             help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
-        gparser.add_argument('--loss-neg-unpaired', type=float, default=0,
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
                             help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--shape-model', choices=('Wu', 'Foo'), default='Wu',
+                            help="shape model (default: Wu)")
+        gparser.add_argument('--shape-loss-func', choices=('shape_nll', 'shape_fy', 'shape_partial_fy', 'shape_rank'), default='shape_nll',
+                            help="loss fuction for SHAPE training data (default: shape)")
+        gparser.add_argument('--shape-unpaired-threshold', type=float, default=0.8,
+                            help='Minimum measured reactivity forced unpaired by shape_partial_fy (default: 0.8)')
+        gparser.add_argument('--shape-perturb', type=float, default=0.1,
+                            help='standard deviation of perturbation for shape loss (default: 0.1)')
+        gparser.add_argument('--shape-nu', type=float, default=0.1,
+                            help='weight for distribution for shape loss (default: 0.1)')
+        gparser.add_argument('--shape-margin', type=float, default=0.0,
+                            help='margin for shape rank loss (default: 0.0)')
+        gparser.add_argument('--shape-pseudo-fy-weight', type=float, default=0.0,
+                            help='weight for FY loss using Turner structure as pseudo ground truth (default: 0.0)')
+        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6.')
+        gparser.add_argument('--shape-loss-weight', type=float, default=1.,
+                            help='weight for SHAPE loss function (default=1) shape/shapeなしの交互学習における重み RNA間の重み')
+        gparser.add_argument('--shape-rank-tau', type=float, default=0.2,
+                            help='temperature for SHAPE Rank Loss (default=0.2)')
+        gparser.add_argument('--shape-rank-objective', choices=('pairwise_logistic', 'mann_whitney'), default='pairwise_logistic',
+                            help='rank objective: legacy logistic or nonparametric 1-AUROC (default=pairwise_logistic)')
+        gparser.add_argument('--shape-rank-weighting', choices=('uniform', 'gap', 'log_gap'), default='uniform',
+                            help='pair weighting for SHAPE Rank Loss (uniform, gap, or log_gap)')
+        gparser.add_argument('--shape-rank-delta', type=float, default=0.0,
+                            help='ignore SHAPE order pairs separated by at most this value (default=0)')
+        gparser.add_argument('--shape-rank-teacher-temperature', type=float, default=0.0,
+                            help='soft-label temperature in SHAPE reactivity units; 0 uses hard ordering (default=0)')
+        gparser.add_argument('--shape-rank-teacher-normalization', choices=('none', 'robust', 'percentile'), default='none',
+                            help='normalize SHAPE targets within each sequence before rank teacher construction (default=none)')
+        gparser.add_argument('--shape-rank-sample-aggregation', choices=('independent', 'mean_paired'), default='independent',
+                            help='evaluate rank loss per MAP sample or once on mean pairedness (default=independent)')
+        gparser.add_argument('--shape-rank-targets', choices=('raw', 'clipped'), default='raw',
+                            help='use raw or [0.01,1] clipped reactivities for rank loss (default=raw)')
+        gparser.add_argument('--shape-imle-alignment', choices=('aligned',), default='aligned',
+                            help='map the 1-based L+1 pairedness gradient to L bases (default=aligned)')
+        gparser.add_argument('--shape-imle-normalization', choices=('none', 'rms', 'max'), default='none',
+                            help='normalize pairedness gradients before the second fold (default=none)')
+        gparser.add_argument('--shape-imle-estimator-scale', choices=('divide_nu', 'none'), default='divide_nu',
+                            help='divide count differences by nu for finite-difference estimation (default=divide_nu)')
+        gparser.add_argument('--shape-imle-difference', choices=('forward', 'central'), default='forward',
+                            help='one-sided or central finite difference using coupled perturbations (default=forward)')
+        gparser.add_argument('--shape-imle-samples', type=int, default=1,
+                            help='number of coupled perturb-and-MAP samples to average (default=1)')
+        gparser.add_argument('--shape-imle-train-turner', action='store_true',
+                            help='opt in to legacy IMLE updates of mixed-model Turner parameters; frozen by default, as in FY/SHAPE-fy')
+        gparser.add_argument('--shape-imle-adaptive-nu', action='store_true',
+                            help='adapt nu per sequence to a target paired-state flip fraction')
+        gparser.add_argument('--shape-imle-nu-min', type=float, default=1e-3,
+                            help='minimum nu for per-sequence adaptation (default=1e-3)')
+        gparser.add_argument('--shape-imle-nu-max', type=float, default=1e3,
+                            help='maximum nu for per-sequence adaptation (default=1e3)')
+        gparser.add_argument('--shape-imle-flip-low', type=float, default=0.01,
+                            help='minimum target paired-state flip fraction (default=0.01)')
+        gparser.add_argument('--shape-imle-flip-high', type=float, default=0.10,
+                            help='maximum target paired-state flip fraction (default=0.10)')
+        gparser.add_argument('--shape-imle-adaptive-factor', type=float, default=2.,
+                            help='multiplicative nu adjustment factor (default=2)')
+        gparser.add_argument('--shape-imle-adaptive-steps', type=int, default=4,
+                            help='maximum fold attempts for adaptive nu (default=4)')
 
-        gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC')")
-        gparser.add_argument('--max-helix-length', type=int, default=30, 
-                        help='the maximum length of helices (default: 30)')
-        gparser.add_argument('--embed-size', type=int, default=0,
-                        help='the dimention of embedding (default: 0 == onehot)')
-        gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--filter-size', type=int, action='append',
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN (default: 1)')
-        gparser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution (default: 0)')
-        gparser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers (default: 0)')
-        gparser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units (default: 0)')
-        gparser.add_argument('--num-transformer-layers', type=int, default=0,
-                        help='the number of the transformer layers (default: 0)')
-        gparser.add_argument('--num-transformer-hidden-units', type=int, default=2048,
-                        help='the number of the hidden units of each transformer layer (default: 2048)')
-        gparser.add_argument('--num-transformer-att', type=int, default=8,
-                        help='the number of the attention heads of each transformer layer (default: 8)')
-        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers (default: 32)')
-        gparser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the CNN and LSTM units (default: 0.0)')
-        gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--num-att', type=int, default=0,
-                        help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
-        gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        gparser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
+        gparser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
+
+        cls.add_task_args(subparser)
+        cls.add_network_args(subparser)
 
         subparser.set_defaults(func = lambda args, conf: Train().run(args, conf))

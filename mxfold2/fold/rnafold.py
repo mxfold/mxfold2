@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +12,7 @@ from .fold import AbstractFold
 
 class RNAFold(AbstractFold):
     def __init__(self, init_param=None):
-        super(RNAFold, self).__init__(interface.predict_turner, interface.partfunc_turner)
+        super(RNAFold, self).__init__(interface.ZukerTurnerWrapper())
         if init_param is None:
             self.score_hairpin_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
             self.score_bulge_at_least = nn.Parameter(torch.zeros((31,), dtype=torch.float32))
@@ -42,6 +46,11 @@ class RNAFold(AbstractFold):
                     setattr(self, n, nn.Parameter(torch.tensor(getattr(init_param, n))))
 
 
-    def make_param(self, seq):
-        param = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
-        return [ param for s in seq ]
+    def make_param(self, seq: list[str], perturb: float = 0) -> list[dict[str, Any]]:
+        device = next(self.parameters()).device
+        param_without_perturb = { n : getattr(self, n) for n in dir(self) if n.startswith("score_") }
+        if perturb > 0:
+            param = { n : getattr(self, n) + torch.normal(0, perturb, size=getattr(self, n).shape, device=device) for n in dir(self) if n.startswith("score_") }
+            return ([param for _ in seq], [param_without_perturb for _ in seq])
+        else:
+            return [ param_without_perturb for _ in seq ]

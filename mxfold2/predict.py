@@ -1,45 +1,78 @@
+from __future__ import annotations
+
 import os
 import random
 import time
+from argparse import Namespace
 from pathlib import Path
+from typing import Optional
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+#import torch.nn as nn
+#import torch.nn.functional as F
+from torch.amp import autocast
+from torch.optim.swa_utils import AveragedModel
 from torch.utils.data import DataLoader
-import numpy as np
 
-from .compbpseq import accuracy, compare_bpseq
-from .dataset import BPseqDataset, FastaDataset
-from .fold.mix import MixedFold
-from .fold.rnafold import RNAFold
-from .fold.zuker import ZukerFold
+from mxfold2 import interface  # ty:ignore[unresolved-import]
+from mxfold2.compbpseq import accuracy, compare_bpseq
+from mxfold2.dataset import BPseqDataset, FastaDataset
+from mxfold2.fold.fold import AbstractFold
+from mxfold2.common import Common
 
 
-class Predict:
+class Predict(Common):
     def __init__(self):
-        self.test_loader = None
+        super(Predict, self).__init__()
 
 
-    def predict(self, output_bpseq=None, output_bpp=None, result=None, use_constraint=False):
+    def predict(self, 
+                model: AbstractFold | AveragedModel,
+                data_loader: DataLoader,
+                output_bpseq: Optional[str] = None, 
+                output_bpp: Optional[str] = None, 
+                result: Optional[str] = None, 
+                use_constraint: bool = False,
+                shape_list: Optional[list[Optional[str]]] = None,
+                shape_intercept: float = 0.0,
+                shape_slope: float = 0.0,
+                use_amp: bool = False) -> None:
+
         res_fn = open(result, 'w') if result is not None else None
-        self.model.eval()
+        if res_fn is not None:
+            # Keep the CSV contract consumed by utils/avg-res.py and the
+            # historical qsub reports.  Upstream's writer emitted data rows
+            # without a header, which made pandas interpret the first
+            # sequence as column names and silently drop it from aggregates.
+            res_fn.write('name,length,elapsed_time,score,TP,TN,FP,FN,SEN,PPV,F,MCC\n')
+        shape_list = [None] * len(data_loader) if shape_list is None else shape_list
+        while len(shape_list) < len(data_loader):
+            shape_list.append(None)
+
+        model.eval()
+        seq_processed = 0
         with torch.no_grad():
-            for headers, seqs, refs in self.test_loader:
+            for headers, seqs, vals in data_loader:
                 start = time.time()
-                if output_bpp is None:
-                    if use_constraint:
-                        scs, preds, bps = self.model(seqs, constraint=refs)
-                    else:
-                        scs, preds, bps = self.model(seqs)
-                    pfs = bpps = [None] * len(preds)
+                if use_constraint:
+                    constraint = [ tgt if tp=='BPSEQ' else None for tp, tgt in zip(vals['type'], vals['target'])]
                 else:
-                    if use_constraint:
-                        scs, preds, bps, pfs, bpps = self.model(seqs, return_partfunc=True, constraint=refs)
+                    constraint = None
+                pseudoenergy = [
+                    self.load_shape_reactivity(shape_file, shape_intercept, shape_slope) \
+                        if shape_file is not None else None \
+                        for shape_file in shape_list[seq_processed:seq_processed+len(seqs)] ]
+                seq_processed += len(seqs)
+                
+                # Use autocast for mixed precision inference
+                with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
+                    if output_bpp is None:
+                        scs, preds, bps = model(seqs, constraint=constraint, pseudoenergy=pseudoenergy)
+                        pfs = bpps = [None] * len(preds)
                     else:
-                        scs, preds, bps, pfs, bpps = self.model(seqs, return_partfunc=True, )
+                        scs, preds, bps, pfs, bpps = model(seqs, return_partfunc=True, constraint=constraint, pseudoenergy=pseudoenergy)
                 elapsed_time = time.time() - start
-                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, refs, scs, preds, bps, pfs, bpps):
+                for header, seq, ref, sc, pred, bp, pf, bpp in zip(headers, seqs, vals['target'], scs, preds, bps, pfs, bpps):
                     if output_bpseq is None:
                         print('>'+header)
                         print(seq)
@@ -61,95 +94,100 @@ class Predict:
                         x = [header, len(seq), elapsed_time, sc.item()] + list(x) + list(accuracy(*x))
                         res_fn.write(', '.join([str(v) for v in x]) + "\n")
                     if output_bpp is not None:
-                        bpp = np.triu(bpp)
-                        bpp = bpp + bpp.T
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0] 
                         fn = os.path.join(output_bpp, fn+".bpp")
-                        np.savetxt(fn, bpp, fmt='%.5f')
+                        with open(fn, "w") as f:
+                            for i in range(1, len(bpp)):
+                                print(f"{i} {seq[i-1]} ", end='', file=f)
+                                for j, p in bpp[i]:
+                                    print(f"{j}:{p:.3f}", end=' ', file=f)
+                                print(file=f)
 
 
-    def build_model(self, args):
-        if args.model == 'Turner':
-            if args.param != '':
-                return RNAFold(), {}
-            else:
-                from . import param_turner2004
-                return RNAFold(param_turner2004), {}
+    def run(self, args: Namespace, conf: Optional[str] = None) -> None:
+        torch.set_num_threads(args.threads)
+        interface.set_num_threads(args.threads)
 
-        config = {
-            'max_helix_length': args.max_helix_length,
-            'embed_size' : args.embed_size,
-            'num_filters': args.num_filters if args.num_filters is not None else (96,),
-            'filter_size': args.filter_size if args.filter_size is not None else (5,),
-            'pool_size': args.pool_size if args.pool_size is not None else (1,),
-            'dilation': args.dilation, 
-            'num_lstm_layers': args.num_lstm_layers, 
-            'num_lstm_units': args.num_lstm_units,
-            'num_transformer_layers': args.num_transformer_layers,
-            'num_transformer_hidden_units': args.num_transformer_hidden_units,
-            'num_transformer_att': args.num_transformer_att,
-            'num_hidden_units': args.num_hidden_units if args.num_hidden_units is not None else (32,),
-            'num_paired_filters': args.num_paired_filters,
-            'paired_filter_size': args.paired_filter_size,
-            'dropout_rate': args.dropout_rate,
-            'fc_dropout_rate': args.fc_dropout_rate,
-            'num_att': args.num_att,
-            'pair_join': args.pair_join,
-            'no_split_lr': args.no_split_lr,
-        }
-
-        if args.model == 'Zuker':
-            model = ZukerFold(model_type='M', **config)
-
-        elif args.model == 'ZukerC':
-            model = ZukerFold(model_type='C', **config)
-
-        elif args.model == 'ZukerL':
-            model = ZukerFold(model_type='L', **config)
-
-        elif args.model == 'ZukerS':
-            model = ZukerFold(model_type='S', **config)
-
-        elif args.model == 'Mix':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, **config)
-
-        elif args.model == 'MixC':
-            from . import param_turner2004
-            model = MixedFold(init_param=param_turner2004, model_type='C', **config)
-
-        else:
-            raise('not implemented')
-
-        return model, config
-
-
-    def run(self, args, conf=None):
         test_dataset = FastaDataset(args.input)
         if len(test_dataset) == 0:
             test_dataset = BPseqDataset(args.input)
-        self.test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         if args.seed >= 0:
             torch.manual_seed(args.seed)
             random.seed(args.seed)
 
-        self.model, _ = self.build_model(args)
+        model, _ = self.build_model(args)
         if args.param != '':
             param = Path(args.param)
             if not param.exists() and conf is not None:
                 param = Path(conf).parent / param
             p = torch.load(param, map_location='cpu')
+            if isinstance(p, dict) and 'ema_state_dict' in p:
+                p = p['ema_state_dict']
             if isinstance(p, dict) and 'model_state_dict' in p:
                 p = p['model_state_dict']
-            self.model.load_state_dict(p)
+            if 'n_averaged' in p:
+                model = AveragedModel(model)
+            missing, unexpected = model.load_state_dict(p, strict=False)
+            optional_missing = [key for key in missing if '.shape_head_' in key]
+            required_missing = [key for key in missing if key not in optional_missing]
+            if required_missing or unexpected:
+                details = []
+                if required_missing:
+                    details.append(f'missing keys: {required_missing}')
+                if unexpected:
+                    details.append(f'unexpected keys: {list(unexpected)}')
+                raise RuntimeError(
+                    'Incompatible model checkpoint (' + '; '.join(details) + ')'
+                )
 
-        if args.gpu >= 0:
-            self.model.to(torch.device("cuda", args.gpu))
+        device, self.device_type = self.get_device(args.gpu)
+        model.to(device)
 
-        self.predict(output_bpseq=args.bpseq, output_bpp=args.bpp, result=args.result, use_constraint=args.use_constraint)
+        shape_list = None
+        if args.shape is not None: 
+            shape_list = []
+            with open(args.shape) as f:
+                for l in f:
+                    l = l.rstrip('\n').split()
+                    shape_list.append(l[0])
+        elif args.shape_file is not None:
+            shape_list = [args.shape_file]
 
+        # Enable mixed precision if GPU is being used and AMP is available
+        use_amp = hasattr(args, 'use_amp') and args.use_amp and self.device_type in ('cuda', 'mps')
+        
+        self.predict(model=model, data_loader=test_loader, 
+                    output_bpseq=args.bpseq, output_bpp=args.bpp,
+                    result=args.result, use_constraint=args.use_constraint,
+                    shape_list=shape_list,
+                    shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                    use_amp=use_amp)
+
+
+    def load_shape_reactivity(self, fname: str, intercept: float = -0.8, slope: float = 2.6) -> torch.Tensor:
+        r = []
+        with open(fname) as f:
+            for l in f:
+                l = l.rstrip('\n').split()
+                if len(l) == 2:
+                    idx, val = l
+                elif len(l) == 3:
+                    idx, _, val = l
+                else:
+                    raise(ValueError(f"Invalid SHAPE reactivity file: {fname}"))
+                idx, val = int(idx), float(val)
+                while len(r) < idx:
+                    r.append(-999)
+                r[idx-1] = val
+        # Deigan’s pseudoenergy approach
+        r = torch.tensor(r, dtype=torch.float)
+        not_na = r > -1
+        r[torch.logical_not(not_na)] = 0
+        r[not_na] = slope * torch.log(r[not_na]+1) + intercept
+        return r
 
     @classmethod
     def add_args(cls, parser):
@@ -157,11 +195,12 @@ class Predict:
         # input
         subparser.add_argument('input', type=str,
                             help='FASTA-formatted file or list of BPseq files')
-
         subparser.add_argument('--seed', type=int, default=0, metavar='S',
                             help='random seed (default: 0)')
         subparser.add_argument('--gpu', type=int, default=-1, 
                             help='use GPU with the specified ID (default: -1 = CPU)')
+        subparser.add_argument('--threads', type=int, default=1, metavar='N',
+                            help='the number of threads (default: 1)')
         subparser.add_argument('--param', type=str, default='',
                             help='file name of trained parameters') 
         subparser.add_argument('--use-constraint', default=False, action='store_true')
@@ -171,46 +210,17 @@ class Predict:
                             help='output the prediction with BPSEQ format to the specified directory')
         subparser.add_argument('--bpp', type=str, default=None,
                             help='output the base-pairing probability matrix to the specified directory')
+        subparser.add_argument('--shape', type=str, default=None, help='specify the file name that includes the list of SHAPE reactivity files')
+        subparser.add_argument('--shape-file', type=str, default=None, help='specify the file name that includes SHAPE reactivity')
+        subparser.add_argument('--shape-intercept', type=float, default=-0.8,
+                            help='Specify an intercept used with SHAPE restraints. Default is -0.8 kcal/mol.')
+        subparser.add_argument('--shape-slope', type=float, default=2.6, 
+                            help='Specify a slope used with SHAPE restraints. Default is 2.6.')
+        subparser.add_argument('--use-amp', action='store_true',
+                            help='use automatic mixed precision (AMP) for faster inference on GPUs')
 
-        gparser = subparser.add_argument_group("Network setting")
-        gparser.add_argument('--model', choices=('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC'), default='Turner', 
-                            help="Folding model ('Turner', 'Zuker', 'ZukerS', 'ZukerL', 'ZukerC', 'Mix', 'MixC')")
-        gparser.add_argument('--max-helix-length', type=int, default=30, 
-                        help='the maximum length of helices (default: 30)')
-        gparser.add_argument('--embed-size', type=int, default=0,
-                        help='the dimention of embedding (default: 0 == onehot)')
-        gparser.add_argument('--num-filters', type=int, action='append',
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--filter-size', type=int, action='append',
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--pool-size', type=int, action='append',
-                        help='the width of the max-pooling layer of CNN (default: 1)')
-        gparser.add_argument('--dilation', type=int, default=0, 
-                        help='Use the dilated convolution (default: 0)')
-        gparser.add_argument('--num-lstm-layers', type=int, default=0,
-                        help='the number of the LSTM hidden layers (default: 0)')
-        gparser.add_argument('--num-lstm-units', type=int, default=0,
-                        help='the number of the LSTM hidden units (default: 0)')
-        gparser.add_argument('--num-transformer-layers', type=int, default=0,
-                        help='the number of the transformer layers (default: 0)')
-        gparser.add_argument('--num-transformer-hidden-units', type=int, default=2048,
-                        help='the number of the hidden units of each transformer layer (default: 2048)')
-        gparser.add_argument('--num-transformer-att', type=int, default=8,
-                        help='the number of the attention heads of each transformer layer (default: 8)')
-        gparser.add_argument('--num-paired-filters', type=int, action='append', default=[],
-                        help='the number of CNN filters (default: 96)')
-        gparser.add_argument('--paired-filter-size', type=int, action='append', default=[],
-                        help='the length of each filter of CNN (default: 5)')
-        gparser.add_argument('--num-hidden-units', type=int, action='append',
-                        help='the number of the hidden units of full connected layers (default: 32)')
-        gparser.add_argument('--dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the CNN and LSTM units (default: 0.0)')
-        gparser.add_argument('--fc-dropout-rate', type=float, default=0.0,
-                        help='dropout rate of the hidden units (default: 0.0)')
-        gparser.add_argument('--num-att', type=int, default=0,
-                        help='the number of the heads of attention (default: 0)')
-        gparser.add_argument('--pair-join', choices=('cat', 'add', 'mul', 'bilinear'), default='cat', 
-                            help="how pairs of vectors are joined ('cat', 'add', 'mul', 'bilinear') (default: 'cat')")
-        gparser.add_argument('--no-split-lr', default=False, action='store_true')
+        cls.add_task_args(subparser)
+        cls.add_fold_args(subparser)
+        cls.add_network_args(subparser)
 
         subparser.set_defaults(func = lambda args, conf: Predict().run(args, conf))
