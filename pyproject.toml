@@ -1,6 +1,6 @@
 [project]
 name = "mxfold2"
-version = "0.3.0"
+version = "1.0.0"
 description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
 authors = [
     { name="Kengo Sato", email="satoken@life.isct.ac.jp" }

@@ -172,7 +172,7 @@ mxfold2 predict example.fa --shape-file data/examples/hairpin.shape
 
 ## Bundled model provenance
 
-The 0.3.0 default weights (`nr80_imle_rank.pth`) were pretrained for 10 epochs
+The default weights in MXfold2 1.0.0 (`nr80_imle_rank.pth`) were pretrained for 10 epochs
 on 67,681 structure-labeled RNAs of up to 1,000 nt, clustered at 80% sequence
 identity. The collection included curated structures and RNAcentral
 pseudolabels, with curated representatives preferred when available. The

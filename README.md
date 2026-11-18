@@ -7,8 +7,24 @@ structures, chemical probing profiles, or both.
 
 ## Installation
 
-MXfold2 requires Python 3.10 or newer and PyTorch 2.4.1 or newer. Building from
-source also requires CMake 3.15 or newer and a C++17 compiler.
+### Install from PyPI
+
+With Python 3.10 or newer, install the latest published release from
+[PyPI](https://pypi.org/project/mxfold2/):
+
+```sh
+python -m pip install mxfold2
+mxfold2 --help
+```
+
+Use `python -m pip install --upgrade mxfold2` to update an existing
+installation. pip installs PyTorch 2.4.1 or newer and the other Python
+dependencies.
+If a compatible wheel is available for your platform and Python version,
+pip uses it. Building from the source distribution requires CMake 3.15 or
+newer and a C++17 compiler.
+
+### Install from a source checkout
 
 From a source checkout, create an environment and install the package:
 
@@ -46,7 +62,7 @@ the neural network on the first visible CUDA GPU.
 
 ### Bundled models
 
-In version 0.3.0, plain `mxfold2 predict` uses the bundled
+In version 1.0.0, plain `mxfold2 predict` uses the bundled
 `nr80_imle_rank` model. It was pretrained for 10 epochs on RNA secondary
 structures clustered at 80% sequence identity, then fine-tuned with IMLE-Rank
 for three epochs on Ribonanza and three on pri-miRNA and human mRNA probing
@@ -67,8 +83,8 @@ weights. Keep the configuration with the matching `.pth` file.
 ### Reproduce the default model training
 
 The [mxfold2-data repository](https://github.com/mxfold/mxfold2-data) contains
-the prepared datasets, training settings, and a GPU launcher for the 0.3.0
-default model. Repository access is required. See the
+the prepared datasets, training settings, and a GPU launcher for the model
+bundled in 1.0.0. Repository access is required. See the
 [default model recipe](https://github.com/mxfold/mxfold2-data/tree/main/default-model)
 for the training schedule and how to run or resume it.
 
@@ -80,7 +96,8 @@ are maintained in the same repository.
 Put each reference structure in a BPSEQ file and write one file path per line
 in `data/train.lst`. BPSEQ records give the 1-based position, the nucleotide,
 and the position of its pairing partner. Use `0` for an unpaired base. The
-[training guide](docs/training.md#prepare-your-inputs) includes sample files.
+[training guide](https://github.com/mxfold/mxfold2/blob/master/docs/training.md#prepare-your-inputs)
+includes sample files.
 
 This command uses the bundled architecture and trains the neural weights from
 scratch. Run the training examples from the source checkout:
@@ -124,9 +141,9 @@ mxfold2 train @runs/structure/model.conf runs/probing/empty.bpseq.lst \
 ```
 
 Use `mxfold2 predict @runs/probing/model.conf example.fa` to run the fine-tuned
-model. See the [training guide](docs/training.md) for combining structures and
-profiles, resuming checkpoints, evaluating a model, and using SHAPE
-reactivities at prediction time. Run `mxfold2 train --help` or
+model. See the [training guide](https://github.com/mxfold/mxfold2/blob/master/docs/training.md)
+for combining structures and profiles, resuming checkpoints, evaluating a
+model, and using SHAPE reactivities at prediction time. Run `mxfold2 train --help` or
 `mxfold2 predict --help` for the full CLI options.
 
 ## Web interface and citation
