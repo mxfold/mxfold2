@@ -93,7 +93,7 @@ class ZukerFold(AbstractFold):
 
 
     def make_param_helper(self, score_paired: torch.Tensor, score_unpaired: Optional[torch.Tensor],
-                        score_lengths: dict[str, torch.Tensor], perturb: float, use_gumbel: bool = False) -> list[dict[str, Any]]:        
+                        score_lengths: dict[str, torch.Tensor], perturb: float, use_gumbel: bool = False) -> list[dict[str, Any]]:
         device = next(self.parameters()).device
         B, N, _, _ = score_paired.shape
 

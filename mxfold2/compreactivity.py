@@ -38,8 +38,7 @@ def is_shape_format(path: str) -> bool:
                 return False
             try:
                 int(fields[0])
-                if fields[1].lower() not in MISSING_TOKENS:
-                    float(fields[1])
+                parse_reactivity_value(fields[2] if len(fields) == 3 else fields[1])
                 return True
             except ValueError:
                 return False
@@ -96,7 +95,7 @@ def read_shape_reactivity(path: str) -> dict[int, float]:
             if len(fields) < 2:
                 raise ValueError(f"invalid SHAPE line in {path}: {line}")
             pos = int(fields[0])
-            value = parse_reactivity_value(fields[1])
+            value = parse_reactivity_value(fields[2] if len(fields) == 3 else fields[1])
             if value is not None:
                 values[pos] = value
     return values

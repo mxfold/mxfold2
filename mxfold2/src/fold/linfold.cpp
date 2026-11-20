@@ -1757,7 +1757,7 @@ compute_basepairing_probabilities(const std::string& seq, const Options& opts) -
     for (auto i=1; i!=bpp.size(); ++i)
     {
         for (const auto& [j, p]: bpp[i])
-            if (p>=0.01) bpp2[i].emplace_back(j, std::min(p, 1.0f));
+            if (p>0 && p>=opts.bpp_cutoff) bpp2[i].emplace_back(j, std::min(p, 1.0f));
         std::sort(std::begin(bpp2[i]), std::end(bpp2[i]));
     }
     return bpp2;

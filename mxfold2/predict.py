@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import os
 import random
@@ -74,7 +75,8 @@ class Predict(Common):
         bpp_window_step: Optional[int] = None,
     ) -> None:
 
-        res_fn = open(result, "w") if result is not None else None
+        res_fn = open(result, "w", newline="") if result is not None else None
+        result_writer = csv.writer(res_fn) if res_fn is not None else None
         shape_list = [None] * len(data_loader) if shape_list is None else shape_list
         while len(shape_list) < len(data_loader):
             shape_list.append(None)
@@ -94,6 +96,9 @@ class Predict(Common):
             os.makedirs(output_bpseq, exist_ok=True)
             output_lst_path = os.path.join(output_bpseq, "output.lst")
             output_lst_f = open(output_lst_path, "w")
+
+        if output_bpp is not None:
+            os.makedirs(output_bpp, exist_ok=True)
 
         seq_processed = 0
         with torch.no_grad():
@@ -175,7 +180,7 @@ class Predict(Common):
                             else:
                                 raise RuntimeError("unreachable")
                         p = torch.tensor(p, dtype=torch.float32, device=sc.device)
-                        if "dataset_id" in vals:
+                        if vals["type"][batch_j] == "SHAPE" and "dataset_id" in vals:
                             shapes = [
                                 shape_model[vals["dataset_id"][batch_j]].predict(seq, p)
                             ]
@@ -220,8 +225,17 @@ class Predict(Common):
                             )
                             for i in range(1, len(bp)):
                                 print(f"{i}\t{seq[i - 1]}\t{bp[i]}", file=f)
-                    if res_fn is not None:
-                        if shape_model is not None and len(ref) > 0:
+                    if result_writer is not None:
+                        shape_result = shape_model is not None and vals["type"][batch_j] == "SHAPE"
+                        if res_fn.tell() == 0:
+                            if shape_result:
+                                result_writer.writerow(("name", "length", "elapsed_time", "score", "n", "MAE", "MSE"))
+                            else:
+                                result_writer.writerow((
+                                    "name", "length", "elapsed_time", "score", "TP", "TN",
+                                    "FP", "FN", "SEN", "PPV", "F", "MCC", "specificity", "accuracy",
+                                ))
+                        if shape_result:
                             s = torch.tensor(shapes[0])
                             s = s.clip(min=0.0, max=1.0)
                             ref = ref[1:]
@@ -238,7 +252,7 @@ class Predict(Common):
                                 float(torch.sum(d) / len(d)),
                                 float(torch.sum(d2) / len(d)),
                             ]
-                            res_fn.write(", ".join([str(v) for v in x]) + "\n")
+                            result_writer.writerow(x)
                         else:
                             x = compare_bpseq(ref, bp)
                             x = (
@@ -246,7 +260,7 @@ class Predict(Common):
                                 + list(x)
                                 + list(accuracy(*x))
                             )
-                            res_fn.write(", ".join([str(v) for v in x]) + "\n")
+                            result_writer.writerow(x)
                     if output_bpp is not None:
                         fn = os.path.basename(header)
                         fn = os.path.splitext(fn)[0]
@@ -260,6 +274,8 @@ class Predict(Common):
 
         if output_lst_f is not None:
             output_lst_f.close()
+        if res_fn is not None:
+            res_fn.close()
 
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         torch.set_num_threads(args.threads)
@@ -296,7 +312,7 @@ class Predict(Common):
                 p = p["model_state_dict"]
             if "n_averaged" in p:
                 model = AveragedModel(model)
-            model.load_state_dict(p)
+            self.load_model_weights(model, p)
 
         shape_model = None
         if args.shape_param and args.shape_param != "":
@@ -435,7 +451,7 @@ class Predict(Common):
             "--bpp-window-step",
             type=int,
             default=None,
-            help="step size between windows for windowed BPP computation (requires --bpp)",
+            help="step size between BPP windows (default: half the window size)",
         )
         subparser.add_argument(
             "--shape",
@@ -478,6 +494,7 @@ class Predict(Common):
             help="use automatic mixed precision (AMP) for faster inference on GPUs",
         )
 
+        cls.add_task_args(subparser)
         cls.add_fold_args(subparser)
         cls.add_network_args(subparser)
 

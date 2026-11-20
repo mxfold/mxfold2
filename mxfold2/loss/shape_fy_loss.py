@@ -72,37 +72,65 @@ class ShapeFenchelYoungLoss(nn.Module):
         pred: torch.Tensor
         pred_s: list[str]
         #pred_model = self.model.duplicate()
+        # シュードエナジーなし　普通に２次構造予測
         pred, pred_s, _, _, param_without_perturb = self.model(seq, return_param=True, perturb=self.perturb)
-
+        ref: torch.Tensor
+        ref_s: list[str]
         #ref_model = self.model.duplicate()
-        pseudoenergy = [ self.calc_pseudoenergy(r) for r in targets ]
-        logging.debug(f"pseudoenergy = {pseudoenergy}")
+        if len(seq) != len(targets):
+            raise ValueError(
+                f"sequence/SHAPE batch size mismatch: {len(seq)} != {len(targets)}"
+            )
+
+        pseudoenergy = []
+        for s, target in zip(seq, targets):
+            # ShapeDataset stores a dummy value at index 0, while the folding
+            # backend expects one pseudoenergy value per nucleotide.
+            if target.numel() == len(s) + 1:
+                target = target[1:]
+            elif target.numel() != len(s):
+                raise ValueError(
+                    "SHAPE target length must equal the sequence length "
+                    f"(or include one leading dummy value): {target.numel()} "
+                    f"not in ({len(s)}, {len(s) + 1})"
+                )
+            pseudoenergy.append(self.calc_pseudoenergy(target))
 
         # Apply weight scheduling for ref prediction (only for Mixed models)
         scheduled_turner, scheduled_positional = self._get_scheduled_weights()
         if scheduled_turner is None:
-            with torch.no_grad():
-                _, _, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
-            ref: torch.Tensor
-            ref_s: list[str]
-            ref, ref_s, _ = self.model(seq, param=param_without_perturb, constraint=ref_stru, max_internal_length=None)
+            _, ref_s, ref_stru = self.model(
+                seq, param=param_without_perturb, pseudoenergy=pseudoenergy
+            )
+
         else:
             # Save original weights (only score weights, not count weights)
             orig_score_turner = self.model.score_weight_turner
             orig_score_positional = self.model.score_weight_positional
-            # Apply scheduled weights
-            self.model.score_weight_turner = scheduled_turner
-            self.model.score_weight_positional = scheduled_positional
-            logging.debug(f'Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}')
-            with torch.no_grad():
-                _, _, ref_stru = self.model(seq, param=param_without_perturb, pseudoenergy=pseudoenergy)
+            try:
+                # Apply scheduled weights while selecting the SHAPE-guided
+                # reference structure.
+                self.model.score_weight_turner = scheduled_turner
+                self.model.score_weight_positional = scheduled_positional
+                logging.debug(
+                    "Shape ref weights: turner=%.4f, positional=%.4f",
+                    scheduled_turner,
+                    scheduled_positional,
+                )
+                _, ref_s, ref_stru = self.model(
+                    seq, param=param_without_perturb, pseudoenergy=pseudoenergy
+                )
+            finally:
+                self.model.score_weight_turner = orig_score_turner
+                self.model.score_weight_positional = orig_score_positional
 
-            # Restore original weights
-            self.model.score_weight_turner = orig_score_turner
-            self.model.score_weight_positional = orig_score_positional
-            ref: torch.Tensor
-            ref_s: list[str]
-            ref, ref_s, _ = self.model(seq, param=param_without_perturb, constraint=ref_stru, max_internal_length=None)
+        # The pseudoenergy is used only to select the reference structure.
+        # Score that structure under the original objective so that the FY
+        # value and optional score regularizer compare like with like.
+        ref, ref_s, ref_stru = self.model(
+            seq, param=param_without_perturb, constraint=ref_stru
+        )
+
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
         if self.sl_weight > 0.0:
@@ -110,10 +138,10 @@ class ShapeFenchelYoungLoss(nn.Module):
                 ref2: torch.Tensor
                 ref2, _, _ = self.turner(seq, constraint=ref_stru)
             loss += self.sl_weight * (ref-ref2)**2 / l
-        logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
-        logging.debug(f' seq: {seq}')
-        logging.debug(f'pred: {pred_s}')
-        logging.debug(f' ref: {ref_s}')
+        logging.debug(f"Loss = {loss.item()} = ({pred.item()/l} - {ref.item()/l})")
+        logging.debug(seq)
+        logging.debug(pred_s)
+        logging.debug(ref_s)
         if float(loss.item())> 1e10 or torch.isnan(loss):
             logging.error(fname)
             logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
@@ -121,6 +149,7 @@ class ShapeFenchelYoungLoss(nn.Module):
 
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
+                # パラメータのl1ノルムで正則化
                 loss += self.l1_weight * torch.sum(torch.abs(p))
 
         # if self.l2_weight > 0.0:
@@ -132,7 +161,11 @@ class ShapeFenchelYoungLoss(nn.Module):
         return loss
 
     def calc_pseudoenergy(self, r: torch.tensor) -> torch.Tensor:
-        not_na = r > -1
-        r[torch.logical_not(not_na)] = 0
-        r[not_na] = self.shape_slope * torch.log(r[not_na]+1) + self.shape_intercept
-        return r
+        pseudoenergy = r.clone()
+        not_na = pseudoenergy > -1
+        pseudoenergy[torch.logical_not(not_na)] = 0
+        pseudoenergy[not_na] = (
+            self.shape_slope * torch.log(pseudoenergy[not_na] + 1)
+            + self.shape_intercept
+        )
+        return pseudoenergy

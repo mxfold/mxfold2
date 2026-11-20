@@ -3,6 +3,7 @@ from __future__ import annotations
 from itertools import groupby
 from typing import Generator, Any
 import json
+import os
 
 import torch
 from torch.utils.data import Dataset
@@ -48,15 +49,23 @@ class FastaDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
 
 
 class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
-    def __init__(self, bpseq_list: str, convert_t_to_u_flag: bool = False, weight: float = 1.0) -> None:
+    def __init__(
+        self, bpseq_list: str, convert_t_to_u_flag: bool | int = False, weight: float | str = 1.0,
+        *, dataset_id: int = 0, type_name: str = "BPSEQ",
+    ) -> None:
         super(Dataset, self).__init__()
+        # Preserve master's positional (dataset_id, type_name) API.
+        if type(convert_t_to_u_flag) is int:
+            dataset_id, convert_t_to_u_flag = convert_t_to_u_flag, False
+        if isinstance(weight, str):
+            type_name, weight = weight, 1.0
         self.convert_t_to_u_flag = convert_t_to_u_flag
         self.weight = weight
         self.data = []
         with open(bpseq_list) as f:
             for l in f:
                 l = l.rstrip("\n").split()
-                self.data.append(self.read(l[0]))
+                self.data.append(self.read(l[0], dataset_id, type_name))
 
     def __len__(self) -> int:
         return len(self.data)
@@ -64,7 +73,9 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
     def __getitem__(self, idx) -> tuple[str, str, dict[str, torch.Tensor]]:
         return self.data[idx]
 
-    def read(self, filename: str) -> tuple[str, str, dict[str, torch.Tensor]]:
+    def read(
+        self, filename: str, dataset_id: int = 0, type_name: str = "BPSEQ",
+    ) -> tuple[str, str, dict[str, Any]]:
         with open(filename) as f:
             p: list[int] = [0]
             s = [""]
@@ -83,7 +94,10 @@ class BPseqDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         seq = "".join(s)
         if self.convert_t_to_u_flag:
             seq = convert_t_to_u(seq)
-        return (filename, seq, {"type": "BPSEQ", "target": torch.tensor(p), "weight": self.weight})
+        return filename, seq, {
+            "type": type_name, "target": torch.tensor(p),
+            "weight": self.weight, "dataset_id": int(dataset_id),
+        }
 
 
 class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
@@ -113,12 +127,17 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
             for l in f:
                 if not l.startswith("#"):
                     l = l.rstrip("\n").split()
-                    if len(l) > 2:
-                        idx, c, reactivity = l
-                        reactivity = float(reactivity)
-                    elif len(l) == 2:
+                    if not l:
+                        continue
+                    if len(l) == 2:
                         idx, c = l
                         reactivity = -999.0
+                    else:
+                        idx, c, value = l
+                        try:
+                            reactivity = float(value)
+                        except ValueError:
+                            reactivity = -999.0
                     s.append(c)
                     p.append(reactivity)
 
@@ -128,7 +147,11 @@ class ShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
         return (
             filename,
             seq,
-            {"type": "SHAPE", "target": torch.tensor(p), "dataset_id": dataset_id, "weight": 1.0},
+            {
+                "type": "SHAPE", "target": torch.tensor(p),
+                "mask": torch.tensor([float(r != -999.0) for r in p]),
+                "dataset_id": dataset_id, "weight": 1.0,
+            },
         )
 
 
@@ -246,3 +269,48 @@ class JsonShapeDataset(Dataset[tuple[str, str, dict[str, torch.Tensor]]]):
                 "weight": 1.0,
             },
         )
+
+
+class MultiTaskDataset(Dataset[tuple[str, str, dict[str, Any]]]):
+    """Pair structures and reactivities by filename for multitask training."""
+
+    def __init__(
+        self, bpseq_list: str, shape_list: str, dataset_id: int,
+        convert_t_to_u_flag: bool = False, *, weight: float = 1.0,
+    ) -> None:
+        super().__init__()
+        bpseq = BPseqDataset(
+            bpseq_list, convert_t_to_u_flag, weight, dataset_id=dataset_id,
+        )
+        shape = ShapeDataset(shape_list, dataset_id, convert_t_to_u_flag)
+        self.bp = self._by_name(bpseq.data)
+        self.sh = self._by_name(shape.data)
+        self.keys = [name for name in self.bp if name in self.sh]
+        if not self.keys:
+            raise ValueError("MultiTaskDataset: no matching BPSEQ and SHAPE filenames")
+        self.dataset_id = dataset_id
+
+    @staticmethod
+    def _by_name(records):
+        return {
+            os.path.basename(path).split(".", 1)[0]: (seq, values)
+            for path, seq, values in records
+        }
+
+    def __len__(self) -> int:
+        return len(self.keys)
+
+    def __getitem__(self, idx: int) -> tuple[str, str, dict[str, Any]]:
+        name = self.keys[idx]
+        seq, structure = self.bp[name]
+        shape_seq, reactivity = self.sh[name]
+        if seq != shape_seq:
+            raise ValueError(f"Sequence mismatch for {name}")
+        return name, seq, {
+            "type": "MULTI",
+            "target": structure["target"],
+            "shape_target": reactivity["target"],
+            "shape_mask": reactivity["mask"],
+            "dataset_id": self.dataset_id,
+            "weight": structure["weight"],
+        }

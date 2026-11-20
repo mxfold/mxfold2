@@ -13,7 +13,7 @@ def compute_windowed_bpp(
     fold_model: AbstractFold,
     seq: str,
     window_size: int,
-    window_step: int,
+    window_step: int | None = None,
     max_internal_length: int = 30,
     max_helix_length: int = 30,
 ) -> list[list[tuple[int, float]]]:
@@ -23,7 +23,7 @@ def compute_windowed_bpp(
         fold_model: The AbstractFold model instance.
         seq: Full RNA sequence string.
         window_size: Size of each window in nucleotides.
-        window_step: Step size between consecutive windows.
+        window_step: Step between windows. Defaults to half the window size.
         max_internal_length: Maximum internal loop length for DP.
         max_helix_length: Maximum helix length for DP.
 
@@ -32,6 +32,12 @@ def compute_windowed_bpp(
         bpp[i] = [(j, prob), ...] where i and j are 1-indexed.
         bpp[0] is empty.
     """
+    if window_size < 1:
+        raise ValueError("BPP window size must be positive")
+    if window_step is None:
+        window_step = max(1, window_size // 2)
+    if window_step < 1:
+        raise ValueError("BPP window step must be positive")
     seq_len = len(seq)
 
     if not hasattr(fold_model.fold_wrapper, "compute_basepairing_probabilities"):

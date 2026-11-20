@@ -140,6 +140,8 @@ class Common:
             "use_bulge_one_stacking": args.use_bulge_one_stacking,
         }
 
+        if getattr(args, "task", "Folding") == "Multitask":
+            config["task"] = "Multitask"
         modified_only = getattr(args, "modified_only", False)
 
         model = None
@@ -235,6 +237,17 @@ class Common:
 
         return model, config
 
+    @staticmethod
+    def load_model_weights(model: nn.Module, state: dict[str, Any]) -> None:
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        missing = [key for key in missing if ".shape_head_" not in key]
+        unexpected = [key for key in unexpected if ".shape_head_" not in key]
+        if missing or unexpected:
+            raise RuntimeError(
+                f"Incompatible model checkpoint (missing keys: {missing}; "
+                f"unexpected keys: {unexpected})"
+            )
+
     def build_shape_model(self, args: Namespace) -> nn.Module:
         if args.shape_model == "Wu":
             from .fold.shape_layers import Wu
@@ -248,13 +261,13 @@ class Common:
             from .fold.shape_layers import ShapeCNN
 
             return ShapeCNN(
-                num_filters=args.shape_num_filters,
-                filter_size=args.shape_filter_size,
+                num_filters=args.shape_num_filters or (16, 16),
+                filter_size=args.shape_filter_size or (5, 5),
                 pool_size=args.shape_pool_size
                 if args.shape_pool_size is not None
                 else (1,),
                 dropout_rate=args.shape_dropout_rate,
-                fc_layers=args.shape_num_hidden_units,
+                fc_layers=args.shape_num_hidden_units or (32,),
             )
         else:
             raise (NotImplementedError(f"not implemented: {args.shape_model}"))
@@ -279,6 +292,16 @@ class Common:
             type=int,
             default=100,
             help="the beam size of LinFold algorithm (default: 100)",
+        )
+
+    @classmethod
+    def add_task_args(cls, subparser):
+        gparser = subparser.add_argument_group("Task setting")
+        gparser.add_argument(
+            '--task',
+            choices=('Folding', 'Assisted_Folding', 'Multitask', 'Implicit_MLE'),
+            default='Folding',
+            help='training or prediction task (default: Folding)',
         )
 
     @classmethod

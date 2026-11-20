@@ -121,7 +121,7 @@ class MXFold2Objective:
             paired_filter_size = self.fixed_params["paired_filter_size_list"]
         else:
             paired_filter_size = [5, 3, 5, 3, 5, 3, 5, 3]
-            
+
         if "resnet_every_n" in self.fixed_params:
             resnet_every_n = self.fixed_params["resnet_every_n"]
         else:

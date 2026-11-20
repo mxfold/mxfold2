@@ -454,6 +454,9 @@ class NeuralNet(nn.Module):
                             n_layers=num_transformer_layers, dropout=dropout_rate)
         n_in = self.encoder.n_out
 
+        # 1d層からのシェイプ予測
+        self.shape_head_1d = nn.Linear(n_in, 1)
+
         if self.pair_join != 'bilinear':
             self.transform2d = Transform2D(join=pair_join)
 
@@ -484,41 +487,64 @@ class NeuralNet(nn.Module):
             self.bilinear = nn.Bilinear(n_in_paired, n_in_paired, n_out_paired_layers)
             self.linear = nn.Linear(n_in, n_out_unpaired_layers)
 
+        if kwargs.get("task") == "Multitask":
+            self.shape_head_2d = nn.Linear(n_out_paired_layers, 1)
 
-    def forward(self, seq: list[str]) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(self, seq: list[str]):
+        """構造予測用: 従来通り (score_paired, score_unpaired) を返す"""
         device = next(self.parameters()).device
-        x: torch.Tensor
-        x = self.embedding(['0' + s for s in seq]).to(device) # (B, 4, N)
-        x = self.encoder(x)
+        x_embed = self.embedding(['0' + s for s in seq]).to(device)
+        x_enc   = self.encoder(x_embed)
 
         if self.no_split_lr:
-            x_l, x_r = x, x
+            x_l, x_r = x_enc, x_enc
         else:
-            x_l = x[:, :, 0::2]
-            x_r = x[:, :, 1::2]
-        x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)] # reverse the last axis
+            x_l = x_enc[:, :, 0::2]
+            x_r = x_enc[:, :, 1::2]
+        x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)]
 
         if self.pair_join != 'bilinear':
-            x_lr: torch.Tensor = self.transform2d(x_l, x_r)
-
-            score_paired: torch.Tensor
-            score_unpaired: torch.Tensor | None
+            x_lr = self.transform2d(x_l, x_r)
             score_paired = self.fc_paired(x_lr)
-            if self.fc_unpaired is not None:
-                score_unpaired = self.fc_unpaired(x)
-            else:
-                score_unpaired = None
-
+            score_unpaired = self.fc_unpaired(x_enc) if self.fc_unpaired is not None else None
             return score_paired, score_unpaired
-
         else:
             B, N, C = x_l.shape
             x_l = x_l.view(B, N, 1, C).expand(B, N, N, C).reshape(B*N*N, -1)
             x_r = x_r.view(B, 1, N, C).expand(B, N, N, C).reshape(B*N*N, -1)
             score_paired = self.bilinear(x_l, x_r).view(B, N, N, -1)
-            score_unpaired = self.linear(x)
-
+            score_unpaired = self.linear(x_enc)
             return score_paired, score_unpaired
+
+    def extract_features(self, seq: list[str]):
+        """SHAPE予測用の特徴をまとめて返す (x_embed, x_enc, agg_2d)"""
+        device = next(self.parameters()).device
+        x_embed = self.embedding(['0' + s for s in seq]).to(device)
+        x_enc   = self.encoder(x_embed)
+
+        if self.no_split_lr:
+            x_l, x_r = x_enc, x_enc
+        else:
+            x_l = x_enc[:, :, 0::2]
+            x_r = x_enc[:, :, 1::2]
+        x_r = x_r[:, :, torch.arange(x_r.shape[-1]-1, -1, -1)]
+
+        if self.pair_join != 'bilinear':
+            x_lr = self.transform2d(x_l, x_r)
+            score_paired = self.fc_paired(x_lr)
+            agg_2d = score_paired.mean(dim=2)
+        else:
+            B, N, C = x_l.shape
+            x_l = x_l.view(B, N, 1, C).expand(B, N, N, C).reshape(B*N*N, -1)
+            x_r = x_r.view(B, 1, N, C).expand(B, N, N, C).reshape(B*N*N, -1)
+            score_paired = self.bilinear(x_l, x_r).view(B, N, N, -1)
+            agg_2d = score_paired.mean(dim=2)
+
+        return x_embed, x_enc, agg_2d
+
+    def predict_shape(self, seq: list[str]) -> torch.Tensor:
+        _, _, agg_2d = self.extract_features(seq)
+        return self.shape_head_2d(agg_2d).squeeze(-1)
 
 
 class NeuralNet1D(nn.Module):
@@ -565,8 +591,8 @@ class NeuralNet1D(nn.Module):
                             n_layers=num_transformer_layers, dropout=dropout_rate)
         n_in = self.encoder.n_out
         self.fc = nn.Linear(n_in, n_out) if n_in != n_out else None
-
-
+        if kwargs.get("task") == "Multitask":
+            self.shape_head_embed = nn.Linear(self.embedding.n_out, 1)
 
     def forward(self, seq: list[str]) -> torch.Tensor:
         device = next(self.parameters()).device
@@ -577,3 +603,8 @@ class NeuralNet1D(nn.Module):
             x = self.fc(x)
         return x
 
+    def predict_shape(self, seq: list[str]) -> torch.Tensor:
+        device = next(self.parameters()).device
+        x_embed = self.embedding(['0' + s for s in seq]).to(device)   # (B, C_in, N)
+
+        return self.shape_head_embed(x_embed.transpose(1, 2)).squeeze(-1)  # (B, N)

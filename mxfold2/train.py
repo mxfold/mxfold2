@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import math
 import os
@@ -28,7 +29,7 @@ from torch.optim.optimizer import Optimizer
 from torch.amp.grad_scaler import GradScaler
 from torch.amp.autocast_mode import autocast
 from torch.optim.swa_utils import SWALR, AveragedModel
-from torch.utils.data import DataLoader, ConcatDataset, WeightedRandomSampler
+from torch.utils.data import DataLoader, ConcatDataset, RandomSampler, WeightedRandomSampler
 from tqdm import tqdm
 
 from mxfold2.ema import EMA
@@ -42,6 +43,7 @@ from mxfold2.dataset import (
     RibonanzaDataset,
     JsonDataset,
     JsonShapeDataset,
+    MultiTaskDataset,
 )
 from mxfold2.compbpseq import compare_bpseq, accuracy
 from mxfold2.compreactivity import read_shape_reactivity, pairwise_consistency
@@ -49,7 +51,10 @@ from mxfold2.nucleosides import get_modified_positions
 from mxfold2.fold.fold import AbstractFold
 from mxfold2.common import Common
 
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 def read_shape_list(path: str) -> list[str]:
@@ -65,34 +70,39 @@ class Train(Common):
 
     def __init__(self):
         super(Train, self).__init__()
-        self.device_type = "cpu"  # Will be set in run()
+        self.device_type = 'cpu'  # Will be set in run()
+        self.imle_log_file: Optional[str] = None
+        self.log_file: Optional[str] = None
+        self._frozen_eval_modules: list[nn.Module] = []
+        self._l2_sp_anchor: dict[str, torch.Tensor] = {}
+        self._l2_sp_weight = 0.0
 
-    def train(
-        self,
-        epoch: int,
-        model: AbstractFold,
-        optimizer: Optimizer,
-        loss_fn: nn.Module | dict[str, nn.Module],
-        data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
-        n_dataset: Optional[int] = None,
-        loss_weight: defaultdict[str, float] | dict[str, float] = defaultdict(
-            lambda: 1.0
-        ),
-        clip_grad_value: float = 0.0,
-        clip_grad_norm: float = 0.0,
-        scaler: Optional[GradScaler] = None,
-        use_amp: bool = False,
-        grad_accum_steps: int = 1,
-    ) -> None:
+    def train(self, epoch: int, model: AbstractFold, optimizer: Optimizer,
+                loss_fn: nn.Module | dict[str, nn.Module],
+                data_loader: DataLoader[tuple[str, str, dict[str, torch.Tensor]]],
+                n_dataset: Optional[int] = None,
+                loss_weight = defaultdict(lambda: 1.),
+                clip_grad_value: float = 0.0, clip_grad_norm: float = 0.0,
+                scaler: Optional[GradScaler] = None,
+                use_amp: bool = False,
+                grad_accum_steps: int = 1) -> None:
+        if grad_accum_steps < 1:
+            raise ValueError("grad_accum_steps must be at least 1")
         model.train()
+        # model.train() recursively re-enables dropout in frozen feature
+        # extractors.  Keep explicitly frozen modules in eval mode while the
+        # trainable heads remain in training mode.
+        for module in self._frozen_eval_modules:
+            module.eval()
         if not isinstance(loss_fn, dict):
-            loss_fn = {"BPSEQ": loss_fn}
-        if n_dataset is None:
-            n_dataset = len(cast(FastaDataset, data_loader.dataset))
-        loss_total, num = 0.0, 0
-        loss_type = defaultdict(lambda: 0.0)
-        num_type = defaultdict(lambda: 0)
+            loss_fn = {'BPSEQ': loss_fn}
+        # Replay/budget samplers can draw fewer items than the backing dataset.
+        # Accumulation windows and the final partial update use actual draws.
+        progress_total = len(data_loader.sampler) if n_dataset is None else n_dataset
+        n_dataset = len(data_loader.sampler)
+        loss_total, num = 0., 0
         running_loss, n_running_loss = 0, 0
+        imle_rows = []
         start = time.time()
 
         # Check if using SAM optimizer
@@ -102,56 +112,60 @@ class Train(Common):
         accumulated_samples = 0
         optimizer.zero_grad()  # Zero gradients once at the start
 
-        with tqdm(total=n_dataset, disable=self.disable_progress_bar) as pbar:
+        with tqdm(total=progress_total, disable=self.disable_progress_bar) as pbar:
             for fnames, seqs, vals in data_loader:
                 logging.info(f"Step: {self.step}, {fnames}")
                 self.step += 1
                 n_batch = len(seqs)
                 for i in range(n_batch):
                     accumulated_samples += 1
-                    is_update_step = accumulated_samples % grad_accum_steps == 0
+                    position = (accumulated_samples - 1) % grad_accum_steps
+                    window_start = accumulated_samples - 1 - position
+                    accumulation_divisor = min(grad_accum_steps, n_dataset - window_start)
+                    is_update_step = position + 1 == accumulation_divisor
 
                     # Define loss computation function for SAM
                     def compute_loss():
-                        with autocast(
-                            device_type=self.device_type,
-                            dtype=torch.float16,
-                            enabled=use_amp,
-                        ):
-                            if vals["type"][i] == "BPSEQ":
-                                loss = torch.sum(
-                                    loss_fn["BPSEQ"](  # type: ignore[operator]
-                                        seqs[i : i + 1],
-                                        vals["target"][i : i + 1],
-                                        fname=fnames[i : i + 1],
-                                    )
+                        with autocast(device_type=self.device_type, dtype=torch.float16, enabled=use_amp):
+                            if vals['type'][i] in ('BPSEQ', 'BPSEQ2'):
+                                loss = torch.sum(loss_fn['BPSEQ'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]))
+                            elif vals['type'][i] == 'SHAPE':
+                                loss = torch.sum(loss_fn['SHAPE'](seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1], dataset_id=vals['dataset_id'][i:i+1]))
+                            elif vals['type'][i] == 'MULTI':
+                                struct_loss = loss_fn['BPSEQ'](
+                                    seqs[i:i+1], vals['target'][i:i+1], fname=fnames[i:i+1]
                                 )
-                            elif vals["type"][i] == "SHAPE":
-                                loss = torch.sum(
-                                    loss_fn["SHAPE"](  # type: ignore[operator]
-                                        seqs[i : i + 1],
-                                        vals["target"][i : i + 1],
-                                        fname=fnames[i : i + 1],
-                                        dataset_id=vals["dataset_id"][i : i + 1],
-                                    )
+                                shape_loss = loss_fn['SHAPE_regress'](
+                                    seqs[i:i+1],
+                                    vals['shape_target'][i:i+1],
+                                    vals['shape_mask'][i:i+1],
                                 )
+                                alpha, beta = loss_weight['MULTI_intra']
+                                loss = torch.sum(alpha * struct_loss + beta * shape_loss)
                             else:
-                                raise RuntimeError("not implemented")
-                            sample_weight = vals["weight"][i].item() if "weight" in vals else 1.0
-                            return loss * loss_weight[vals["type"][i]] * sample_weight
+                                raise RuntimeError('not implemented')
+                            if self._l2_sp_weight > 0.0:
+                                penalty = None
+                                for name, parameter in model.named_parameters():
+                                    anchor = self._l2_sp_anchor.get(name)
+                                    if anchor is None or not parameter.requires_grad:
+                                        continue
+                                    term = torch.sum((parameter - anchor) ** 2)
+                                    penalty = term if penalty is None else penalty + term
+                                if penalty is None:
+                                    raise RuntimeError('L2-SP has no trainable anchored parameters')
+                                loss = loss + 0.5 * self._l2_sp_weight * penalty
+                            sample_weight = vals['weight'][i].item() if 'weight' in vals else 1.0
+                            return loss * loss_weight[vals['type'][i]] * sample_weight
 
                     if is_sam:
                         # SAM two-step optimization with gradient accumulation
                         loss = self._sam_step(
-                            model,
-                            optimizer, # type: ignore
-                            compute_loss,
-                            clip_grad_value,
-                            clip_grad_norm,
-                            scaler,
-                            use_amp,
-                            grad_accum_steps=grad_accum_steps,
-                            is_update_step=is_update_step,
+                            model, optimizer, compute_loss,
+                            clip_grad_value, clip_grad_norm,
+                            scaler, use_amp,
+                            grad_accum_steps=accumulation_divisor,
+                            is_update_step=is_update_step
                         )
                         if is_update_step:
                             optimizer.zero_grad()
@@ -160,7 +174,7 @@ class Train(Common):
                         loss = compute_loss()
 
                         # Scale loss for gradient accumulation and backward pass
-                        scaled_loss = loss / grad_accum_steps
+                        scaled_loss = loss / accumulation_divisor
                         if scaler is not None:
                             scaler.scale(scaled_loss).backward()
                         else:
@@ -173,32 +187,19 @@ class Train(Common):
                                 scaler.unscale_(optimizer)
 
                             if clip_grad_norm > 0.0:
-                                nn.utils.clip_grad_norm_(
-                                    model.parameters(),
-                                    max_norm=clip_grad_norm,
-                                    norm_type=2,
-                                )
+                                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm, norm_type=2)
                             elif clip_grad_value > 0.0:
-                                nn.utils.clip_grad_value_(
-                                    model.parameters(), clip_value=clip_grad_value
-                                )
+                                nn.utils.clip_grad_value_(model.parameters(), clip_value=clip_grad_value)
 
                             # Workaround for pytorch_optimizer AdaBelief/Lion: ensure state is initialized
                             # for parameters that didn't have gradients in the first step
                             if isinstance(optimizer, (po.AdaBelief, po.Lion)):
                                 for group in optimizer.param_groups:
-                                    for p in group["params"]:
-                                        if (
-                                            p.grad is not None
-                                            and len(optimizer.state[p]) == 0
-                                        ):
-                                            optimizer.state[p]["exp_avg"] = (
-                                                torch.zeros_like(p)
-                                            )
+                                    for p in group['params']:
+                                        if p.grad is not None and len(optimizer.state[p]) == 0:
+                                            optimizer.state[p]['exp_avg'] = torch.zeros_like(p)
                                             if isinstance(optimizer, po.AdaBelief):
-                                                optimizer.state[p]["exp_avg_var"] = (
-                                                    torch.zeros_like(p)
-                                                )
+                                                optimizer.state[p]['exp_avg_var'] = torch.zeros_like(p)
 
                             # Step the optimizer
                             if scaler is not None:
@@ -211,11 +212,27 @@ class Train(Common):
 
                     loss_total += loss.item()
                     running_loss += loss.item()
-                    loss_type[vals["type"][i]] += loss.item()
-                    num_type[vals["type"][i]] += 1
+                    if vals['type'][i] == 'SHAPE':
+                        stats = getattr(loss_fn['SHAPE'], 'last_imle_stats', {})
+                        nus = stats.get('selected_nu', [])
+                        flips = stats.get('flip_fraction', [])
+                        if nus and flips:
+                            imle_rows.append([
+                                epoch,
+                                self.step,
+                                fnames[i],
+                                getattr(loss_fn['SHAPE'], 'difference_mode', 'forward'),
+                                len(nus),
+                                sum(nus) / len(nus),
+                                min(nus),
+                                max(nus),
+                                sum(flips) / len(flips),
+                                min(flips),
+                                max(flips),
+                            ])
 
                 num += n_batch
-                pbar.set_postfix(train_loss="{:.3e}".format(loss_total / num))
+                pbar.set_postfix(train_loss='{:.3e}'.format(loss_total / num))
                 pbar.update(n_batch)
 
                 n_running_loss += n_batch
@@ -224,54 +241,33 @@ class Train(Common):
                     if self.use_wandb:
                         log_data = {
                             "train/loss": running_loss,
-                            "train/step": (epoch - 1) * n_dataset + num,
+                            "train/step": (epoch-1) * n_dataset + num,
                         }
-                        if self.device_type == "cuda":
-                            log_data["train/gpu_memory_allocated"] = (
-                                torch.cuda.memory_allocated(self.gpu) / 1024**3
-                            )
-                            log_data["train/gpu_memory_reserved"] = (
-                                torch.cuda.memory_reserved(self.gpu) / 1024**3
-                            )
+                        if self.device_type == 'cuda':
+                            log_data["train/gpu_memory_allocated"] = torch.cuda.memory_allocated(self.gpu) / 1024**3
+                            log_data["train/gpu_memory_reserved"] = torch.cuda.memory_reserved(self.gpu) / 1024**3
                         # MPS does not provide memory stats via PyTorch API
                         wandb.log(log_data)
                     running_loss, n_running_loss = 0, 0
 
-        # Handle remaining accumulated gradients at end of epoch
-        if accumulated_samples % grad_accum_steps != 0:
-            if is_sam:
-                # For SAM, we need to do the full two-step update with remaining gradients
-                # This is handled by calling _sam_step with is_update_step=True
-                pass  # Already handled in the loop
-            else:
-                if scaler is not None:
-                    scaler.unscale_(optimizer)
-
-                if clip_grad_norm > 0.0:
-                    nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm=clip_grad_norm, norm_type=2
-                    )
-                elif clip_grad_value > 0.0:
-                    nn.utils.clip_grad_value_(
-                        model.parameters(), clip_value=clip_grad_value
-                    )
-
-                if scaler is not None:
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    optimizer.step()
-
-                optimizer.zero_grad()
-
         elapsed_time = time.time() - start
-        for tp in loss_type.keys():
-            logging.debug(
-                f"loss[{tp}]={loss_type[tp] / num_type[tp]:.6f}={loss_type[tp]:.3f}/{num_type[tp]}"
-            )
-        print(
-            f"Train Epoch: {epoch}\tLoss: {loss_total / num:.6f}\tTime: {elapsed_time:.3f}s"
-        )
+        avg_loss = loss_total / num
+        log_line = f"Train Epoch: {epoch}\tLoss: {avg_loss:.6f}\tTime: {elapsed_time:.3f}s"
+        print(log_line)
+        # エポック単位のログは loss.log に一行だけ書く（alloc のみ記録、resv/peak は 0.0 で埋める）
+        try:
+            if torch.cuda.is_available():
+                alloc = torch.cuda.memory_allocated() / 1e6
+            else:
+                alloc = 0.0
+            if self.log_file is not None:
+                with open(self.log_file, "a") as f:
+                    f.write(f"{epoch},train,{avg_loss:.6f},{elapsed_time:.3f},{self.step},{alloc:.1f}\n")
+        except Exception:
+            pass
+        if self.imle_log_file is not None and imle_rows:
+            with open(self.imle_log_file, 'a', newline='') as f:
+                csv.writer(f).writerows(imle_rows)
 
     def _sam_step(
         self,
@@ -442,14 +438,16 @@ class Train(Common):
                                     shape_scores.append(score)
                             sample_idx += 1
                         elif vals["type"][i] == "SHAPE":
-                            loss = torch.sum(
-                                loss_fn["SHAPE"](  # type: ignore[operator]
-                                    seqs[i : i + 1],
-                                    vals["target"][i : i + 1],
-                                    fname=fnames[i : i + 1],
-                                    dataset_id=vals["dataset_id"][i : i + 1],
+                            # I-MLE evaluates an objective gradient even during validation.
+                            with torch.enable_grad():
+                                loss = torch.sum(
+                                    loss_fn["SHAPE"](
+                                        seqs[i : i + 1],
+                                        vals["target"][i : i + 1],
+                                        fname=fnames[i : i + 1],
+                                        dataset_id=vals["dataset_id"][i : i + 1],
+                                    )
                                 )
-                            )
                         else:
                             raise RuntimeError("not implemented")
                     loss_total += loss.item()
@@ -561,7 +559,7 @@ class Train(Common):
 
     def resume_checkpoint(
         self,
-        filename: str,
+        filename: str | dict[str, Any],
         model: AbstractFold,
         optimizer: Optimizer,
         scheduler,
@@ -570,9 +568,11 @@ class Train(Common):
         scaler: Optional[GradScaler] = None,
         gpu: int = -1,
     ) -> tuple[int, Optional[GradScaler], Optional[str]]:
-        checkpoint = torch.load(filename)
+        checkpoint = (
+            filename if isinstance(filename, dict) else torch.load(filename, map_location="cpu")
+        )
         epoch = checkpoint["epoch"]
-        model.load_state_dict(checkpoint["model_state_dict"])
+        self.load_model_weights(model, checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
         # Restore step counter
@@ -610,60 +610,76 @@ class Train(Common):
 
         return epoch, scaler, wandb_run_id
 
-    def build_optimizer(
-        self,
-        optimizer: str,
-        model: AbstractFold,
-        lr: float,
-        l2_weight: float,
-        shape_model: Optional[list[nn.Module]] = None,
-        sam_type: Optional[str] = None,
-        sam_rho: float = 0.05,
-        sam_alpha: float = 0.1,
-    ) -> Optimizer:
-        optim_params = [
-            {"params": model.parameters(), "lr": lr, "weight_decay": l2_weight},
-        ]
+    def build_optimizer(self, optimizer: str, model: AbstractFold, lr: float, l2_weight: float,
+                        shape_model: Optional[list[nn.Module]] = None,
+                        sam_type: Optional[str] = None,
+                        sam_rho: float = 0.05,
+                        sam_alpha: float = 0.1,
+                        lr_overrides: Optional[dict[str, Optional[float]]] = None) -> Optimizer:
+        lr_overrides = lr_overrides or {}
+        if any(value is not None for value in lr_overrides.values()):
+            grouped: dict[str, list[nn.Parameter]] = {
+                'embedding': [], 'encoder': [], 'fc_paired': [], 'other': []
+            }
+            for name, parameter in model.named_parameters():
+                if not parameter.requires_grad:
+                    continue
+                if '.embedding.' in name:
+                    key = 'embedding'
+                elif '.encoder.' in name:
+                    key = 'encoder'
+                elif '.fc_paired.' in name:
+                    key = 'fc_paired'
+                else:
+                    key = 'other'
+                grouped[key].append(parameter)
+            optim_params = []
+            for key in ('embedding', 'encoder', 'fc_paired', 'other'):
+                if not grouped[key]:
+                    continue
+                group_lr = lr_overrides.get(key)
+                optim_params.append({
+                    'params': grouped[key],
+                    'lr': lr if group_lr is None else group_lr,
+                    'weight_decay': l2_weight,
+                })
+        else:
+            optim_params = [
+                {'params': (p for p in model.parameters() if p.requires_grad),
+                 'lr': lr, 'weight_decay': l2_weight},
+            ]
         if shape_model is not None:
             for sm in shape_model:
-                optim_params.append(
-                    {"params": sm.parameters(), "lr": 0.001, "weight_decay": l2_weight}
-                )
+                optim_params.append({'params': sm.parameters(), 'lr': lr, 'weight_decay': l2_weight})
 
         # Define base optimizer classes and their kwargs
         base_optimizer_config = {
-            "Adam": (Adam, {"amsgrad": False}),
-            "AdamW": (AdamW, {"amsgrad": False}),
-            "RMSprop": (RMSprop, {}),
-            "SGD": (SGD, {"nesterov": True, "momentum": 0.9}),
-            "ASGD": (ASGD, {}),
-            "AdaBelief": (po.AdaBelief, {}),
-            "Lion": (po.Lion, {}),
+            'Adam': (Adam, {'amsgrad': False}),
+            'AdamW': (AdamW, {'amsgrad': False}),
+            'RMSprop': (RMSprop, {}),
+            'SGD': (SGD, {'nesterov': True, 'momentum': 0.9}),
+            'ASGD': (ASGD, {}),
+            'AdaBelief': (po.AdaBelief, {}),
+            'Lion': (po.Lion, {}),
         }
 
         if optimizer not in base_optimizer_config:
-            raise RuntimeError(f"not implemented: {optimizer}")
+            raise RuntimeError(f'not implemented: {optimizer}')
 
         base_optimizer_class, base_kwargs = base_optimizer_config[optimizer]
 
         # Apply SAM wrapper if requested
-        if sam_type is None or sam_type == "None":
+        if sam_type is None or sam_type == 'None':
             # Create regular optimizer
-            return base_optimizer_class(optim_params, **base_kwargs) # type: ignore
-        elif sam_type == "SAM":
-            return SAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs) # type: ignore
-        elif sam_type == "ASAM":
+            return base_optimizer_class(optim_params, **base_kwargs)
+        elif sam_type == 'SAM':
+            return SAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
+        elif sam_type == 'ASAM':
             return ASAM(optim_params, base_optimizer_class, rho=sam_rho, **base_kwargs)
-        elif sam_type == "GSAM":
-            return GSAM(
-                optim_params,
-                base_optimizer_class,
-                rho=sam_rho,
-                alpha=sam_alpha,
-                **base_kwargs,
-            )
+        elif sam_type == 'GSAM':
+            return GSAM(optim_params, base_optimizer_class, rho=sam_rho, alpha=sam_alpha, **base_kwargs)
         else:
-            raise RuntimeError(f"not implemented SAM type: {sam_type}")
+            raise RuntimeError(f'not implemented SAM type: {sam_type}')
 
     def build_loss_function(
         self, loss_func: str, model: AbstractFold, args: Namespace
@@ -675,6 +691,8 @@ class Train(Common):
                 model,
                 loss_pos_paired=args.loss_pos_paired,
                 loss_neg_paired=args.loss_neg_paired,
+                loss_pos_unpaired=getattr(args, "loss_pos_unpaired", 0.0),
+                loss_neg_unpaired=getattr(args, "loss_neg_unpaired", 0.0),
                 perturb=args.perturb,
                 l1_weight=args.l1_weight,
                 l2_weight=args.l2_weight,
@@ -707,69 +725,100 @@ class Train(Common):
         else:
             raise (ValueError(f"not implemented: {loss_func}"))
 
-    def build_shape_loss_function(
-        self,
-        loss_func: str,
-        model: AbstractFold,
-        args: Namespace,
-        shape_model: Optional[list[nn.Module]] = None,
-        lwf_model: Optional[AbstractFold] = None,
-    ) -> nn.Module:
-        if loss_func == "shape_nll":
+    def build_shape_loss_function(self, loss_func: str, model: AbstractFold, args: Namespace,
+                                  shape_model: Optional[list[nn.Module]] = None,
+                                  lwf_model: Optional[AbstractFold] = None) -> nn.Module:
+        from .loss.implicit_mle import AdaptiveStepConfig
+
+        adaptive = AdaptiveStepConfig(
+            enabled=args.shape_imle_adaptive_nu,
+            minimum=args.shape_imle_nu_min,
+            maximum=args.shape_imle_nu_max,
+            flip_fraction_low=args.shape_imle_flip_low,
+            flip_fraction_high=args.shape_imle_flip_high,
+            factor=args.shape_imle_adaptive_factor,
+            max_steps=args.shape_imle_adaptive_steps,
+        )
+        imle_options = dict(
+            alignment=args.shape_imle_alignment,
+            normalization=args.shape_imle_normalization,
+            estimator_scale=args.shape_imle_estimator_scale,
+            difference_mode=args.shape_imle_difference,
+            num_samples=args.shape_imle_samples,
+            adaptive=adaptive,
+            train_turner=getattr(args, 'shape_imle_train_turner', False),
+        )
+        if loss_func == 'shape_nll':
             from mxfold2.loss.shape_nll_loss import ShapeNLLLoss
+            return ShapeNLLLoss(model=model,
+                            shape_model=shape_model,
+                            shape_only=args.shape_only_training,
+                            lwf_model=lwf_model,
+                            lwf_weight=args.lwf_weight,
+                            perturb=args.shape_perturb, nu=args.shape_nu,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight,
+                            pseudo_fy_weight=args.shape_pseudo_fy_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end,
+                            **imle_options)
 
-            return ShapeNLLLoss(
-                model=model,
-                shape_model=shape_model,  # type: ignore[arg-type]
-                perturb=args.shape_perturb,
-                nu=args.shape_nu,
-                l1_weight=args.l1_weight,
-                l2_weight=args.l2_weight,
-                lwf_model=lwf_model,
-                lwf_weight=args.lwf_weight,
-                sl_weight=args.score_loss_weight,
-                shape_only=args.shape_only_training,
-                pseudo_fy_weight=args.shape_pseudo_fy_weight,
-                weight_schedule=args.weight_schedule,
-                weight_schedule_start=args.weight_schedule_start,
-                weight_schedule_end=args.weight_schedule_end,
-            )
-
-        elif loss_func == "shape_fy":
+        elif loss_func == 'shape_fy':
             from mxfold2.loss.shape_fy_loss import ShapeFenchelYoungLoss
+            return ShapeFenchelYoungLoss(model,
+                            perturb=args.shape_perturb,
+                            shape_intercept=args.shape_intercept, shape_slope=args.shape_slope,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end)
 
-            return ShapeFenchelYoungLoss(
-                model,
-                perturb=args.shape_perturb,
-                shape_intercept=args.shape_intercept,
-                shape_slope=args.shape_slope,
-                l1_weight=args.l1_weight,
-                l2_weight=args.l2_weight,
-                sl_weight=args.score_loss_weight,
-                weight_schedule=args.weight_schedule,
-                weight_schedule_start=args.weight_schedule_start,
-                weight_schedule_end=args.weight_schedule_end,
-            )
+        elif loss_func == 'shape_partial_fy':
+            from mxfold2.loss.shape_partial_fy_loss import ShapePartialFenchelYoungLoss
+            return ShapePartialFenchelYoungLoss(model,
+                            perturb=args.shape_perturb,
+                            unpaired_threshold=args.shape_unpaired_threshold,
+                            l1_weight=args.l1_weight,
+                            sl_weight=args.score_loss_weight)
 
-        elif loss_func == "shape_rank":
+        elif loss_func == 'shape_rank':
             from mxfold2.loss.shape_rank_loss import ShapeRankLoss
-
-            return ShapeRankLoss(
-                model,
-                margin=args.shape_margin,
-                perturb=args.shape_perturb,
-                nu=args.shape_nu,
-                l1_weight=args.l1_weight,
-                l2_weight=args.l2_weight,
-                sl_weight=args.score_loss_weight,
-                pseudo_fy_weight=args.shape_pseudo_fy_weight,
-                weight_schedule=args.weight_schedule,
-                weight_schedule_start=args.weight_schedule_start,
-                weight_schedule_end=args.weight_schedule_end,
-            )
+            return ShapeRankLoss(model,
+                            objective=getattr(args, 'shape_rank_objective', 'pairwise_logistic'),
+                            margin=args.shape_margin,
+                            tau=args.shape_rank_tau,
+                            weighting=getattr(args, 'shape_rank_weighting', 'uniform'),
+                            rank_delta=args.shape_rank_delta,
+                            teacher_temperature=args.shape_rank_teacher_temperature,
+                            teacher_normalization=getattr(args, 'shape_rank_teacher_normalization', 'none'),
+                            clip_targets=args.shape_rank_targets == 'clipped',
+                            perturb=args.shape_perturb, nu=args.shape_nu,
+                            l1_weight=args.l1_weight, l2_weight=args.l2_weight,
+                            sl_weight=args.score_loss_weight,
+                            pseudo_fy_weight=args.shape_pseudo_fy_weight,
+                            weight_schedule=args.weight_schedule,
+                            weight_schedule_start=args.weight_schedule_start,
+                            weight_schedule_end=args.weight_schedule_end,
+                            sample_aggregation=args.shape_rank_sample_aggregation,
+                            **imle_options)
 
         else:
-            raise (ValueError(f"not implemented: {loss_func}"))
+            raise(ValueError(f'not implemented: {loss_func}'))
+
+    def build_shape_regress_loss_function(self, model: AbstractFold):
+        net = getattr(getattr(model, "zuker", model), "net", None)
+        if net is None:
+            raise ValueError("Multitask training requires a neural folding model")
+
+        def shape_loss(seq, target, mask):
+            pred = net.predict_shape(seq)
+            target = target.to(pred.device)
+            mask = mask.to(device=pred.device, dtype=torch.bool)
+            return (pred[mask] - target[mask]).square().sum() / mask.sum().clamp_min(1)
+
+        return shape_loss
 
     def build_scheduler(self, scheduler: str, optimizer: Optimizer, args: Namespace):
         if scheduler == "CyclicLR":
@@ -803,6 +852,109 @@ class Train(Common):
                 elif v is not None:
                     f.write("{}\n{}\n".format(k, v))
 
+    def build_training_loader(
+        self, args: Namespace, generator: torch.Generator,
+    ) -> tuple[DataLoader, int]:
+        inputs = [args.input] if isinstance(args.input, str) else args.input
+        weights = (
+            [float(weight) for weight in args.dataset_weight.split(",")]
+            if args.dataset_weight else [1.0] * len(inputs)
+        )
+        if len(weights) != len(inputs):
+            raise ValueError("The number of --dataset-weight values must match the number of inputs")
+
+        convert = args.convert_t_to_u
+        if args.task == "Multitask":
+            if args.replay_fraction > 0.0:
+                raise ValueError("--replay-fraction is supported for Folding and Implicit_MLE")
+            if not args.shape or len(inputs) != len(args.shape):
+                raise ValueError("Multitask requires equal numbers of BPSEQ and SHAPE lists")
+            datasets = [
+                MultiTaskDataset(bpseq, shape, index, convert, weight=weight)
+                for index, (bpseq, shape, weight) in enumerate(zip(inputs, args.shape, weights))
+            ]
+        else:
+            datasets = [
+                BPseqDataset(path, convert, weight)
+                for path, weight in zip(inputs, weights)
+            ]
+
+        if args.json_dataset:
+            datasets.append(JsonDataset(args.json_dataset, convert))
+        replay_start = sum(len(dataset) for dataset in datasets)
+        replay_length = 0
+        if args.input_2 is not None:
+            replay = BPseqDataset(args.input_2, convert, type_name="BPSEQ2")
+            datasets.append(replay)
+            replay_length = len(replay)
+        primary_length = replay_start + replay_length
+
+        n_shape_datasets = 0
+        if args.ribonanza:
+            ribonanza = RibonanzaDataset(args.ribonanza, convert_t_to_u_flag=convert)
+            datasets.append(ribonanza)
+            n_shape_datasets += len(ribonanza.dataset_id)
+
+        if args.task != "Multitask":
+            for shape in args.shape or ():
+                datasets.append(ShapeDataset(shape, n_shape_datasets, convert))
+                n_shape_datasets += 1
+
+        if args.json_shape_dataset:
+            json_shape = JsonShapeDataset(args.json_shape_dataset, n_shape_datasets, convert)
+            datasets.append(json_shape)
+            n_shape_datasets += len(json_shape.dataset_id)
+
+        if args.task == "Implicit_MLE" and not n_shape_datasets:
+            raise ValueError("Implicit_MLE requires reactivity data")
+
+        for path in args.extra_dataset or ():
+            datasets.append(BPseqDataset(path, convert))
+
+        dataset = ConcatDataset(datasets) if len(datasets) > 1 else datasets[0]
+        n_samples = len(dataset)
+        if not n_samples:
+            raise ValueError("Training data is empty")
+        replay_fraction = args.replay_fraction
+        budget = args.samples_per_epoch
+        if budget < 0:
+            raise ValueError("--samples-per-epoch must be nonnegative")
+        if not 0.0 <= replay_fraction < 1.0:
+            raise ValueError("--replay-fraction must be in [0, 1)")
+        if replay_fraction and (not replay_length or replay_length == n_samples):
+            raise ValueError("--replay-fraction requires non-empty primary and --input-2 data")
+
+        auxiliary_length = n_samples - primary_length
+        downsample = args.downsampling > 0.0 and primary_length > 0 and auxiliary_length > 0
+        sampler = None
+        if replay_fraction or downsample:
+            sampling_weights = torch.ones(n_samples, dtype=torch.double)
+            if downsample:
+                sampling_weights[:primary_length] = 1.0 / primary_length
+                sampling_weights[primary_length:] = args.downsampling / auxiliary_length
+            if replay_fraction:
+                replay_slice = slice(replay_start, replay_start + replay_length)
+                sampling_weights[replay_slice] = 0.0
+                sampling_weights *= (1.0 - replay_fraction) / sampling_weights.sum()
+                sampling_weights[replay_slice] = replay_fraction / replay_length
+
+            draws = budget or n_samples
+            if downsample and not (budget or replay_fraction):
+                draws = min(n_samples, int(primary_length * (1.0 + args.downsampling) + 0.5))
+            sampler = WeightedRandomSampler(
+                sampling_weights, draws, replacement=bool(budget or replay_fraction),
+                generator=generator,
+            )
+            logging.info("Sampling %d of %d records per epoch", draws, n_samples)
+        elif budget:
+            sampler = RandomSampler(dataset, replacement=True, num_samples=budget, generator=generator)
+            logging.info("Budgeted sampling: samples/epoch=%d dataset=%d", budget, n_samples)
+
+        loader = DataLoader(
+            dataset, batch_size=1, sampler=sampler, shuffle=sampler is None, generator=generator,
+        )
+        return loader, n_shape_datasets
+
     def run(self, args: Namespace, conf: Optional[str] = None) -> None:
         self.disable_progress_bar = args.disable_progress_bar
         self.gpu = args.gpu
@@ -812,100 +964,55 @@ class Train(Common):
             level=getattr(logging, loglevel, None),
         )
 
-        dataset_weights = (
-            [float(w) for w in args.dataset_weight.split(",")]
-            if args.dataset_weight
-            else [1.0] * len(args.input)
-        )
-        if len(dataset_weights) != len(args.input):
-            raise ValueError(
-                f"Number of --dataset-weight values ({len(dataset_weights)}) "
-                f"does not match number of input files ({len(args.input)})"
-            )
-        train_datasets = [
-            BPseqDataset(
-                inp, convert_t_to_u_flag=getattr(args, "convert_t_to_u", False), weight=w
-            )
-            for inp, w in zip(args.input, dataset_weights)
-        ]
-        train_dataset = (
-            ConcatDataset(train_datasets)
-            if len(train_datasets) > 1
-            else train_datasets[0]
-        )
-        n_train_samples = len(train_dataset)
-        n_dataset_id = 0
-        if args.json_dataset is not None:
-            json_dataset = JsonDataset(
-                args.json_dataset,
-                convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
-            )
-            train_dataset = ConcatDataset([train_dataset, json_dataset])
-            n_train_samples = len(train_dataset)
-        if args.ribonanza is not None:
-            ribonanza_dataset = RibonanzaDataset(
-                args.ribonanza,
-                offset=n_dataset_id,
-                convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
-            )
-            n_dataset_id += len(ribonanza_dataset.dataset_id)
-            train_dataset = ConcatDataset([train_dataset, ribonanza_dataset])
-        if args.shape is not None:
-            shape_dataset = [
-                ShapeDataset(
-                    s,
-                    i + n_dataset_id,
-                    convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
-                )
-                for i, s in enumerate(args.shape)
-            ]
-            n_dataset_id += len(shape_dataset)
-            train_dataset = ConcatDataset([train_dataset] + shape_dataset)
-        if args.json_shape_dataset is not None:
-            json_shape_dataset = JsonShapeDataset(
-                args.json_shape_dataset,
-                offset=n_dataset_id,
-                convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
-            )
-            n_dataset_id += len(json_shape_dataset.dataset_id)
-            train_dataset = ConcatDataset([train_dataset, json_shape_dataset])
-        if args.extra_dataset is not None:
-            extra_dataset = [
-                BPseqDataset(
-                    s, convert_t_to_u_flag=getattr(args, "convert_t_to_u", False)
-                )
-                for s in args.extra_dataset
-            ]
-            train_dataset = ConcatDataset([train_dataset] + extra_dataset)
-        n_shape_samples = len(train_dataset) - n_train_samples
+        if args.shape_imle_samples < 1:
+            raise ValueError("--shape-imle-samples must be at least 1")
+        if args.shape_imle_samples > 1 and args.shape_perturb <= 0:
+            logging.warning("Multiple I-MLE samples without perturbation repeat the same fold")
 
-        # Create generator for reproducible shuffling
         generator = torch.Generator()
         if args.seed >= 0:
             generator.manual_seed(args.seed)
+        train_loader, n_dataset_id = self.build_training_loader(args, generator)
 
-        sampler = None
-        if args.downsampling > 0.0:
-            weights = [1.0 / n_train_samples] * n_train_samples + [
-                args.downsampling / n_shape_samples
-            ] * n_shape_samples
-            n_train_samples = int(n_train_samples * (1.0 + args.downsampling) + 0.5)
-            sampler = WeightedRandomSampler(
-                weights, n_train_samples, replacement=False, generator=generator
-            )
+        # Keep the historical --log-dir interface used by the TSUBAME
+        # scripts, while also accepting upstream's --output-dir.  The latter
+        # is the checkpoint directory; when only one is supplied it is also a
+        # sensible place for loss/IMLE logs.
+        log_dir = getattr(args, 'log_dir', None)
+        if log_dir is None:
+            log_dir = args.output_dir
+        if log_dir is not None:
+            os.makedirs(log_dir, exist_ok=True)
+            self.log_file = os.path.join(log_dir, "loss.log")
+        else:
+            os.makedirs("logs", exist_ok=True)
+            self.log_file = os.path.join("logs", "loss.log")
+        # 追記モードで開き、ファイルが空ならヘッダーを書き込む（既存ログがあれば追記のみ）
+        write_header = True
+        if os.path.exists(self.log_file) and os.path.getsize(self.log_file) > 0:
+            write_header = False
+        with open(self.log_file, "a") as f:
+            if write_header:
+                # 追加列: step, alloc_mb
+                f.write("epoch,phase,loss,time,step,alloc_mb\n")
+        if n_dataset_id and args.shape_loss_func in ('shape_nll', 'shape_rank'):
+            self.imle_log_file = os.path.join(log_dir if log_dir is not None else 'logs', 'imle_stats.csv')
+            if not os.path.exists(self.imle_log_file) or os.path.getsize(self.imle_log_file) == 0:
+                with open(self.imle_log_file, 'w', newline='') as f:
+                    csv.writer(f).writerow([
+                        'epoch', 'step', 'file', 'difference', 'samples',
+                        'nu_mean', 'nu_min', 'nu_max', 'flip_mean',
+                        'flip_min', 'flip_max',
+                    ])
 
-        train_loader = DataLoader(
-            train_dataset,
-            sampler=sampler,
-            batch_size=1,
-            shuffle=True if sampler is None else False,
-            generator=generator,
-        )  # works well only for batch_size=1!!
+        if args.output_dir is not None:
+            os.makedirs(args.output_dir, exist_ok=True)
 
         test_loaders: list[tuple[DataLoader, list[str] | None]] = []
         if args.test_input is not None:
+            test_inputs = [args.test_input] if isinstance(args.test_input, str) else args.test_input
             test_shape_lists = getattr(args, "test_shape", None) or []
-            for idx, test_path in enumerate(args.test_input):
+            for idx, test_path in enumerate(test_inputs):
                 test_dataset = BPseqDataset(
                     test_path,
                     convert_t_to_u_flag=getattr(args, "convert_t_to_u", False),
@@ -934,19 +1041,26 @@ class Train(Common):
 
         model, config = self.build_model(args)
         config.update({"model": args.model, "param": args.param, "fold": args.fold})
+        resume_state = None
+        if args.resume is not None:
+            resume_state = torch.load(args.resume, map_location="cpu")
+            # The unused 1D SHAPE head was introduced on master. Keep the
+            # parameter groups of older modification checkpoints intact.
+            for name, module in model.named_modules():
+                if hasattr(module, "shape_head_1d") and f"{name}.shape_head_1d.weight" not in resume_state["model_state_dict"]:
+                    module.shape_head_1d = None
 
         shape_model = None
-        if (
-            args.shape is not None
-            or args.ribonanza is not None
-            or args.json_shape_dataset is not None
+        if n_dataset_id and (
+            args.shape_loss_func == "shape_nll"
+            or (resume_state is not None and "shape_model_state_dict" in resume_state)
         ):
             shape_model = [self.build_shape_model(args) for _ in range(n_dataset_id)]
 
         if args.init_param != "":
             init_param = Path(args.init_param)
             if not init_param.exists() and conf is not None:
-                init_param = Path(conf) / init_param
+                init_param = Path(conf).parent / init_param
             p = torch.load(init_param, map_location="cpu")
             if (
                 shape_model is not None
@@ -957,13 +1071,13 @@ class Train(Common):
                     sm.load_state_dict(p["shape_model_state_dict"][i])
             if isinstance(p, dict) and "model_state_dict" in p:
                 p = p["model_state_dict"]
-            model.load_state_dict(p)
+            self.load_model_weights(model, p)
 
         lwf_model = None
         if args.lwf_weight > 0.0:
             lwf_model, _ = self.build_model(args)
-            lwf_model.load_state_dict(model.state_dict())
-            lwf_model.eval()
+            self.load_model_weights(lwf_model, model.state_dict())
+            lwf_model.eval().requires_grad_(False)
 
         device, self.device_type = self.get_device(args.gpu)
         model.to(device)
@@ -973,8 +1087,109 @@ class Train(Common):
         if lwf_model is not None:
             lwf_model.to(device)
 
+        # --- Freeze specified high-level components (encoder, fc_paired) ---
+        self._frozen_eval_modules = []
+        if hasattr(args, 'freeze') and args.freeze:
+            keys = []
+            for item in args.freeze:
+                for k in item.split(','):
+                    k = k.strip()
+                    if k:
+                        keys.append(k)
+
+            # try to find the network module (handles model.zuker.net or model.net)
+            net = None
+            if hasattr(model, 'zuker') and hasattr(model.zuker, 'net'):
+                net = model.zuker.net
+            elif hasattr(model, 'net'):
+                net = model.net
+            else:
+                net = model
+
+            def _register_frozen_eval_module(m: Optional[nn.Module]) -> None:
+                if m is not None and all(existing is not m for existing in self._frozen_eval_modules):
+                    self._frozen_eval_modules.append(m)
+
+            def _freeze_module(m: Optional[nn.Module]) -> bool:
+                if m is None:
+                    return False
+                for p in m.parameters():
+                    p.requires_grad = False
+                _register_frozen_eval_module(m)
+                return True
+
+            applied = []
+            if 'encoder' in keys:
+                if hasattr(net, 'encoder'):
+                    _freeze_module(getattr(net, 'encoder'))
+                    applied.append('encoder')
+                else:
+                    logging.warning("freeze requested: 'encoder' not found on model")
+            if 'fc_paired' in keys:
+                if hasattr(net, 'fc_paired'):
+                    _freeze_module(getattr(net, 'fc_paired'))
+                    applied.append('fc_paired')
+                else:
+                    logging.warning("freeze requested: 'fc_paired' not found on model")
+
+            # fallback: if a key appears in parameter names, freeze those params
+            for k in keys:
+                if k in ('encoder','fc_paired'):
+                    continue
+                matched = False
+                for name, p in model.named_parameters():
+                    if k in name:
+                        p.requires_grad = False
+                        matched = True
+                if matched:
+                    applied.append(k)
+                    # Register the corresponding module(s) for eval mode as
+                    # well.  This also handles generic keys such as
+                    # "embedding", which freeze by parameter-name matching.
+                    for module_name, module in model.named_modules():
+                        if module_name.rsplit('.', 1)[-1] != k:
+                            continue
+                        module_params = list(module.parameters())
+                        if module_params and all(not p.requires_grad for p in module_params):
+                            _register_frozen_eval_module(module)
+
+            total = sum(p.numel() for p in model.parameters())
+            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            logging.info(f"Freeze keys={keys} applied={applied}. trainable params={trainable}/{total}")
+
         torch.set_num_threads(args.threads)
         interface.set_num_threads(args.threads)
+
+        self._l2_sp_weight = getattr(args, 'l2_sp_weight', 0.0)
+        self._l2_sp_anchor = {}
+        if self._l2_sp_weight > 0.0:
+            anchor_path = getattr(args, 'l2_sp_anchor', '')
+            if not anchor_path:
+                raise ValueError('--l2-sp-anchor is required when --l2-sp-weight is positive')
+            anchor_checkpoint = torch.load(anchor_path, map_location='cpu')
+            if isinstance(anchor_checkpoint, dict) and 'model_state_dict' in anchor_checkpoint:
+                anchor_state = anchor_checkpoint['model_state_dict']
+            else:
+                anchor_state = anchor_checkpoint
+            for name, parameter in model.named_parameters():
+                if '.embedding.' not in name and '.encoder.' not in name:
+                    continue
+                value = anchor_state.get(name)
+                if value is None:
+                    raise ValueError(f'L2-SP anchor is missing parameter: {name}')
+                if value.shape != parameter.shape:
+                    raise ValueError(
+                        f'L2-SP anchor shape mismatch for {name}: {value.shape} != {parameter.shape}'
+                    )
+                self._l2_sp_anchor[name] = value.detach().to(device=device, dtype=parameter.dtype)
+            if not self._l2_sp_anchor:
+                raise ValueError('No embedding or encoder parameters found for L2-SP')
+            logging.info(
+                'L2-SP weight=%g anchored_parameters=%d anchored_numel=%d',
+                self._l2_sp_weight,
+                len(self._l2_sp_anchor),
+                sum(value.numel() for value in self._l2_sp_anchor.values()),
+            )
 
         optimizer = self.build_optimizer(
             args.optimizer,
@@ -985,19 +1200,27 @@ class Train(Common):
             sam_type=getattr(args, "sam_type", None),
             sam_rho=getattr(args, "sam_rho", 0.05),
             sam_alpha=getattr(args, "sam_alpha", 0.1),
+            lr_overrides={
+                "embedding": args.lr_embedding,
+                "encoder": args.lr_encoder,
+                "fc_paired": args.lr_fc_paired,
+            },
         )
 
-        loss_fn = {
-            "BPSEQ": self.build_loss_function(args.loss_func, model, args),
-            "SHAPE": self.build_shape_loss_function(
-                args.shape_loss_func,
-                model,
-                args,
-                shape_model=shape_model,
-                lwf_model=lwf_model,
-            ),
+        loss_fn = {"BPSEQ": self.build_loss_function(args.loss_func, model, args)}
+        if n_dataset_id:
+            loss_fn["SHAPE"] = self.build_shape_loss_function(
+                args.shape_loss_func, model, args, shape_model=shape_model, lwf_model=lwf_model,
+            )
+        if args.task == "Multitask":
+            loss_fn["SHAPE_regress"] = self.build_shape_regress_loss_function(model)
+        loss_weight = {
+            "BPSEQ": args.bpseq_loss_weight,
+            "BPSEQ2": args.second_loss_weight,
+            "SHAPE": args.shape_loss_weight,
+            "MULTI": 1.0,
+            "MULTI_intra": (args.mt_alpha, args.mt_beta),
         }
-        loss_weight = {"BPSEQ": 1.0, "SHAPE": args.shape_loss_weight}
         scheduler = self.build_scheduler(args.scheduler, optimizer, args)
 
         # Initialize GradScaler for mixed precision training
@@ -1031,10 +1254,10 @@ class Train(Common):
 
         checkpoint_epoch = 0
         resumed_wandb_run_id: Optional[str] = None
-        if args.resume is not None:
+        if resume_state is not None:
             checkpoint_epoch, resumed_scaler, resumed_wandb_run_id = (
                 self.resume_checkpoint(
-                    args.resume,
+                    resume_state,
                     model,
                     optimizer,
                     scheduler,
@@ -1052,6 +1275,8 @@ class Train(Common):
         # Initialize wandb if project is specified
         self.use_wandb = args.wandb_project is not None
         if self.use_wandb:
+            if wandb is None:
+                raise RuntimeError("wandb is required when --wandb-project is used")
             wandb_config = vars(args).copy()
             if resumed_wandb_run_id is not None and not args.wandb_new_run:
                 wandb.init(
@@ -1101,7 +1326,6 @@ class Train(Common):
                 optimizer=optimizer,
                 loss_fn=loss_fn,
                 data_loader=train_loader,
-                n_dataset=n_train_samples,
                 loss_weight=loss_weight,
                 clip_grad_value=args.clip_grad_value,
                 clip_grad_norm=args.clip_grad_norm,
@@ -1147,12 +1371,16 @@ class Train(Common):
                     or (ema.shadow if ema and epoch > ema_start else None)
                     or model,
                 )
+                eval_loss_fn = loss_fn
+                if eval_model is not model:
+                    eval_fold = eval_model.module if isinstance(eval_model, AveragedModel) else eval_model
+                    eval_loss_fn = {"BPSEQ": self.build_loss_function(args.loss_func, eval_fold, args)}
                 for test_idx, (t_loader, t_shape_paths) in enumerate(test_loaders):
                     prefix = "test" if len(test_loaders) == 1 else f"test_{test_idx}"
                     self.test(
                         epoch,
                         model=eval_model,
-                        loss_fn=loss_fn,
+                        loss_fn=eval_loss_fn,
                         data_loader=t_loader,
                         use_amp=use_amp,
                         shape_paths=t_shape_paths,
@@ -1174,9 +1402,13 @@ class Train(Common):
                 }
                 wandb.log(log_dict)
 
-            if args.output_dir is not None:
+            checkpoint_dir = args.output_dir or args.log_dir
+            checkpoint_interval = max(1, args.checkpoint_every_n_epochs)
+            if checkpoint_dir is not None and (
+                epoch % checkpoint_interval == 0 or epoch == args.epochs
+            ):
                 self.save_checkpoint(
-                    args.output_dir,
+                    checkpoint_dir,
                     epoch,
                     model,
                     optimizer,
@@ -1297,6 +1529,21 @@ class Train(Common):
             "and the second has weight 0.5. Default: all 1.0",
         )
 
+        subparser.add_argument('--input-2', type=str, default=None,
+                            help='Second training data of the list of BPSEQ-formatted files')
+        subparser.add_argument('--replay-fraction', type=float, default=0.0,
+                            help='Sampling fraction for --input-2 replay data (default: 0; replacement sampling)')
+        subparser.add_argument('--samples-per-epoch', type=int, default=0,
+                            help='Bound draws per epoch (0: original full-dataset behavior)')
+        subparser.add_argument('--second-loss-weight', type=float, default=1.0,
+                            help='loss weight for the second BPSEQ dataset (default: 1.0)')
+        subparser.add_argument('--freeze', type=str, action='append',
+                               help='freeze components for fine-tuning(Not --resume, but --init-param). repeatable or comma-separated. supported keys: encoder,fc_paired')
+        subparser.add_argument('--l2-sp-anchor', type=str, default='',
+                            help='Checkpoint anchoring embedding and encoder parameters for L2-SP')
+        subparser.add_argument('--l2-sp-weight', type=float, default=0.0,
+                            help='L2-SP coefficient for squared distance from --l2-sp-anchor')
+
         gparser = subparser.add_argument_group("Training environment")
         subparser.add_argument(
             "--epochs",
@@ -1339,6 +1586,11 @@ class Train(Common):
             help="use automatic mixed precision (AMP) for faster training on GPUs",
         )
 
+        subparser.add_argument('--log-dir', type=str, default=None,
+                            help='Directory for loss/IMLE logs and, when --output-dir is omitted, checkpoints')
+        subparser.add_argument('--checkpoint-every-n-epochs', type=int, default=1,
+                            help='Save checkpoints every N epochs (always save the final epoch)')
+
         gparser = subparser.add_argument_group("Weights & Biases (wandb)")
         gparser.add_argument(
             "--wandb-project",
@@ -1362,6 +1614,7 @@ class Train(Common):
             help="start a new wandb run even when resuming from a checkpoint with a saved run ID",
         )
 
+        cls.add_task_args(subparser)
         cls.add_fold_args(subparser)
 
         gparser = subparser.add_argument_group("Setting for optimizer")
@@ -1376,6 +1629,13 @@ class Train(Common):
             default=0.001,
             help="the learning rate for optimizer (default: 0.001)",
         )
+        gparser.add_argument('--lr-embedding', type=float, default=None,
+                            help='Optional learning rate override for embedding parameters')
+        gparser.add_argument('--lr-encoder', type=float, default=None,
+                            help='Optional learning rate override for encoder parameters')
+        gparser.add_argument('--lr-fc-paired', type=float, default=None,
+                            help='Optional learning rate override for 2D paired-head parameters')
+
         gparser.add_argument(
             "--clip-grad-value",
             type=float,
@@ -1534,9 +1794,16 @@ class Train(Common):
             default=0.005,
             help="the penalty for negative base-pairs for loss augmentation (default: 0.005)",
         )
+        gparser.add_argument('--bpseq-loss-weight', type=float, default=1.,
+                            help='weight for BPSEQ examples mixed into Implicit_MLE training (default: 1)')
+        gparser.add_argument('--loss-pos-unpaired', type=float, default=0.,
+                            help='the penalty for positive unpaired bases for loss augmentation (default: 0)')
+        gparser.add_argument('--loss-neg-unpaired', type=float, default=0.,
+                            help='the penalty for negative unpaired bases for loss augmentation (default: 0)')
+
         gparser.add_argument(
             "--shape-loss-func",
-            choices=("shape_nll", "shape_fy", "shape_rank"),
+            choices=("shape_nll", "shape_fy", "shape_partial_fy", "shape_rank"),
             default="shape_nll",
             help="loss fuction for SHAPE training data (default: shape)",
         )
@@ -1582,6 +1849,53 @@ class Train(Common):
             default=1.0,
             help="weight for SHAPE loss function (default=1)",
         )
+        gparser.add_argument('--shape-unpaired-threshold', type=float, default=0.8,
+                            help='Minimum measured reactivity forced unpaired by shape_partial_fy (default: 0.8)')
+        gparser.add_argument('--shape-rank-tau', type=float, default=0.2,
+                            help='temperature for SHAPE Rank Loss (default=0.2)')
+        gparser.add_argument('--shape-rank-objective', choices=('pairwise_logistic', 'mann_whitney'), default='pairwise_logistic',
+                            help='rank objective: legacy logistic or nonparametric 1-AUROC (default=pairwise_logistic)')
+        gparser.add_argument('--shape-rank-weighting', choices=('uniform', 'gap', 'log_gap'), default='uniform',
+                            help='pair weighting for SHAPE Rank Loss (uniform, gap, or log_gap)')
+        gparser.add_argument('--shape-rank-delta', type=float, default=0.0,
+                            help='ignore SHAPE order pairs separated by at most this value (default=0)')
+        gparser.add_argument('--shape-rank-teacher-temperature', type=float, default=0.0,
+                            help='soft-label temperature in SHAPE reactivity units; 0 uses hard ordering (default=0)')
+        gparser.add_argument('--shape-rank-teacher-normalization', choices=('none', 'robust', 'percentile'), default='none',
+                            help='normalize SHAPE targets within each sequence before rank teacher construction (default=none)')
+        gparser.add_argument('--shape-rank-sample-aggregation', choices=('independent', 'mean_paired'), default='independent',
+                            help='evaluate rank loss per MAP sample or once on mean pairedness (default=independent)')
+        gparser.add_argument('--shape-rank-targets', choices=('raw', 'clipped'), default='raw',
+                            help='use raw or [0.01,1] clipped reactivities for rank loss (default=raw)')
+        gparser.add_argument('--shape-imle-alignment', choices=('aligned',), default='aligned',
+                            help='map the 1-based L+1 pairedness gradient to L bases (default=aligned)')
+        gparser.add_argument('--shape-imle-normalization', choices=('none', 'rms', 'max'), default='none',
+                            help='normalize pairedness gradients before the second fold (default=none)')
+        gparser.add_argument('--shape-imle-estimator-scale', choices=('divide_nu', 'none'), default='divide_nu',
+                            help='divide count differences by nu for finite-difference estimation (default=divide_nu)')
+        gparser.add_argument('--shape-imle-difference', choices=('forward', 'central'), default='forward',
+                            help='one-sided or central finite difference using coupled perturbations (default=forward)')
+        gparser.add_argument('--shape-imle-samples', type=int, default=1,
+                            help='number of coupled perturb-and-MAP samples to average (default=1)')
+        gparser.add_argument('--shape-imle-train-turner', action='store_true',
+                            help='opt in to legacy IMLE updates of mixed-model Turner parameters; frozen by default, as in FY/SHAPE-fy')
+        gparser.add_argument('--shape-imle-adaptive-nu', action='store_true',
+                            help='adapt nu per sequence to a target paired-state flip fraction')
+        gparser.add_argument('--shape-imle-nu-min', type=float, default=1e-3,
+                            help='minimum nu for per-sequence adaptation (default=1e-3)')
+        gparser.add_argument('--shape-imle-nu-max', type=float, default=1e3,
+                            help='maximum nu for per-sequence adaptation (default=1e3)')
+        gparser.add_argument('--shape-imle-flip-low', type=float, default=0.01,
+                            help='minimum target paired-state flip fraction (default=0.01)')
+        gparser.add_argument('--shape-imle-flip-high', type=float, default=0.10,
+                            help='maximum target paired-state flip fraction (default=0.10)')
+        gparser.add_argument('--shape-imle-adaptive-factor', type=float, default=2.,
+                            help='multiplicative nu adjustment factor (default=2)')
+        gparser.add_argument('--shape-imle-adaptive-steps', type=int, default=4,
+                            help='maximum fold attempts for adaptive nu (default=4)')
+        gparser.add_argument('--mt-alpha', type=float, default=1.0, help='multitask: weight for structure loss')
+        gparser.add_argument('--mt-beta',  type=float, default=1.0, help='multitask: weight for SHAPE loss')
+
         gparser.add_argument(
             "--downsampling",
             type=float,

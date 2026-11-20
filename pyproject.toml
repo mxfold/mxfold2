@@ -1,6 +1,6 @@
 [project]
 name = "mxfold2"
-version = "0.2.0"
+version = "1.0.0"
 description = "RNA secondary structure prediction using deep neural networks with thermodynamic integration"
 authors = [
     { name="Kengo Sato", email="satoken@life.isct.ac.jp" }
@@ -24,6 +24,9 @@ mxfold2 = "mxfold2.__main__:main"
 requires = ["scikit-build-core", "pybind11"]
 build-backend = "scikit_build_core.build"
 
+[tool.uv]
+cache-dir = ".uv-cache"
+
 [dependency-groups]
 dev = [
     "jupyter>=1.1.1",
@@ -35,5 +38,15 @@ dev = [
 [tool.scikit-build]
 cmake.source-dir = "./mxfold2/src"
 sdist.include = ["mxfold2/models/*"]
-sdist.exclude = [".devcontainer", ".gitignore", ".gitmodules", ".pylintrc"]
+sdist.exclude = [
+    ".devcontainer",
+    ".gitignore",
+    ".gitmodules",
+    ".pylintrc",
+    "/.worktrees/",
+    "/mxfold2-data/",
+    "/reports/",
+    "/scripts/",
+    "/tests/",
+]
 wheel.exclude = ["mxfold2/src"]

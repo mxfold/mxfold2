@@ -2,69 +2,123 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Optional
+from typing import Optional, List, Literal
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.autograd
 
-from mxfold2.fold.fold import AbstractFold
+from ..fold.fold import AbstractFold
+from ..fold.shape_layers import _mask_and_clip_targets
+from .implicit_mle import AdaptiveStepConfig, estimate_implicit_mle
+from .nonparametric_rank import mann_whitney_rank_loss
+
+
+TeacherNormalization = Literal["none", "robust", "percentile"]
+RankObjective = Literal["pairwise_logistic", "mann_whitney"]
 
 
 class ShapeRankLoss(nn.Module):
-    class ADwrapper(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, losses, num_counts, *tensors):
-            ctx.save_for_backward(*tensors[: num_counts * 2])
-            ctx.num_counts = num_counts
-            return losses.clone()
+    """
+    Non-parametric, rank-based SHAPE loss using the implicit-MLE framework.
 
-        @staticmethod
-        def backward(ctx, grad_output):
-            saved = ctx.saved_tensors
-            num_counts = ctx.num_counts
-            pred_counts = saved[:num_counts]
-            ref_counts = saved[num_counts : num_counts * 2]
-            # Apply grad_output to properly propagate gradients through the chain rule
-            # grad_output shape: (batch,) or scalar
-            # pred_counts[i], ref_counts[i] shape: (batch, features)
-            grads = tuple(
-                grad_output.view(-1, 1) * (p - r)
-                for p, r in zip(pred_counts, ref_counts)
-            )
-            return (None, None) + (None,) * (num_counts * 2) + grads
+    - 1回目の fold で予測構造 pred_bps を得る
+    - pred_bps から paired ベクトル (0/1, requires_grad=True) を作る
+    - SHAPE targets の大小関係を教師として，pairwise logistic loss または
+      Mann-Whitney AUROC lossを計算する
+    - rank loss の dL/dpaired を pseudoenergy に変換する
+    - forward または central finite difference で count 差分を計算する
+    - 必要なら摂動幅 nu を paired-state flip率に合わせて配列ごとに調整する
+    - 複数の coupled perturb-and-MAP 標本を平均して構造モデルへ勾配を流す
+    """
 
     def __init__(
         self,
         model: AbstractFold,
         perturb: float = 0.0,
         nu: float = 0.1,
-        margin: float = 0.0,
+        tau: float = 0.2,
         l1_weight: float = 0.0,
         l2_weight: float = 0.0,
         sl_weight: float = 0.0,
+        margin: float = 0.0,
+        rank_delta: float = 0.0,
+        teacher_temperature: float = 0.0,
+        teacher_normalization: TeacherNormalization = "none",
+        alignment: str = "aligned",
+        normalization: str = "none",
+        estimator_scale: str = "divide_nu",
+        clip_targets: bool = False,
+        difference_mode: str = "forward",
+        num_samples: int = 1,
+        sample_aggregation: str = "independent",
+        adaptive: AdaptiveStepConfig | None = None,
         pseudo_fy_weight: float = 0.0,
         weight_schedule: str = "none",
         weight_schedule_start: int = 1,
         weight_schedule_end: Optional[int] = None,
+        weighting: str = "uniform",
+        objective: RankObjective = "pairwise_logistic",
+        train_turner: bool = False,
     ) -> None:
-        super(ShapeRankLoss, self).__init__()
+        super().__init__()
         self.model = model
         self.perturb = perturb
-        self.nu = nu
-        self.margin = margin
+        self.nu = nu          # pseudoenergy のスケール
+        self.tau = tau        # 順位ロスの温度
+        self.weighting = weighting
+        self.objective = objective
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
         self.sl_weight = sl_weight
+        self.margin = margin
+        self.rank_delta = rank_delta
+        self.teacher_temperature = teacher_temperature
+        self.teacher_normalization = teacher_normalization
+        self.alignment = alignment
+        self.normalization = normalization
+        self.estimator_scale = estimator_scale
+        self.clip_targets = clip_targets
+        self.difference_mode = difference_mode
+        self.num_samples = num_samples
+        self.sample_aggregation = sample_aggregation
+        self.adaptive = adaptive or AdaptiveStepConfig()
         self.pseudo_fy_weight = pseudo_fy_weight
-        # Weight scheduling for ref prediction (only for Mixed models)
+        self.train_turner = train_turner
         self.weight_schedule = weight_schedule
         self.weight_schedule_start = weight_schedule_start
         self.weight_schedule_end = weight_schedule_end
         self.current_epoch = 1
         self.total_epochs = 1
+        self.last_imle_stats: dict[str, list[float]] = {}
+        if tau <= 0.0:
+            raise ValueError("rank tau must be positive")
+        if rank_delta < 0.0:
+            raise ValueError("rank delta must be non-negative")
+        if teacher_temperature < 0.0:
+            raise ValueError("rank teacher temperature must be non-negative")
+        if teacher_normalization not in ("none", "robust", "percentile"):
+            raise ValueError(
+                "rank teacher normalization must be one of none, robust, percentile"
+            )
+        if sample_aggregation not in ("independent", "mean_paired"):
+            raise ValueError(
+                "rank sample aggregation must be independent or mean_paired"
+            )
+        if weighting not in ("uniform", "gap", "log_gap"):
+            raise ValueError("rank weighting must be one of uniform, gap, log_gap")
+        if objective not in ("pairwise_logistic", "mann_whitney"):
+            raise ValueError("rank objective must be pairwise_logistic or mann_whitney")
+        if objective == "mann_whitney" and (
+            margin != 0.0 or rank_delta != 0.0 or teacher_temperature != 0.0
+            or teacher_normalization != "none" or weighting != "uniform"
+            or clip_targets
+        ):
+            raise ValueError(
+                "Mann-Whitney objective uses raw ranks: set margin, rank_delta, "
+                "teacher_temperature to 0, teacher_normalization to none, "
+                "weighting to uniform, and clip_targets to False"
+            )
         if sl_weight > 0.0 or pseudo_fy_weight > 0.0:
             from .. import param_turner2004
             from ..fold.rnafold import RNAFold
@@ -74,19 +128,17 @@ class ShapeRankLoss(nn.Module):
             )
 
     def set_epoch_info(self, epoch: int, total_epochs: int) -> None:
-        """Set the current epoch and total epochs for weight scheduling."""
         self.current_epoch = epoch
         self.total_epochs = total_epochs
 
-    def _get_scheduled_weights(self) -> tuple[float, float]:
-        """Calculate scheduled weights for ref prediction based on current epoch."""
-        if self.weight_schedule == "none" or not hasattr(
-            self.model, "score_weight_turner"
-        ):
-            return None, None
+    def _get_reference_model_weights(self) -> dict[str, float] | None:
+        if self.weight_schedule == "none" or not hasattr(self.model, "score_weight_turner"):
+            return None
 
         schedule_end = self.weight_schedule_end or self.total_epochs
-        if self.current_epoch < self.weight_schedule_start:
+        if schedule_end <= self.weight_schedule_start:
+            progress = float(self.current_epoch >= schedule_end)
+        elif self.current_epoch < self.weight_schedule_start:
             progress = 0.0
         elif self.current_epoch >= schedule_end:
             progress = 1.0
@@ -94,223 +146,241 @@ class ShapeRankLoss(nn.Module):
             progress = (self.current_epoch - self.weight_schedule_start) / (
                 schedule_end - self.weight_schedule_start
             )
-
         if self.weight_schedule == "cosine":
-            progress = 0.5 * (1 - math.cos(math.pi * progress))
+            progress = 0.5 * (1.0 - math.cos(math.pi * progress))
+        elif self.weight_schedule != "linear":
+            raise ValueError(f"unknown weight schedule: {self.weight_schedule}")
 
-        # Turner: 1.0 -> 0.5, Positional: 0.0 -> 0.5
-        weight_turner = 1.0 - 0.5 * progress
-        weight_positional = 0.5 * progress
-        return weight_turner, weight_positional
+        return {
+            "score_weight_turner": 1.0 - 0.5 * progress,
+            "score_weight_positional": 0.5 * progress,
+        }
+
+    def _per_sequence_rank_loss(
+        self,
+        shape_vec: torch.Tensor,
+        paired_vec: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        1本の配列についての順位ロスを計算する。
+
+        shape_vec: [L_all]  (raw SHAPE targets, 1D)
+        paired_vec: [L_all]  (0/1, same length as pred_bps / sequence)
+        """
+        if self.objective == "mann_whitney":
+            return mann_whitney_rank_loss(shape_vec, paired_vec)
+
+        device = paired_vec.device
+
+        if self.clip_targets:
+            valid, t_all = _mask_and_clip_targets(
+                shape_vec, min_val=0.01, max_val=1.0
+            )
+        else:
+            valid = shape_vec > -10
+            t_all = shape_vec
+
+        # valid な点が全く無い場合：loss=0だが paired 依存にして勾配経路だけ残す
+        if not valid.any():
+            return paired_vec.sum() * 0.0
+
+        t_valid = t_all[valid].to(device)
+        t_valid = self._normalize_teacher_targets(t_valid)
+        p_mask = paired_vec[valid].to(device)
+
+        # 要素数が 1 以下ではSHAPEの大小関係を作れない。
+        if t_valid.numel() <= 1:
+            return p_mask.sum() * 0.0
+
+        # shape_gap[i,j] > 0 なら i の方が低SHAPEなので、
+        # pairedness[i] - pairedness[j] が正になることを教師信号にする。
+        # 比較集合は予測構造に依存しないため、全unpaired/全pairedでもlossと
+        # 勾配が定義される。SHAPE差がrank_delta以下の曖昧な組は除外する。
+        shape_gap = t_valid[None, :] - t_valid[:, None]
+
+        if self.teacher_temperature > 0.0:
+            # Treat the observed ordering as uncertain instead of converting
+            # every non-tied pair into a hard label.  One unordered comparison
+            # is enough: sigmoid(shape_gap / temperature) is the probability
+            # that position i should be more paired than position j.
+            upper = torch.triu(
+                torch.ones_like(shape_gap, dtype=torch.bool), diagonal=1
+            )
+            selected = upper & (shape_gap.abs() > self.rank_delta)
+            if not selected.any():
+                return p_mask.sum() * 0.0
+
+            gaps = shape_gap[selected]
+            paired_gap = (p_mask[:, None] - p_mask[None, :])[selected]
+            teacher_probability = torch.sigmoid(
+                gaps / self.teacher_temperature
+            )
+            # The signed margin makes the zero-temperature limit agree with
+            # the existing hard-order objective in either orientation.
+            student_logits = (
+                paired_gap - gaps.sign() * self.margin
+            ) / self.tau
+            selected_loss = F.binary_cross_entropy_with_logits(
+                student_logits,
+                teacher_probability,
+                reduction="none",
+            )
+            absolute_gaps = gaps.abs()
+            return self._weighted_mean(selected_loss, absolute_gaps)
+
+        ordered = shape_gap > self.rank_delta
+        if not ordered.any():
+            return p_mask.sum() * 0.0
+
+        paired_gap = p_mask[:, None] - p_mask[None, :]
+        pairwise_loss = F.softplus((self.margin - paired_gap) / self.tau)
+        selected_loss = pairwise_loss[ordered]
+        gaps = shape_gap[ordered]
+        return self._weighted_mean(selected_loss, gaps)
+
+    def _normalize_teacher_targets(self, targets: torch.Tensor) -> torch.Tensor:
+        """Put SHAPE differences on a comparable scale within one sequence.
+
+        The rank ordering itself is unchanged by both transforms. ``robust``
+        uses a median/MAD scale and ``percentile`` maps values to their
+        empirical CDF (with average ranks for ties).  The latter makes the
+        temperature and ``rank_delta`` dimensionless and bounded, while the
+        former preserves relative distances after suppressing outliers.
+        """
+        mode = self.teacher_normalization
+        if mode == "none" or targets.numel() <= 1:
+            return targets
+
+        if mode == "robust":
+            center = targets.median()
+            mad = (targets - center).abs().median()
+            # 1.4826 makes MAD comparable to a standard deviation for a
+            # normal distribution.  The IQR fallback avoids magnifying a
+            # nearly tied sequence when MAD happens to be zero.
+            scale = 1.4826 * mad
+            if float(scale.detach()) < 1e-3:
+                q25, q75 = torch.quantile(
+                    targets, torch.tensor([0.25, 0.75], device=targets.device)
+                )
+                scale = (q75 - q25) / 1.349
+            scale = scale.clamp_min(1e-3)
+            return (targets - center) / scale
+
+        # Average ranks give equal targets the same percentile.  Counting
+        # ties explicitly avoids an arbitrary order from argsort.
+        less = (targets[:, None] > targets[None, :]).sum(dim=1).to(targets.dtype)
+        equal = (targets[:, None] == targets[None, :]).sum(dim=1).to(targets.dtype)
+        ranks = less + 0.5 * (equal - 1.0)
+        denominator = max(targets.numel() - 1, 1)
+        return ranks / denominator
+
+    def _weighted_mean(
+        self, selected_loss: torch.Tensor, gaps: torch.Tensor
+    ) -> torch.Tensor:
+        if self.weighting == "uniform":
+            return selected_loss.mean()
+
+        # Larger reactivity gaps are more reliable evidence for an ordering
+        # than nearly tied values. Normalize weights to mean one so this
+        # changes estimator direction without changing its overall scale.
+        if self.weighting == "gap":
+            weights = gaps
+        else:  # log_gap: less aggressive than a linear gap weight
+            weights = torch.log1p(gaps / 0.05)
+        weights = weights / weights.mean().clamp_min(1e-12)
+        return (selected_loss * weights).mean()
 
     def forward(
         self,
-        seq: list[str],
-        targets: list[torch.Tensor],
-        fname: Optional[list[str]] = None,
-        dataset_id: Optional[list[int]] = None,
+        seq: List[str],
+        targets: List[torch.Tensor],
+        fname: Optional[List[str]] = None,
+        dataset_id: Optional[int] = None,
     ) -> torch.Tensor:
-        pred: torch.Tensor
-        pred_s: list[str]
-        pred_bps: list[list[int]]
-        pred, pred_s, pred_bps, param, _ = self.model(
-            seq, return_param=True, return_count=True, perturb=self.perturb
+        # dataset_id は ShapeNLLLoss との互換性のために受け取るが，ここでは使わない
+        del dataset_id
+
+        def objective(paired: list[torch.Tensor]) -> torch.Tensor:
+            return torch.stack(
+                [
+                    self._per_sequence_rank_loss(target.to(paired[0].device), pair)
+                    for target, pair in zip(targets, paired)
+                ]
+            )
+
+        estimate = estimate_implicit_mle(
+            self.model,
+            seq,
+            objective,
+            perturb=self.perturb,
+            nu=self.nu,
+            alignment=self.alignment,
+            normalization=self.normalization,
+            estimator_scale=self.estimator_scale,
+            difference_mode=self.difference_mode,
+            num_samples=self.num_samples,
+            sample_aggregation=self.sample_aggregation,
+            adaptive=self.adaptive,
+            reference_model_weights=self._get_reference_model_weights(),
+            train_turner=self.train_turner,
         )
+        loss = estimate.loss
+        self.last_imle_stats = {
+            "selected_nu": estimate.selected_nu,
+            "flip_fraction": estimate.flip_fraction,
+        }
 
-        pred_params, pred_counts = [], []
-        for k in sorted(param[0].keys()):
-            if k.startswith("score_"):
-                pred_params.append(torch.vstack([param[i][k] for i in range(len(seq))]))
-            elif k.startswith("count_"):
-                pred_counts.append(
-                    torch.vstack(
-                        [
-                            self.model.apply_modified_only_mask(seq[i], k, param[i][k])
-                            for i in range(len(seq))
-                        ]
-                    )
-                )
-            elif isinstance(param[0][k], dict):
-                for kk in sorted(param[0][k].keys()):
-                    if kk.startswith("score_"):
-                        pred_params.append(
-                            torch.vstack([param[i][k][kk] for i in range(len(seq))])
-                        )
-                    elif kk.startswith("count_"):
-                        pred_counts.append(
-                            torch.vstack(
-                                [
-                                    self.model.apply_modified_only_mask(
-                                        seq[i], kk, param[i][k][kk]
-                                    )
-                                    for i in range(len(seq))
-                                ]
-                            )
-                        )
-
-        paired = []
-        losses = []
-        for pred_bp, target in zip(pred_bps, targets):
-            p = [1 if v > 0 else 0 for v in pred_bp]
-            p = torch.tensor(
-                p, dtype=torch.float32, requires_grad=True, device=pred.device
-            )
-            target = target.to(pred.device)
-            paired.append(p)
-
-            # Vectorized pairwise comparison (much faster than nested loops)
-            # Original code:
-            #   n_compare = p.sum() * 0
-            #   n_violate = p.sum() * 0
-            #   for i in torch.where(p==1)[0]:
-            #       for j in torch.where(p==0)[0]:
-            #           n_compare = n_compare + p[i] * (1-p[j])
-            #           if target[i] > target[j]:
-            #               n_violate = n_violate + p[i] * (1-p[j])
-            paired_idx = torch.where(p == 1)[0]
-            unpaired_idx = torch.where(p == 0)[0]
-
-            if len(paired_idx) > 0 and len(unpaired_idx) > 0:
-                # p[paired_idx] is always 1, (1-p[unpaired_idx]) is always 1
-                # so n_compare = len(paired_idx) * len(unpaired_idx)
-                n_compare = p[paired_idx].sum() * (1 - p[unpaired_idx]).sum()
-
-                # Broadcasting: compare all pairs at once
-                # target[paired_idx][:, None] has shape (n_paired, 1)
-                # target[unpaired_idx][None, :] has shape (1, n_unpaired)
-                # Result has shape (n_paired, n_unpaired)
-                violations = (
-                    target[paired_idx][:, None]
-                    > target[unpaired_idx][None, :] + self.margin
-                ).float()
-                # Weight by p values to maintain gradient connection
-                weights = p[paired_idx][:, None] * (1 - p[unpaired_idx])[None, :]
-                n_violate = (violations * weights).sum()
-            else:
-                n_compare = p.sum() * 0  # Maintain gradient connection
-                n_violate = p.sum() * 0
-
-            losses.append(n_violate / (n_compare.detach() + 1e-5))
-
-        losses = torch.stack(losses)
-        # Use autograd.grad to get gradients only for paired, without affecting other parameters
-        grads = torch.autograd.grad(
-            losses,
-            paired,
-            grad_outputs=torch.ones_like(losses),
-            retain_graph=True,
-            create_graph=False,
-        )
-
-        ref: torch.Tensor
-        ref_s: list[str]
-
-        # Apply weight scheduling for ref prediction (only for Mixed models)
-        scheduled_turner, scheduled_positional = self._get_scheduled_weights()
-        if scheduled_turner is None:
-            ref, ref_s, ref_stru, param, _ = self.model(
-                seq,
-                param=param,
-                return_param=True,
-                return_count=True,
-                pseudoenergy=[self.nu * g for g in grads],
-            )
-
-        else:
-            # Save original weights (only score weights, not count weights)
-            orig_score_turner = self.model.score_weight_turner
-            orig_score_positional = self.model.score_weight_positional
-            # Apply scheduled weights
-            self.model.score_weight_turner = scheduled_turner
-            self.model.score_weight_positional = scheduled_positional
-            logging.debug(
-                f"Shape ref weights: turner={scheduled_turner:.4f}, positional={scheduled_positional:.4f}"
-            )
-            ref, ref_s, ref_stru = self.model(
-                seq, param=param, pseudoenergy=[self.nu * g for g in grads]
-            )
-
-            # Restore original weights
-            self.model.score_weight_turner = orig_score_turner
-            self.model.score_weight_positional = orig_score_positional
-            ref, ref_s, ref_stru, param, _ = self.model(
-                seq,
-                param=param,
-                return_param=True,
-                return_count=True,
-                constraint=ref_stru,
-            )
-
-        ref_counts = []
-        for k in sorted(param[0].keys()):
-            if k.startswith("count_"):
-                ref_counts.append(
-                    torch.vstack(
-                        [
-                            self.model.apply_modified_only_mask(seq[i], k, param[i][k])
-                            for i in range(len(seq))
-                        ]
-                    )
-                )
-            elif isinstance(param[0][k], dict):
-                for kk in sorted(param[0][k].keys()):
-                    if kk.startswith("count_"):
-                        ref_counts.append(
-                            torch.vstack(
-                                [
-                                    self.model.apply_modified_only_mask(
-                                        seq[i], kk, param[i][k][kk]
-                                    )
-                                    for i in range(len(seq))
-                                ]
-                            )
-                        )
-
-        num_counts = len(pred_counts)
-        losses = self.ADwrapper.apply(
-            losses, num_counts, *pred_counts, *ref_counts, *pred_params
-        )
-        losses = losses.to(pred.device)
-
-        l = torch.tensor([len(s) for s in seq], device=pred.device)
-
-        # FY Loss: Use Turner structure as pseudo ground truth
+        l = torch.tensor([len(s) for s in seq], device=estimate.loss.device)
         if self.pseudo_fy_weight > 0.0:
             with torch.no_grad():
-                turner_energy, turner_s, turner_stru = self.turner(seq)
-
-            fy_ref, fy_ref_s, _ = self.model(
-                seq, param=param, constraint=turner_stru, max_internal_length=None
+                _, _, turner_structures = self.turner(seq)
+            fy_ref, _, _ = self.model(
+                seq,
+                constraint=turner_structures,
+                max_internal_length=None,
             )
-            fy_loss = (pred - fy_ref) / l
-            losses = losses + self.pseudo_fy_weight * fy_loss
+            loss = loss + self.pseudo_fy_weight * (
+                estimate.prediction_score - fy_ref
+            ) / l
 
         if self.sl_weight > 0.0:
             with torch.no_grad():
-                ref2: torch.Tensor
-                ref2_s: list[str]
-                ref2, ref2_s, _ = self.turner(seq, constraint=ref_stru)
-            losses += self.sl_weight * (ref - ref2) ** 2 / l
+                ref2, _, _ = self.turner(
+                    seq,
+                    constraint=estimate.target_structures,
+                )
+            loss = loss + self.sl_weight * (estimate.target_score - ref2) ** 2 / l
 
-        loss = losses.mean()
-
-        logging.debug(f"Loss = {loss.item()} = ({pred.item()} - {ref.item()})")
+        # logging は scalar 前提なので，バッチサイズ >1 のときは mean を取っておく
+        scalar_loss = loss.mean()
+        logging.debug(
+            "ShapeRankLoss = %s = (%s - %s)",
+            scalar_loss.item(),
+            estimate.prediction_score.mean().item(),
+            estimate.target_score.mean().item(),
+        )
         logging.debug(seq)
-        logging.debug(pred_s)
-        logging.debug(ref_s)
-        if float(loss.item()) > 1e10 or torch.isnan(loss):
+        logging.debug(estimate.prediction_structures)
+        logging.debug(estimate.target_structures)
+        if float(scalar_loss.item()) > 1e10 or torch.isnan(scalar_loss):
             logging.error(fname)
-            logging.error(f"{loss.item()}, {pred.item()}, {ref.item()}")
+            logging.error(
+                "%s, %s, %s",
+                scalar_loss.item(),
+                estimate.prediction_score.mean().item(),
+                estimate.target_score.mean().item(),
+            )
             logging.error(seq)
 
+        # l1/l2 正則化が欲しければここで追加（デフォルトは 0）
         if self.l1_weight > 0.0:
             for p in self.model.parameters():
-                loss += self.l1_weight * torch.sum(torch.abs(p))
+                scalar_loss = scalar_loss + self.l1_weight * torch.sum(torch.abs(p))
 
         # if self.l2_weight > 0.0:
         #     l2_reg = 0.0
         #     for p in self.model.parameters():
-        #         l2_reg += torch.sum((self.l2_weight * p) ** 2)
-        #     loss += torch.sqrt(l2_reg)
+        #         l2_reg = l2_reg + torch.sum(p ** 2)
+        #     scalar_loss = scalar_loss + self.l2_weight * l2_reg
 
-        return loss
+        return scalar_loss

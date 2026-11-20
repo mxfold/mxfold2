@@ -170,3 +170,13 @@ wandb
 .pixi/*
 !.pixi/config.toml
 mod-data
+
+# Local TSUBAME experiment artifacts
+qsub_logs/
+imle_*.o[0-9]*
+
+# Local research files and checkouts
+/.worktrees/
+/mxfold2-data/
+/reports/
+/scripts/

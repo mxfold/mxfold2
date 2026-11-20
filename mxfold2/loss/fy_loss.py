@@ -17,11 +17,14 @@ class FenchelYoungLoss(nn.Module):
     def __init__(self, model: AbstractFold,
             loss_pos_paired: float = 0., loss_neg_paired: float = 0.,
             perturb: float = 0., l1_weight: float = 0., l2_weight: float = 0.,
-            sl_weight: float = 0., **kwargs) -> None:
+            sl_weight: float = 0., *, loss_pos_unpaired: float = 0.,
+            loss_neg_unpaired: float = 0., **kwargs) -> None:
         super(FenchelYoungLoss, self).__init__()
         self.model = model
         self.loss_pos_paired = loss_pos_paired
         self.loss_neg_paired = loss_neg_paired
+        self.loss_pos_unpaired = loss_pos_unpaired
+        self.loss_neg_unpaired = loss_neg_unpaired
         self.perturb = perturb
         self.l1_weight = l1_weight
         self.l2_weight = l2_weight
@@ -37,12 +40,13 @@ class FenchelYoungLoss(nn.Module):
 
 
     def forward(self, seq: list[str], pairs: list[torch.Tensor], fname: Optional[list[str]] = None) -> torch.Tensor:
-        use_hinge = self.loss_pos_paired != 0. or self.loss_neg_paired != 0.
-        hinge_kwargs = dict(
-            reference=pairs,
+        penalties = dict(
             loss_pos_paired=self.loss_pos_paired,
             loss_neg_paired=self.loss_neg_paired,
-        ) if use_hinge else {}
+            loss_pos_unpaired=self.loss_pos_unpaired,
+            loss_neg_unpaired=self.loss_neg_unpaired,
+        )
+        hinge_kwargs = dict(reference=pairs, **penalties) if any(penalties.values()) else {}
 
         pred: torch.Tensor
         pred_s: list[str]
@@ -55,6 +59,7 @@ class FenchelYoungLoss(nn.Module):
             max_internal_length=None, **hinge_kwargs)
         l = torch.tensor([len(s) for s in seq], device=pred.device)
         loss = (pred - ref) / l
+        # たぶんslは熱力学的正則化なんだろう
         if self.sl_weight > 0.0:
             with torch.no_grad():
                 ref2: torch.Tensor

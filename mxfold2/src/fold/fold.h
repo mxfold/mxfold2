@@ -27,6 +27,7 @@ class Fold
             size_t min_hairpin;
             size_t max_internal;
             size_t max_helix;
+            float bpp_cutoff = 0.01f;
             mutable std::vector<u_int32_t> stru;
             bool use_margin;
             std::vector<u_int32_t> ref;
